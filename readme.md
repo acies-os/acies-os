@@ -7,23 +7,15 @@ titled "Acies-OS: A Content-Centric Platform for Edge AI Twinning and
 Orchestration". The code is currently under preparation and will be released
 soon. Stay tuned for updates!
 
-## Description
-
-## Features
-
-## Getting Started
-
 ## Prerequisites
+
+Install `rye`: https://github.com/astral-sh/rye
 
 ## Installation
 
-## Usage
-
-## Contributing
-
-We welcome contributions! Guidelines for contributing will be provided in the future.
-
-## License
+```bash
+rye sync
+```
 
 ## Citation
 

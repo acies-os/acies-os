@@ -1,6 +1,6 @@
 [project]
 name = "acies-os"
-version = "0.1.0"
+version = "0.2.2"
 description = "A Content-Centric Platform for Edge AI Twinning and Orchestration"
 authors = [
     { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
