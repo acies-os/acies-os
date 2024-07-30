@@ -1,0 +1,54 @@
+[project]
+name = "acies-os"
+version = "0.1.0"
+description = "A Content-Centric Platform for Edge AI Twinning and Orchestration"
+authors = [
+    { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
+    { name = "Yizhuo Chen", email = "yizhuoc@illinois.edu" },
+    { name = "Tianshi Wang", email = "tianshi34@illinois.edu" },
+    { name = "Tommy Kimura", email = "tkimura4@illinois.edu" },
+    { name = "Denizhan Kara", email = "kara4@illinois.edu" },
+]
+dependencies = [
+    "acies @ https://github.com/acies-os/acies-os/releases/download/v0.2.2/acies-0.2.2-cp38-abi3-macosx_11_0_arm64.whl ; platform_system == 'Darwin'",
+    "acies @ https://github.com/acies-os/acies-os/releases/download/v0.2.2/acies-0.2.2-cp38-abi3-manylinux_2_34_aarch64.whl ; platform_system == 'Linux' and platform_machine == 'aarch64'",
+    "acies @ https://github.com/acies-os/acies-os/releases/download/v0.2.2/acies-0.2.2-cp38-abi3-manylinux_2_34_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "click>=8.1.7",
+    "deepsense_augmented @ git+ssh://github.com/acies-os/deepsense-augmented.git",
+    "foundation-sense @ git+ssh://github.com/acies-os/FoundationSense.git",
+    "ipdb>=0.13.13",
+    "numpy>=1.26.4,<2.0",
+    "scipy>=1.13.0",
+    "tomli>=2.0.1",
+    "torch>=2.3.0,<2.4.0",
+    "websockets>=12.0",
+]
+readme = "README.md"
+requires-python = ">= 3.8"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = []
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/acies"]
+
+[project.scripts]
+acies-vfm = "acies.vehicle_classifier.vfm:main"
+acies-controller = "acies.controller.base:main"
+acies-twinctl = "acies.twin.twinctl:main"
+
+[tool.ruff]
+line-length = 120
+lint.extend-select = ['Q', 'RUF100', 'C90', 'I']
+lint.unfixable = ['F401']
+lint.flake8-quotes = { inline-quotes = 'single', multiline-quotes = 'double' }
+lint.mccabe = { max-complexity = 13 }
+format = { quote-style = 'single' }
