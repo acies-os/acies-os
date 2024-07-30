@@ -14,6 +14,8 @@ Install `rye`: https://github.com/astral-sh/rye
 ## Installation
 
 ```bash
+git clone git@github.com:acies-os/acies-os.git
+cd acies-os
 rye sync
 ```
 
