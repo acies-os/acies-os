@@ -9,14 +9,14 @@ soon. Stay tuned for updates!
 
 ## Prerequisites
 
-Install `rye`: https://github.com/astral-sh/rye
+Install `uv`: <https://github.com/astral-sh/uv>
 
 ## Installation
 
 ```bash
 git clone git@github.com:acies-os/acies-os.git
 cd acies-os
-rye sync
+uv sync
 ```
 
 ## Citation
