@@ -4,8 +4,9 @@
 
 This repository will contain the code for the project described in the paper
 titled "Acies-OS: A Content-Centric Platform for Edge AI Twinning and
-Orchestration". The code is currently under preparation and will be released
-soon. Stay tuned for updates!
+Orchestration".
+
+The latest release is `v0.2.2`.
 
 ## Prerequisites
 
