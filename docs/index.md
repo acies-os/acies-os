@@ -1,17 +1,11 @@
-.. acies-os documentation master file, created by
-   sphinx-quickstart on Fri Sep  5 02:33:42 2025.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 acies-os documentation
 ======================
 
 ```{toctree}
 :maxdepth: 2
 :caption: Contents
+getting-started
 ```
-
-# AciesOS
 
 ## Overview
 
