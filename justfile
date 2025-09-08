@@ -8,8 +8,8 @@ clean:
 
 RUNCMD := `command -v uv || command -v rye || (echo "Please install uv" >&2 && exit 1)`
 
-DOCS_SOURCE := "docs"
-DOCS_BUILD := "build"
+DOCS_SOURCE := "sphinx"
+DOCS_BUILD := "docs"
 
 # Build HTML docs with Sphinx
 build-doc:

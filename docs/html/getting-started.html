@@ -1,0 +1,626 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Getting Started &#8212; acies-os 0.2.2 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=000c92bf"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'getting-started';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="acies-os documentation" href="index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">acies-os 0.2.2 documentation</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#">
+    Getting Started
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#">
+    Getting Started
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"></div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Getting Started</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="getting-started">
+<h1>Getting Started<a class="headerlink" href="#getting-started" title="Link to this heading">#</a></h1>
+<section id="installing-dependencies">
+<h2>Installing Dependencies<a class="headerlink" href="#installing-dependencies" title="Link to this heading">#</a></h2>
+<section id="python-environment-management">
+<h3>Python Environment Management<a class="headerlink" href="#python-environment-management" title="Link to this heading">#</a></h3>
+<p>This project uses <a class="reference external" href="https://docs.astral.sh/uv"><code class="docutils literal notranslate"><span class="pre">uv</span></code></a> (or its predecessor <a class="reference external" href="https://rye.astral.sh"><code class="docutils literal notranslate"><span class="pre">rye</span></code></a>) to manage the Python environment.</p>
+<p>To check if <code class="docutils literal notranslate"><span class="pre">rye</span></code> is already installed, run:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>which<span class="w"> </span>rye
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>If the command prints a path, <code class="docutils literal notranslate"><span class="pre">rye</span></code> is available and you can skip this step.</p></li>
+<li><p>If not, we recommend installing <code class="docutils literal notranslate"><span class="pre">uv</span></code> for new setups. Follow <a class="reference external" href="https://docs.astral.sh/uv/getting-started/installation/">uv’s official installation guide</a>.</p></li>
+</ul>
+<p>For backward compatibility, you may also install <a class="reference external" href="https://rye.astral.sh/guide/installation/">rye</a>.</p>
+</section>
+<section id="clone-and-install-dependencies">
+<h3>Clone and install dependencies<a class="headerlink" href="#clone-and-install-dependencies" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/acies-os/controller.git
+$<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>controller
+controller$<span class="w"> </span>uv<span class="w"> </span>sync
+
+<span class="c1"># or, if using rye</span>
+controller$<span class="w"> </span>rye<span class="w"> </span>sync
+</pre></div>
+</div>
+</section>
+<section id="install-just">
+<h3>Install <code class="docutils literal notranslate"><span class="pre">just</span></code><a class="headerlink" href="#install-just" title="Link to this heading">#</a></h3>
+<p>Install <code class="docutils literal notranslate"><span class="pre">just</span></code> use <a class="reference external" href="https://just.systems/man/en/packages.html">your package manager</a> or <a class="reference external" href="https://just.systems/man/en/pre-built-binaries.html">pre-built binary</a>.</p>
+</section>
+<section id="install-zenohd">
+<h3>Install <code class="docutils literal notranslate"><span class="pre">zenohd</span></code><a class="headerlink" href="#install-zenohd" title="Link to this heading">#</a></h3>
+<p>For x86_64 linux:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>wget<span class="w"> </span>https://github.com/eclipse-zenoh/zenoh/releases/download/0.11.0/zenoh-0.11.0-x86_64-unknown-linux-gnu-standalone.zip
+</pre></div>
+</div>
+<p>For aarch64 linux:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>wget<span class="w"> </span>https://github.com/eclipse-zenoh/zenoh/releases/download/0.11.0/zenoh-0.11.0-aarch64-unknown-linux-gnu-standalone.zip
+</pre></div>
+</div>
+<p>For aarch64 macOS:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>wget<span class="w"> </span>https://github.com/eclipse-zenoh/zenoh/releases/download/0.11.0/zenoh-0.11.0-aarch64-apple-darwin-standalone.zip
+</pre></div>
+</div>
+<p>To unzip the downloaded file, use the following command:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>unzip<span class="w"> </span>zenoh-0.11.0-&lt;platform&gt;-standalone.zip
+</pre></div>
+</div>
+<p>Replace <code class="docutils literal notranslate"><span class="pre">&lt;platform&gt;</span></code> with the appropriate platform identifier (e.g., <code class="docutils literal notranslate"><span class="pre">x86_64-unknown-linux-gnu</span></code>, <code class="docutils literal notranslate"><span class="pre">aarch64-unknown-linux-gnu</span></code>, or <code class="docutils literal notranslate"><span class="pre">aarch64-apple-darwin</span></code>).</p>
+<p>To verify the installed version, run:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./zenohd<span class="w"> </span>--version
+</pre></div>
+</div>
+<p>Ensure the output shows version <code class="docutils literal notranslate"><span class="pre">v0.11.0</span></code>.</p>
+</section>
+</section>
+<section id="set-up-a-new-raspberry-pi-shake">
+<h2>Set Up A New Raspberry Pi/Shake<a class="headerlink" href="#set-up-a-new-raspberry-pi-shake" title="Link to this heading">#</a></h2>
+<ol class="arabic">
+<li><p>Install <a class="reference external" href="https://www.raspberrypi.com/software/">Raspberry Pi Imager</a> on the command machine.</p></li>
+<li><p>Start the imager app, select</p>
+<ul class="simple">
+<li><p>Device: Raspberry Pi 4</p></li>
+<li><p>Operating System: <code class="docutils literal notranslate"><span class="pre">Ubuntu</span> <span class="pre">Server</span> <span class="pre">22.04.4</span> <span class="pre">LTS</span> <span class="pre">(64-bit)</span></code></p></li>
+<li><p>Storage: the SD card</p></li>
+</ul>
+<p><img alt="Step 1" src="_images/rpi_imager_1.png" />
+<img alt="Step 2" src="_images/rpi_imager_2.png" />
+<img alt="Step 3" src="_images/rpi_imager_3.png" /></p>
+<p>The imager app should take care of downloading the OS, formatting the SD card
+and write the new image. Here are few commands for doing things in command
+line on macOS in case of need:</p>
+<p>Find the SD card:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>diskutil<span class="w"> </span>list
+<span class="c1"># ...</span>
+<span class="c1"># some other disks</span>
+<span class="c1"># ...</span>
+/dev/disk2<span class="w"> </span><span class="o">(</span>external,<span class="w"> </span>physical<span class="o">)</span>:
+<span class="w">  </span><span class="c1">#:                       TYPE NAME                    SIZE       IDENTIFIER</span>
+<span class="w">  </span><span class="m">0</span>:<span class="w">     </span>FDisk_partition_scheme<span class="w">                        </span>*127.9<span class="w"> </span>GB<span class="w">   </span>disk2
+<span class="w">  </span><span class="m">1</span>:<span class="w">             </span>Windows_FAT_32<span class="w"> </span>boot<span class="w">                    </span><span class="m">66</span>.1<span class="w"> </span>MB<span class="w">    </span>disk2s1
+<span class="w">  </span><span class="m">2</span>:<span class="w">                      </span>Linux<span class="w">                         </span><span class="m">127</span>.8<span class="w"> </span>GB<span class="w">   </span>disk2s2
+</pre></div>
+</div>
+<p>Format the SD card:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>diskutil<span class="w"> </span>eraseDisk<span class="w"> </span>FAT32<span class="w"> </span>SDCARD<span class="w"> </span>MBRFormat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TARGET_DISK</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+<p>Write image to the SD card:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>diskutil<span class="w"> </span>unmountDisk<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TARGET_DISK</span><span class="s2">&quot;</span>
+dd<span class="w"> </span><span class="nv">bs</span><span class="o">=</span>4M<span class="w"> </span><span class="k">if</span><span class="o">=</span>&lt;image_file&gt;<span class="w"> </span><span class="nv">of</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TARGET_DISK</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">status</span><span class="o">=</span>progress<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sync
+</pre></div>
+</div>
+</li>
+<li><p>Open the router admin page, in the wireless client page, find the temporary IP of the new board.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>ssh-copy-id<span class="w"> </span>-i<span class="w"> </span>~/.ssh/id_rsa.pub<span class="w"> </span>myshake@&lt;tmp_ip&gt;
+$<span class="w"> </span>ssh<span class="w"> </span>myshake@&lt;tmp_ip&gt;
+myshake@rsn$:<span class="w"> </span>sudo<span class="w"> </span>visudo
+<span class="c1"># add to the end of the file</span>
+myshake<span class="w"> </span><span class="nv">ALL</span><span class="o">=(</span>ALL<span class="o">)</span><span class="w"> </span>NOPASSWD:<span class="w"> </span>ALL
+</pre></div>
+</div>
+</li>
+<li><p>On the command machine, open a terminal in this repo and run</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="c1"># just boarding_party &lt;tmp_ip&gt; &lt;static_ip&gt; &lt;vpn_ip&gt; &lt;node_name&gt; all</span>
+just<span class="w"> </span>boarding-party<span class="w"> </span><span class="m">10</span>.7.0.33<span class="w"> </span><span class="m">10</span>.7.0.9<span class="w"> </span><span class="m">10</span>.8.0.9<span class="w"> </span>rs6<span class="w"> </span>all
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">all</span></code> tag will run every task defined in the <code class="docutils literal notranslate"><span class="pre">boarding_party.yaml</span></code>
+playbook. If you want to run part of the playbook, you can check the content
+of the file or list the tasks and tags by running:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>just<span class="w"> </span>list-boarding-party
+ansible-playbook<span class="w"> </span>boarding_party.yaml<span class="w"> </span>--list-tasks
+
+playbook:<span class="w"> </span>boarding_party.yaml
+
+<span class="w">   </span>play<span class="w"> </span><span class="c1">#1 (all): Bootstrap new shakes.	TAGS: []</span>
+<span class="w">    </span>tasks:
+<span class="w">      </span>Create<span class="w"> </span>.ssh<span class="w"> </span>folder.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[]</span>
+<span class="w">      </span>Set<span class="w"> </span>authorized<span class="w"> </span>key<span class="w"> </span>taken<span class="w"> </span>from<span class="w"> </span>file<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>ssh<span class="o">]</span>
+<span class="w">      </span>Copy<span class="w"> </span>myshake<span class="w"> </span>keys.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>ssh<span class="o">]</span>
+<span class="w">      </span>Back<span class="w"> </span>up<span class="w"> </span>configs.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>backup<span class="o">]</span>
+<span class="w">      </span>Set<span class="w"> </span>static<span class="w"> </span>IP<span class="w"> </span>with<span class="w"> </span>interfaces.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>deprecated<span class="o">]</span>
+<span class="w">      </span>Set<span class="w"> </span>static<span class="w"> </span>IP<span class="w"> </span>with<span class="w"> </span>dhcpcd.conf.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>deprecated<span class="o">]</span>
+<span class="w">      </span>Config<span class="w"> </span>WiFi.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>wifi<span class="o">]</span>
+<span class="w">      </span>Copy<span class="w"> </span>/etc/hosts.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>config<span class="o">]</span>
+<span class="w">      </span>Set<span class="w"> </span>hostname.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>hostname<span class="o">]</span>
+<span class="w">      </span>Apt<span class="w"> </span>update.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>update<span class="o">]</span>
+<span class="w">      </span>Apt<span class="w"> </span>install<span class="w"> </span>packages.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>install<span class="o">]</span>
+<span class="w">      </span>Config<span class="w"> </span>avahi-daemon.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>avahi<span class="o">]</span>
+<span class="w">      </span>Start<span class="w"> </span>and<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>avahi-daemon.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>avahi<span class="o">]</span>
+<span class="w">      </span>Create<span class="w"> </span>Wireguard<span class="w"> </span>keys.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>vpn<span class="o">]</span>
+<span class="w">      </span>Change<span class="w"> </span>file<span class="w"> </span>mode<span class="w"> </span><span class="k">for</span><span class="w"> </span>the<span class="w"> </span>private<span class="w"> </span>key.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>vpn<span class="o">]</span>
+<span class="w">      </span>Get<span class="w"> </span>private<span class="w"> </span>key<span class="w"> </span>to<span class="w"> </span>generate<span class="w"> </span>config.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>vpn<span class="o">]</span>
+<span class="w">      </span>Generate<span class="w"> </span>Wireguard<span class="w"> </span>client<span class="w"> </span>config.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>vpn<span class="o">]</span>
+<span class="w">      </span>Start<span class="w"> </span>wg0.service<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>vpn<span class="o">]</span>
+<span class="w">      </span>Get<span class="w"> </span>public<span class="w"> </span>key<span class="w"> </span><span class="k">for</span><span class="w"> </span>server<span class="w"> </span>command.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>vpn<span class="o">]</span>
+<span class="w">      </span>Print<span class="w"> </span><span class="nb">command</span><span class="w"> </span>to<span class="w"> </span>run<span class="w"> </span>on<span class="w"> </span>Wireguard<span class="w"> </span>server.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>vpn<span class="o">]</span>
+<span class="w">      </span>Set<span class="w"> </span>up<span class="w"> </span>Bash<span class="w"> </span>profile.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>bash<span class="o">]</span>
+<span class="w">      </span>Set<span class="w"> </span>up<span class="w"> </span>bashrc.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>bash<span class="o">]</span>
+<span class="w">      </span>Remove<span class="w"> </span>conflicting<span class="w"> </span>packages<span class="w"> </span>with<span class="w"> </span>docker.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker<span class="o">]</span>
+<span class="w">      </span>Set<span class="w"> </span>up<span class="w"> </span>the<span class="w"> </span>docker<span class="w"> </span>apt<span class="w"> </span>repository<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker<span class="o">]</span>
+<span class="w">      </span>Install<span class="w"> </span>Ubuntu<span class="w"> </span>GPG<span class="w"> </span>key<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker<span class="o">]</span>
+<span class="w">      </span>Install<span class="w"> </span>docker.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker<span class="o">]</span>
+<span class="w">      </span>Create<span class="w"> </span>docker<span class="w"> </span>group.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker,<span class="w"> </span>docker-group<span class="o">]</span>
+<span class="w">      </span>Add<span class="w"> </span>user<span class="w"> </span>to<span class="w"> </span>docker<span class="w"> </span>group.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker,<span class="w"> </span>docker-group<span class="o">]</span>
+<span class="w">      </span>Enable<span class="w"> </span>docker.service.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker,<span class="w"> </span>docker-daemon<span class="o">]</span>
+<span class="w">      </span>Enable<span class="w"> </span>containerd.service.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker,<span class="w"> </span>docker-daemon<span class="o">]</span>
+<span class="w">      </span>Copy<span class="w"> </span>myshake<span class="w"> </span>keys.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>docker,<span class="w"> </span>docker-registry<span class="o">]</span>
+<span class="w">      </span>Back<span class="w"> </span>up<span class="w"> </span>GPSD<span class="w"> </span>and<span class="w"> </span>NTP<span class="w"> </span>configs.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>gpsd<span class="o">]</span>
+<span class="w">      </span>Config<span class="w"> </span>gpsd.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>gpsd<span class="o">]</span>
+<span class="w">      </span>Config<span class="w"> </span>ntp<span class="w"> </span>with<span class="w"> </span>gpsd.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>gpsd<span class="o">]</span>
+<span class="w">      </span>Reboot.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>all,<span class="w"> </span>reboot<span class="o">]</span>
+<span class="w">      </span>Debug<span class="w"> </span>command.<span class="w">	</span>TAGS:<span class="w"> </span><span class="o">[</span>debug<span class="o">]</span>
+</pre></div>
+</div>
+<p>For example, to only run SSH related tasks, you can replace <code class="docutils literal notranslate"><span class="pre">all</span></code> with <code class="docutils literal notranslate"><span class="pre">ssh</span></code>:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="c1"># Replace `all` with `ssh`` here --------------------v</span>
+just<span class="w"> </span>boarding-party<span class="w"> </span><span class="m">10</span>.7.0.33<span class="w"> </span><span class="m">10</span>.7.0.9<span class="w"> </span><span class="m">10</span>.8.0.9<span class="w"> </span>rs6<span class="w"> </span>ssh
+</pre></div>
+</div>
+</li>
+<li><p>Enable serial port. Run the command on the Pi:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>sudo<span class="w"> </span>raspi-config
+-&gt;<span class="w"> </span><span class="m">3</span><span class="w"> </span>Interface<span class="w"> </span>Options
+-&gt;<span class="w"> </span>I6<span class="w"> </span>Serial<span class="w"> </span>Port
+-&gt;<span class="w"> </span>Would<span class="w"> </span>you<span class="w"> </span>like<span class="w"> </span>a<span class="w"> </span>login<span class="w"> </span>shell<span class="w"> </span>to<span class="w"> </span>be<span class="w"> </span>accessible<span class="w"> </span>over<span class="w"> </span>serial?<span class="w"> </span>&lt;No&gt;
+-&gt;<span class="w"> </span>Would<span class="w"> </span>you<span class="w"> </span>like<span class="w"> </span>the<span class="w"> </span>serial<span class="w"> </span>port<span class="w"> </span>hardware<span class="w"> </span>to<span class="w"> </span>be<span class="w"> </span>enabled?<span class="w"> </span>&lt;Yes&gt;
+-&gt;<span class="w"> </span>Finish<span class="w"> </span>and<span class="w"> </span>reboot
+</pre></div>
+</div>
+</li>
+<li><p>If you want to check the output from <code class="docutils literal notranslate"><span class="pre">/dev/ttyS0</span></code>, config the port with</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>stty<span class="w"> </span>-F<span class="w"> </span>/dev/ttyS0<span class="w"> </span><span class="m">230400</span><span class="w"> </span>min<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="nb">time</span><span class="w"> </span><span class="m">5</span><span class="w"> </span>ignbrk<span class="w"> </span>-brkint<span class="w"> </span>-imaxbel<span class="w"> </span>-opost<span class="w"> </span>-onlcr<span class="w"> </span>-isig<span class="w"> </span>-icanon<span class="w"> </span>-iexten<span class="w"> </span>-echo<span class="w"> </span>-echoe<span class="w"> </span>-echok<span class="w"> </span>-echoctl<span class="w"> </span>-echoke
+</pre></div>
+</div>
+</li>
+<li><p>Check <code class="docutils literal notranslate"><span class="pre">dmesg</span></code> output for low voltage warning. To reduce power consumption:</p>
+<p>Disable HDMI output.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>libraspberrypi-bin
+</pre></div>
+</div>
+<p>Then append the following to <code class="docutils literal notranslate"><span class="pre">/etc/rc.local</span></code> before <code class="docutils literal notranslate"><span class="pre">exit</span> <span class="pre">0</span></code> line:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>/opt/vc/bin/tvservice -o
+</pre></div>
+</div>
+<p>If this is not enough, limit the CPU frequency by adding the following line to <code class="docutils literal notranslate"><span class="pre">/boot/config.txt</span></code></p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>[all]
+arm_freq=1300
+</pre></div>
+</div>
+<p>See the Raspberry Pi
+<a class="reference external" href="https://www.raspberrypi.com/documentation/computers/config_txt.html">manual</a>
+for CPU frequency and info about <code class="docutils literal notranslate"><span class="pre">arm_freq</span></code>.</p>
+<p><a class="reference external" href="https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#frequency-management-and-thermal-control">Frequency Management and Thermal Control</a></p>
+</li>
+<li><p>Enable swapfile.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>dphys-swapfile
+$<span class="w"> </span>sudo<span class="w"> </span>dphys-swapfile<span class="w"> </span>swapoff
+$<span class="w"> </span>sudo<span class="w"> </span>vim<span class="w"> </span>/etc/dphys-swapfile
+<span class="c1"># change the line to</span>
+<span class="nv">CONF_SWAPSIZE</span><span class="o">=</span><span class="m">1024</span>
+$<span class="w"> </span>sudo<span class="w"> </span>dphys-swapfile<span class="w"> </span>setup
+$<span class="w"> </span>sudo<span class="w"> </span>dphys-swapfile<span class="w"> </span>swapon
+</pre></div>
+</div>
+</li>
+<li><p>Then reboot.</p></li>
+</ol>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="index.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">acies-os documentation</p>
+      </div>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installing-dependencies">Installing Dependencies</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#python-environment-management">Python Environment Management</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clone-and-install-dependencies">Clone and install dependencies</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-just">Install <code class="docutils literal notranslate"><span class="pre">just</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-zenohd">Install <code class="docutils literal notranslate"><span class="pre">zenohd</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#set-up-a-new-raspberry-pi-shake">Set Up A New Raspberry Pi/Shake</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/getting-started.md.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2025, Shangchen Wu, Jinyang Li.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.1.3.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.16.1.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
