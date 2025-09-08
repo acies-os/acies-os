@@ -15,6 +15,8 @@ DOCS_BUILD := "docs"
 build-doc:
     {{ RUNCMD }} run sphinx-build -b html {{ DOCS_SOURCE }} {{ DOCS_BUILD }}/html
     @echo "Docs built at {{ DOCS_BUILD }}/html/index.html"
+    cp -a docs/html/* docs/
+    rm -rf docs/html
 
 # Open docs in a browser (Windows/mac/wsl compatible)
 view-doc:
