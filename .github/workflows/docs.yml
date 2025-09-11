@@ -64,11 +64,11 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/docs'
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/docs'
         with:
           path: "./docs/_build"
 
@@ -78,7 +78,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/docs'
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
