@@ -4,6 +4,7 @@ version = "0.2.2"
 description = "A Content-Centric Platform for Edge AI Twinning and Orchestration"
 authors = [
     { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
+    { name = "Shangchen Wu", email = "sw57@illinois.edu" },
     { name = "Yizhuo Chen", email = "yizhuoc@illinois.edu" },
     { name = "Tianshi Wang", email = "tianshi34@illinois.edu" },
     { name = "Tommy Kimura", email = "tkimura4@illinois.edu" },
@@ -26,11 +27,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/acies"]
-
-[project.scripts]
-acies-vfm = "acies.vehicle_classifier.vfm:main"
-acies-controller = "acies.controller.base:main"
-acies-twinctl = "acies.twin.twinctl:main"
 
 [tool.ruff]
 line-length = 120
