@@ -3,6 +3,7 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+docs/_build/
 wheels/
 *.egg-info
 *.lock
