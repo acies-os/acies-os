@@ -41,7 +41,8 @@ lint.mccabe = { max-complexity = 13 }
 format = { quote-style = 'single' }
 
 [dependency-groups]
-dev = [
+docs = [
+    "livereload>=2.7.1",
     "myst-parser>=4.0.1",
     "pydata-sphinx-theme>=0.16.1",
     "sphinx>=8.1.3",

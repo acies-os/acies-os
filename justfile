@@ -7,16 +7,17 @@ clean:
     rm -f *.log
 
 RUNCMD := `command -v uv || command -v rye || (echo "Please install uv" >&2 && exit 1)`
-
-DOCS_SOURCE := "sphinx"
-DOCS_BUILD := "docs"
+DOCS_SOURCE := "source"
+DOCS_BUILD := "_build"
 
 # Build HTML docs with Sphinx
 build-doc:
-    {{ RUNCMD }} run sphinx-build -b html {{ DOCS_SOURCE }} {{ DOCS_BUILD }}/html
-    @echo "Docs built at {{ DOCS_BUILD }}/html/index.html"
-    cp -a docs/html/* docs/
-    rm -rf docs/html
+    cd docs && {{ RUNCMD }} run sphinx-build -b html {{ DOCS_SOURCE }} {{ DOCS_BUILD }}
+    @echo "Docs built at docs/{{ DOCS_BUILD }}/index.html"
+
+live-doc:
+    echo $PWD
+    {{ RUNCMD }} run docs/watch-doc.py
 
 # Open docs in a browser (Windows/mac/wsl compatible)
 view-doc:
@@ -25,4 +26,4 @@ view-doc:
         || powershell.exe -NoProfile start http://localhost:8000 \
         || open http://localhost:8000 \
         || true) &
-    python3 -m http.server -d {{ DOCS_BUILD }} 8000
+    python3 -m http.server -d docs/{{ DOCS_BUILD }} 8000
