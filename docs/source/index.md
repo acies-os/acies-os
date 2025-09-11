@@ -5,6 +5,7 @@ acies-os documentation
 :maxdepth: 2
 :caption: Contents
 getting-started
+test
 ```
 
 ## Overview
