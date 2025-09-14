@@ -28,6 +28,7 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_autodoc_typehints",
     "myst_parser",
+    "sphinx_design",
 ]
 source_suffix = {
     ".rst": "restructuredtext",
@@ -35,7 +36,7 @@ source_suffix = {
 }
 root_doc = "index"  # default; ensure docs/index.md exists
 
-# myst_enable_extensions = ["colon_fence", "deflist", "linkify"]
+myst_enable_extensions = ["colon_fence", "deflist"]
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -43,3 +44,4 @@ root_doc = "index"  # default; ensure docs/index.md exists
 
 html_theme = 'pydata_sphinx_theme'
 html_static_path = ['_static']
+html_css_files = ['css/custom.css']

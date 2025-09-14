@@ -1,4 +1,13 @@
-# AciesOS Documentation
+acies-os documentation
+======================
+
+```{toctree}
+:maxdepth: 1
+:caption: Contents
+guided-setup
+getting-started
+sys-installation
+```
 
 ## Overview
 
