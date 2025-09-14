@@ -47,8 +47,8 @@ You must first join the acies-os organization and authenticate your machine--see
 1. **Know your passwords**
    You will need three passwords to work on this testbed. They change over time, so they're not listed verbatim here. We refer to them as:
 
-   * **Wi-Fi password**: When you power on the Raspberry Shakes, they are hard-coded to connect to a wireless network with SSID `iobt-2.4` and a specific network password. In the rest of this document, we refer to that as **the Wi-Fi password**.
-   * **Shakes password**: To log in to the Shakes after they connect to the above network, you will use account name `myshake` and its password. We refer to this as **the Shakes password**.
+   * **Wi-Fi password**: When you power on the Raspberry Shakes, they are hard-coded to connect to a wireless network with a specific SSID and password. In the rest of this document, we refer to that as **the Wi-Fi password**.
+   * **Shakes password**: To log in to the Shakes after they connect to the above network, you will use an account name and its password. We refer to this as **the Shakes password**.
    * **Server password**: If you are running experiments that involve a server (other than your own machine), you will need an account on that server for centralized testbed components. Usually the edge server is your own machine, but if you are using an existing server (e.g., Eugene), you will need credentials to the used account on that server.
 
 2. **Connect peripherals**
@@ -58,7 +58,7 @@ You must first join the acies-os organization and authenticate your machine--see
    Red and blue (board power) LEDs should come on, plus a yellow one (indicating SD read/write activity) that may blink irregularly.
 
 4. **Set up a Wi-Fi hotspot**
-   Create a hotspot with SSID `iobt-2.4` and the corresponding **Wi-Fi password**. The Shakes are pre-configured to connect only to that SSID with that specific password.
+   Create a hotspot with the SSID and the corresponding **Wi-Fi password**. The Shakes are pre-configured to connect only to that SSID with that specific password.
    *(OS-specific steps omitted here; on Windows you can use **Settings -> Network & Internet -> Mobile hotspot**. Use the same SSID/password as above.)*
 
 > For post-experiment data copying instructions, see the issue thread: **acies-os/postexp#2**.
