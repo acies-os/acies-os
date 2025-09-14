@@ -1,6 +1,7 @@
 # System Installation Guide
 
-(section3.1)=
+(sec-join-github-org)=
+
 ## Joining the Acies-OS Organization on GitHub
 
 To use and/or contribute to this testbed, please make sure to:
@@ -15,10 +16,21 @@ To use and/or contribute to this testbed, please make sure to:
 
 ---
 
-(section3.2)=
+(sec-raspberry-pi-setup)=
+
+## Installing Raspberry Pi Software
+
+If you are using a new Raspberry Pi, follow the instruction here to set up your board:
+[https://github.com/acies-os/fleet-command/blob/main/readme.md](https://github.com/acies-os/fleet-command/blob/main/readme.md)
+
+---
+
+(sec-install-on-edge-server)=
+
 ## Installing Edge Server Software
 
-If you are using your own machine to run the **controller** and **GUI** during field experiments, you will need to install both from their repositories. (You must first join the acies-os organization and authenticate your machine—see [this section](#section3.1).)
+If you are using your own machine to run the **controller** and **GUI** during field experiments, you will need to install both from their repositories.
+You must first join the acies-os organization and authenticate your machine--see [this section](#sec-join-github-org).
 
 * **Install the controller**:
   [https://github.com/acies-os/controller/blob/main/README.md](https://github.com/acies-os/controller/blob/main/README.md)
@@ -28,7 +40,8 @@ If you are using your own machine to run the **controller** and **GUI** during f
 
 ---
 
-(section3.3)=
+(sec-field-network-setup)=
+
 ## Network Set-up for Field Data Collection
 
 1. **Know your passwords**
@@ -52,7 +65,8 @@ If you are using your own machine to run the **controller** and **GUI** during f
 
 ---
 
-(section3.4)=
+(sec-field-analytics-deployment)=
+
 ## Field Analytics Deployment
 
 If you also need to run analytics in the field:
@@ -68,6 +82,7 @@ If you also need to run analytics in the field:
 
    ```bash
    cd /ws/acies/classifier/vehicle-classifier
-   just <classifier-name>   # e.g.,
-   just vfm
+   just <classifier-name>
+   # e.g.,
+   # just vfm
    ```

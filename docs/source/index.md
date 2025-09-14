@@ -1,5 +1,4 @@
-acies-os documentation
-======================
+# acies-os documentation
 
 ```{toctree}
 :maxdepth: 1

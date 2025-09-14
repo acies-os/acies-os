@@ -20,23 +20,23 @@ templates_path = ['_templates']
 exclude_patterns = []
 
 extensions = [
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
-    "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
-    "sphinx.ext.intersphinx",
-    "sphinx_copybutton",
-    "sphinx_autodoc_typehints",
-    "myst_parser",
-    "sphinx_design",
+    'sphinx.ext.autodoc',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.viewcode',
+    'sphinx.ext.intersphinx',
+    'sphinx_copybutton',
+    'sphinx_autodoc_typehints',
+    'myst_parser',
+    'sphinx_design',
 ]
 source_suffix = {
-    ".rst": "restructuredtext",
-    ".md": "markdown",
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
 }
-root_doc = "index"  # default; ensure docs/index.md exists
+root_doc = 'index'  # default; ensure docs/index.md exists
 
-myst_enable_extensions = ["colon_fence", "deflist"]
+myst_enable_extensions = ['colon_fence', 'deflist']
 
 
 # -- Options for HTML output -------------------------------------------------
