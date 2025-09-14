@@ -98,12 +98,12 @@ If you are using a new Raspberry Pi, follow the instruction here to set up your 
 ## Installing Edge Server Software
 
 If you are using your own machine to run the **controller** and **GUI** during field experiments, you will need to install both from their repositories.
-You must first join the acies-os organization and authenticate your machine--see [this section](#sec-join-github-org).
+You must first join the acies-os organization and authenticate your machine -- see [this section](#sec-join-github-org).
 
-* **Install the controller**:
+- **Install the controller**:
   [https://github.com/acies-os/controller/blob/main/README.md](https://github.com/acies-os/controller/blob/main/README.md)
 
-* **Install the GUI**:
+- **Install the GUI**:
   [https://github.com/acies-os/ui/blob/main/readme.md](https://github.com/acies-os/ui/blob/main/readme.md)
 
 ---
@@ -115,9 +115,9 @@ You must first join the acies-os organization and authenticate your machine--see
 1. **Know your passwords**
    You will need three passwords to work on this testbed. They change over time, so they're not listed verbatim here. We refer to them as:
 
-   * **Wi-Fi password**: When you power on the Raspberry Shakes, they are hard-coded to connect to a wireless network with a specific SSID and password. In the rest of this document, we refer to that as **the Wi-Fi password**.
-   * **Shakes password**: To log in to the Shakes after they connect to the above network, you will use an account name and its password. We refer to this as **the Shakes password**.
-   * **Server password**: If you are running experiments that involve a server (other than your own machine), you will need an account on that server for centralized testbed components. Usually the edge server is your own machine, but if you are using an existing server (e.g., Eugene), you will need credentials to the used account on that server.
+   - **Wi-Fi password**: When you power on the Raspberry Shakes, they are hard-coded to connect to a wireless network with a specific SSID and password. In the rest of this document, we refer to that as **the Wi-Fi password**.
+   - **Shakes password**: To log in to the Shakes after they connect to the above network, you will use an account name and its password. We refer to this as **the Shakes password**.
+   - **Server password**: If you are running experiments that involve a server (other than your own machine), you will need an account on that server for centralized testbed components. Usually the edge server is your own machine, but if you are using an existing server (e.g., Eugene), you will need credentials to the used account on that server.
 
 2. **Connect peripherals**
    Connect a matching antenna (labeled with the same number as the Shake), a GPS, and a microphone to each Raspberry Pi via the USB ports.
