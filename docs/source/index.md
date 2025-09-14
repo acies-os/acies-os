@@ -1,4 +1,12 @@
-# AciesOS Documentation
+# acies-os documentation
+
+```{toctree}
+:maxdepth: 1
+:caption: Contents
+guided-setup
+getting-started
+sys-installation
+```
 
 ## Overview
 
@@ -20,11 +28,3 @@ If you use this repository in your research, please cite our accompanying paper 
 ```
 
 The latest release is `v0.2.2`.
-
-## Documentation
-
-```{toctree}
-:maxdepth: 2
-:caption: Contents
-getting-started
-```
