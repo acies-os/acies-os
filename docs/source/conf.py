@@ -23,7 +23,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.napoleon',
-    'sphinx.ext.viewcode',
+    # 'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
     'sphinx_copybutton',
     'sphinx_autodoc_typehints',
@@ -46,3 +46,4 @@ html_theme = 'pydata_sphinx_theme'
 html_static_path = ['_static']
 html_css_files = ['css/custom.css']
 html_favicon = '_static/favicon.ico'
+html_show_sourcelink = False
