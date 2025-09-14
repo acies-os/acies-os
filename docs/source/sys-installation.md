@@ -11,7 +11,7 @@ To use and/or contribute to this testbed, please make sure to:
    Org profile: [https://github.com/acies-os](https://github.com/acies-os)
 
 2. **Authenticate your machine**
-   If you’re going to use your machine as a controller for the testbed (recommended if you’re running experiments in the middle of nowhere with no Internet access), you will need to clone some of the GitHub repositories on your machine so you can compile and install controller software ahead of time.
+   If you're going to use your machine as a controller for the testbed (recommended if you're running experiments in the middle of nowhere with no Internet access), you will need to clone some of the GitHub repositories on your machine so you can compile and install controller software ahead of time.
    Create an **SSH key** on your machine and use it to authenticate to the **acies-os** organization; otherwise cloning/syncing will fail.
 
 ---
@@ -45,7 +45,7 @@ You must first join the acies-os organization and authenticate your machine--see
 ## Network Set-up for Field Data Collection
 
 1. **Know your passwords**
-   You will need three passwords to work on this testbed. They change over time, so they’re not listed verbatim here. We refer to them as:
+   You will need three passwords to work on this testbed. They change over time, so they're not listed verbatim here. We refer to them as:
 
    * **Wi-Fi password**: When you power on the Raspberry Shakes, they are hard-coded to connect to a wireless network with SSID `iobt-2.4` and a specific network password. In the rest of this document, we refer to that as **the Wi-Fi password**.
    * **Shakes password**: To log in to the Shakes after they connect to the above network, you will use account name `myshake` and its password. We refer to this as **the Shakes password**.
@@ -59,7 +59,7 @@ You must first join the acies-os organization and authenticate your machine--see
 
 4. **Set up a Wi-Fi hotspot**
    Create a hotspot with SSID `iobt-2.4` and the corresponding **Wi-Fi password**. The Shakes are pre-configured to connect only to that SSID with that specific password.
-   *(OS-specific steps omitted here; on Windows you can use **Settings → Network & Internet → Mobile hotspot**. Use the same SSID/password as above.)*
+   *(OS-specific steps omitted here; on Windows you can use **Settings -> Network & Internet -> Mobile hotspot**. Use the same SSID/password as above.)*
 
 > For post-experiment data copying instructions, see the issue thread: **acies-os/postexp#2**.
 

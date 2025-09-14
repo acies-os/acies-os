@@ -58,7 +58,7 @@ No
 
 (sec-q3)=
 
-## 3. On the Raspberry Shakes you’re deploying, are sensing & Wi-Fi already configured?
+## 3. On the Raspberry Shakes you're deploying, are sensing & Wi-Fi already configured?
 
 ::::{grid} 2
 :gutter: 5
