@@ -1,0 +1,22 @@
+/* Smooth scroll + offset for sticky headers */
+html { scroll-behavior: smooth; }
+*:target { scroll-margin-top: 80px; }
+
+/* Animate the heading itself if it has the id */
+h1[id]:target, h2[id]:target, h3[id]:target,
+h4[id]:target, h5[id]:target, h6[id]:target {
+  animation: flash-highlight 3s ease-out;
+}
+
+/* If Sphinx puts the id on a span before the heading, animate the next heading */
+*:target + h1, *:target + h2, *:target + h3,
+*:target + h4, *:target + h5, *:target + h6 {
+  animation: flash-highlight 3s ease-out;
+}
+
+/* Keyframes: bright → fade → clear */
+@keyframes flash-highlight {
+  0%   { background: #fff8cc; box-shadow: inset 0 0 0 2px var(--sd-color-primary, #2b8cbe); }
+  70%  { background: rgba(255, 248, 204, 0.35); box-shadow: inset 0 0 0 2px rgba(43, 140, 190, 0.4); }
+  100% { background: transparent; box-shadow: none; }
+}
