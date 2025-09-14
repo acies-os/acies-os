@@ -5,7 +5,6 @@
 :caption: Contents
 guided-setup
 getting-started
-sys-installation
 ```
 
 ## Overview
