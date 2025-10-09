@@ -5,6 +5,7 @@
 :caption: Contents
 guided-setup
 getting-started
+dev-menu
 ```
 
 ## Overview
