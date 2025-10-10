@@ -1,5 +1,11 @@
 # Developer's Guide
 
+```{toctree}
+:caption: API Reference
+:maxdepth: 2
+core-api
+```
+
 This section guides you through building and deploying your own service on Acies-OS using the provided API. By subclassing the core Service class and implementing a few required methods, you can integrate custom sensor logic or processing pipelines directly into the middleware.
 
 ## 1. Subclass Service
@@ -180,4 +186,4 @@ def main(...):
 
 ---
 
-> Want to customize your service further? Refer to our [API documentation](https://www.example.org)!
+> Want to customize your service further? Refer to our [API documentation](core-api.md)!
