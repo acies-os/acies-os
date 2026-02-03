@@ -1,0 +1,239 @@
+# Node locations
+[gps]
+# node_name = [latitude, longitude]
+rs1 = [40.2887754, -88.1261283]
+rs2 = [40.2887779, -88.1264918]
+rs3 = [40.2889196, -88.1261327]
+rs5 = [40.2889153, -88.1264850]
+rs6 = [40.2890700, -88.1261287]
+rs7 = [40.2890667, -88.1264864]
+rs8 = [40.2891961, -88.1261333]
+rs10 = [40.2891928, -88.1264877]
+
+# Confidence threshold to filter multi-label output
+[confidence_threshold]
+miata = 1.1
+cx30 = 0.75
+gle350 = 0.65
+mustang = 1.1
+
+polaris = 0.95
+warthog = 0.95
+truck = 0.80
+husky = 0.95
+
+[ensemble]
+# ensemble temporal window size in seconds
+win = 30
+
+# minimum number of predictions required to calculate the ensemble result
+size = 3
+
+# Confidence threshold to filter ensemble output
+# meaning: number of detection in win
+[ensemble_confidence_threshold]
+miata = 4
+cx30 = 4
+gle350 = 4
+mustang = 4
+polaris = 4
+warthog = 4
+truck = 4
+husky = 4
+
+[noise_thresh]
+rs1 = { geo = 100000, mic = 3500 }
+rs2 = { geo = 100000, mic = 3500 }
+rs3 = { geo = 100000, mic = 3500 }
+rs5 = { geo = 100000, mic = 3500 }
+rs6 = { geo = 100000, mic = 3500 }
+rs7 = { geo = 100000, mic = 3500 }
+rs8 = { geo = 100000, mic = 3500 }
+rs10 = { geo = 100000, mic = 3500 }
+
+[service_types]
+geo = "(?:.*[^_]+|^)(geo).*"
+mic = "(?:.*[^_]+|^)(mic).*"
+infer = ".*((?:vfm|mae|ds)(?:_geo|_mic)*).*"
+
+[dependencies]
+vfm = ['geo', 'mic']
+vfm_mic = ["mic"]
+vfm_geo = ["geo"]
+
+
+[failover]
+
+# active services when in `healthy` state
+ok_states = [
+    [
+        "mic",
+        "geo",
+        "vfm",
+    ],
+    [
+        "mic",
+        "geo",
+        "mae",
+    ],
+    [
+        "mic",
+        "geo",
+        "ds",
+    ],
+    [
+        "mic",
+        "vfm_mic",
+    ],
+    [
+        "mic",
+        "mae_mic",
+    ],
+    [
+        "mic",
+        "ds_mic",
+    ],
+    [
+        "geo",
+        "vfm_geo",
+    ],
+    [
+        "geo",
+        "mae_geo",
+    ],
+    [
+        "geo",
+        "ds_geo",
+    ],
+]
+
+# active services when in `service failure` state
+service_failures = [
+    [
+        "mic",
+        "geo",
+        "vfm_geo",
+    ],
+    [
+        "mic",
+        "geo",
+        "mae_geo",
+    ],
+    [
+        "mic",
+        "geo",
+        "ds_geo",
+    ],
+    [
+        "mic",
+        "geo",
+        "vfm_mic",
+    ],
+    [
+        "mic",
+        "geo",
+        "mae_mic",
+    ],
+    [
+        "mic",
+        "geo",
+        "ds_mic",
+    ],
+    [
+        "mic",
+        "geo",
+    ],
+    [
+        "mic",
+        "vfm",
+    ],
+    [
+        "mic",
+        "mae",
+    ],
+    [
+        "mic",
+        "ds",
+    ],
+    [
+        "mic",
+        "vfm_geo",
+    ],
+    [
+        "mic",
+        "mae_geo",
+    ],
+    [
+        "mic",
+        "ds_geo",
+    ],
+    [
+        "mic",
+    ],
+    [
+        "geo",
+        "vfm",
+    ],
+    [
+        "geo",
+        "mae",
+    ],
+    [
+        "geo",
+        "ds",
+    ],
+    [
+        "geo",
+        "vfm_mic",
+    ],
+    [
+        "geo",
+        "mae_mic",
+    ],
+    [
+        "geo",
+        "ds_mic",
+    ],
+    [
+        "geo",
+    ],
+]
+
+# failover target service
+service_failover = "infer"
+
+# active services when in `node failure` state
+node_failures = [
+    [
+    ],
+    [
+        "vfm",
+    ],
+    [
+        "mae",
+    ],
+    [
+        "ds",
+    ],
+    [
+        "vfm_geo",
+    ],
+    [
+        "mae_geo",
+    ],
+    [
+        "ds_geo",
+    ],
+    [
+        "vfm_mic",
+    ],
+    [
+        "mae_mic",
+    ],
+    [
+        "ds_mic",
+    ],
+]
+
+# # node failover target
+# node_failover = "activate_backup_node"
