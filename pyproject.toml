@@ -42,6 +42,9 @@ lint.flake8-quotes = { inline-quotes = 'single', multiline-quotes = 'double' }
 lint.mccabe = { max-complexity = 13 }
 format = { quote-style = 'single' }
 
+[tool.basedpyright]
+reportAny = false
+
 [dependency-groups]
 docs = [
     "livereload>=2.7.1",

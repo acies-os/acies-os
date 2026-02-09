@@ -1,309 +1,318 @@
+"""
+Message types for async channel (pub/sub) communication.
+
+This module provides the AciesMsg class for async channel messages.
+Sync channel (request/response) uses plain dicts via JSON.
+"""
+
 import json
-
-from ._acies_core import _Msg
-
-
-def _dumps(data: dict | None) -> bytes:
-    """Serialize a mapping to UTF-8 JSON bytes.
-
-    Args:
-        data: JSON-serializable mapping or ``None``.
-
-    Returns:
-        bytes: UTF-8 encoded JSON (``b"null"`` if ``None``).
-    """
-
-    return json.dumps(data).encode()
-
-
-def _loads(data: bytes) -> dict:
-    """Deserialize UTF-8 JSON bytes to a Python object.
-
-    Args:
-        data: UTF-8 JSON payload.
-
-    Returns:
-        dict: Decoded mapping.
-
-    Raises:
-        json.JSONDecodeError: If the payload is not valid JSON.
-        UnicodeDecodeError: If the bytes are not UTF-8.
-    """
-    return json.loads(data)
-
-
-_new_array_constructors = {
-    'i16': _Msg.new_array_i16,
-    'i32': _Msg.new_array_i32,
-    'i64': _Msg.new_array_i64,
-    'f64': _Msg.new_array_f64,
-}
+from datetime import datetime
+from typing import Any, Literal
 
 
 class AciesMsg:
-    """High-level wrapper around the C-extension ``_Msg``.
+    """Message for async channel (pub/sub) communication.
 
-    Provides constructors for array, json, heartbeat, and control messages,
-    plus helpers to access payload/metadata as Python objects and to
-    convert to/from raw bytes.
+    Message types:
+    - 'command': One-way commands (topic subscription, service control, etc.)
+    - 'heartbeat': Service liveness/diagnostics
+    - 'data': Application data (sensor readings, inference results, etc.)
 
-    Notes:
-        * Timestamps are nanoseconds since epoch.
-        * Payloads/metadata are stored as UTF-8 JSON when applicable.
+    Note: The sync channel (request/response via Zenoh queryable) uses
+    plain dicts, not AciesMsg objects.
+
+    Example:
+        # Data message
+        msg = AciesMsg(
+            type='data',
+            payload=[1, 2, 3, 4],
+            reply_to='sensor/geo/ctl',
+            metadata={'channel': 'EH3'}
+        )
+
+        # Heartbeat
+        msg = AciesMsg(
+            type='heartbeat',
+            payload={'cpu': 0.5, 'mem': 0.3},
+            reply_to='service/ctl',
+            metadata={'deactivated': False}
+        )
+
+        # Command
+        msg = AciesMsg(
+            type='command',
+            payload={'command': 'subscribe', 'topic': 'sensors/geo'},
+            reply_to='service/ctl'
+        )
     """
 
-    def __init__(self):
-        self._msg = None
-
-    @classmethod
-    def new_array_msg(
-        cls,
-        payload: list[int | float],
+    def __init__(
+        self,
+        msg_type: Literal['command', 'heartbeat', 'data'],
+        payload: Any,
+        *,
         reply_to: str,
-        metadata: dict | None,
-        data_type='i16',
-        timestamp_ns: int | None = None,
+        metadata: dict[str, Any] | None = None,
+        timestamp: datetime | None = None,
     ):
-        """Create an array message.
+        """Create a message for the async channel.
 
         Args:
-            payload: Numeric values to send.
-            reply_to: Topic to address replies to.
-            metadata: Optional mapping attached as metadata.
-            data_type: One of ``{"i16","i32","i64","f64"}``.
-            timestamp_ns: Optional nanosecond timestamp to set.
+            type: Message type ('command', 'heartbeat', 'data')
+            payload: Message payload (any JSON-serializable data)
+            reply_to: Topic for replies/identification
+            metadata: Optional metadata dict
+            timestamp: Message timestamp (defaults to now)
 
-        Returns:
-            AciesMsg: The constructed message.
-
-        Raises:
-            ValueError: If ``data_type`` is not supported.
+        Example:
+            msg = AciesMsg(
+                type='data',
+                payload={'result': 0.95},
+                reply_to='classifier/ctl',
+                metadata={'model': 'ResNet50'}
+            )
         """
-
-        if data_type not in _new_array_constructors:
-            raise ValueError(f'Invalid data type {data_type}, currently only i16, i32, i64, f64 are supported.')
-        func = _new_array_constructors[data_type]
-        _metadata = _dumps(metadata)
-        obj = cls.__new__(cls)
-        super(AciesMsg, obj).__init__()
-        obj._msg = func(payload, reply_to, _metadata)
-        if timestamp_ns is not None:
-            obj._msg.set_timestamp(timestamp_ns)
-        return obj
-
-    @classmethod
-    def new_heartbeat(
-        cls,
-        reply_to: str,
-        metadata: dict | None,
-        timestamp_ns: int | None = None,
-    ):
-        """Create a heartbeat message.
-
-        Args:
-            reply_to: Topic to address replies to.
-            metadata: Optional mapping attached as metadata.
-            timestamp_ns: Optional nanosecond timestamp to set.
-
-        Returns:
-            AciesMsg: The heartbeat message.
-        """
-
-        _metadata = _dumps(metadata)
-        obj = cls.__new__(cls)
-        super(AciesMsg, obj).__init__()
-        obj._msg = _Msg.new_heartbeat(reply_to, _metadata)
-        if timestamp_ns is not None:
-            obj._msg.set_timestamp(timestamp_ns)
-        return obj
-
-    @classmethod
-    def new_ctl_msg(
-        cls,
-        kind: str,
-        reply_to: str,
-        payload: dict,
-        metadata: dict | None = None,
-        timestamp_ns: int | None = None,
-    ):
-        """Create a control message.
-
-        Args:
-            kind: One of ``{"set","get","topic","reply"}``.
-            reply_to: Control topic.
-            payload: Control payload mapping (JSON-serializable).
-            metadata: Optional metadata mapping.
-            timestamp_ns: Optional nanosecond timestamp to set.
-
-        Returns:
-            AciesMsg: The control message.
-
-        Raises:
-            ValueError: If ``kind`` is not supported.
-        """
-        if kind not in ['set', 'get', 'topic', 'reply']:
-            raise ValueError(f'Invalid kind: {kind}')
-        _payload = _dumps(payload)
-        _metadata = _dumps(metadata)
-        obj = cls.__new__(cls)
-        super(AciesMsg, obj).__init__()
-        obj._msg = _Msg.new_ctl(kind, reply_to, _payload, _metadata)
-        if timestamp_ns is not None:
-            obj._msg.set_timestamp(timestamp_ns)
-        return obj
-
-    @classmethod
-    def new_json_msg(
-        cls,
-        reply_to: str,
-        payload: dict,
-        metadata: dict | None = None,
-        timestamp_ns: int | None = None,
-    ):
-        """Create a JSON message.
-
-        Args:
-            reply_to: Topic to address replies to.
-            payload: JSON-serializable mapping as the message body.
-            metadata: Optional metadata mapping.
-            timestamp_ns: Optional nanosecond timestamp to set.
-
-        Returns:
-            AciesMsg: The JSON message.
-        """
-
-        _payload = _dumps(payload)
-        _metadata = _dumps(metadata)
-        obj = cls.__new__(cls)
-        super(AciesMsg, obj).__init__()
-        obj._msg = _Msg.new_json(reply_to, _payload, _metadata)
-        if timestamp_ns is not None:
-            obj._msg.set_timestamp(timestamp_ns)
-        return obj
+        self._type = msg_type
+        self._payload = payload
+        self._reply_to = reply_to
+        self._metadata = metadata if metadata is not None else {}
+        self._timestamp = timestamp if timestamp is not None else datetime.now()
 
     @property
-    def timestamp(self) -> int:
-        assert self._msg is not None
-        return self._msg.timestamp
+    def type(self) -> str:
+        """Message type ('command', 'heartbeat', or 'data')."""
+        return self._type
+
+    @property
+    def payload(self) -> Any:
+        """Message payload (can be dict, list, or any JSON-serializable data)."""
+        return self._payload
+
+    @payload.setter
+    def payload(self, value: Any):
+        """Set message payload."""
+        self._payload = value
 
     @property
     def reply_to(self) -> str:
-        assert self._msg is not None
-        return self._msg.reply_to
-
-    def get_payload(self) -> dict:
-        """Return the decoded payload.
-
-        Returns:
-            dict: Decoded payload mapping (empty dict if ``None``).
-
-        """
-        assert self._msg is not None
-        data = self._msg.payload
-        if isinstance(data, bytes):
-            data = _loads(data)
-        if data is None:
-            data = {}
-        return data
-
-    def get_metadata(self) -> dict:
-        """Return the decoded metadata.
-
-        Returns:
-            dict: Decoded metadata mapping (empty dict if ``None``).
-        """
-        
-        assert self._msg is not None
-        data = self._msg.metadata
-        if isinstance(data, bytes):
-            data = _loads(data)
-        if data is None:
-            data = {}
-        return data
-
-    def set_metadata(self, value: dict):
-        """Set metadata for message kinds that support it.
-
-        Supported kinds: ``array_i16``, ``array_i32``, ``array_i64``,
-        ``array_f64``, ``set``, ``get``, ``reply``, ``topic``.
-
-        Args:
-            value: Mapping to serialize as metadata.
-
-        Raises:
-            TypeError: If the current message kind does not support metadata.
-        """
-
-        assert self._msg is not None
-        if self.kind in [
-            'array_i16',
-            'array_i32',
-            'array_i64',
-            'array_f64',
-            'set',
-            'get',
-            'reply',
-            'topic',
-        ]:
-            self._msg.metadata = _dumps(value)
-        else:
-            raise TypeError(f'{self.kind} msg does not have metadata')
+        """Reply-to topic."""
+        return self._reply_to
 
     @property
-    def kind(self) -> str:
-        """str: Message kind (e.g., ``"json"``, ``"reply"``, ``"array_i16"``)."""
+    def metadata(self) -> dict:
+        """Message metadata (always returns a dict)."""
+        return self._metadata
 
-        assert self._msg is not None
-        return self._msg.kind
+    @metadata.setter
+    def metadata(self, value: dict):
+        """Set message metadata."""
+        if not isinstance(value, dict):
+            raise TypeError(f'Metadata must be a dict, got {type(value)}')
+        self._metadata = value
 
-    def __repr__(self):
-        return self._msg.__repr__()
+    @property
+    def timestamp(self) -> datetime:
+        """Message timestamp as datetime object."""
+        return self._timestamp
 
-    def to_bytes(self):
-        """Serialize the message to its wire format.
+    @property
+    def timestamp_ns(self) -> int:
+        """Timestamp in nanoseconds since epoch (for backward compatibility)."""
+        return int(self._timestamp.timestamp() * 1e9)
 
-        Returns:
-            bytes: Encoded message suitable for transport/storage.
-        """
-        assert self._msg is not None
-        return self._msg.to_bytes()
-
-    @classmethod
-    def from_bytes(cls, data: bytes):
-        """Create a message from its wire-format bytes.
-
-        Args:
-            data: Byte representation produced by :meth:`to_bytes`.
-
-        Returns:
-            AciesMsg: Decoded message instance.
-        """
-        obj = cls.__new__(cls)
-        super(AciesMsg, obj).__init__()
-        obj._msg = _Msg.from_bytes(data)
-        return obj
-
-    def to_dict(self):
-        """Return a JSON-friendly dictionary view of the message.
+    def to_dict(self) -> dict[str, Any]:
+        """Convert message to dictionary.
 
         Returns:
-            dict: Mapping with keys ``"kind"``, ``"timestamp"``, ``"reply_to"``,
-            ``"payload"``, and ``"metadata"``.
+            dict: Dictionary with keys 'type', 'payload', 'reply_to',
+                  'metadata', and 'timestamp' (in nanoseconds).
+
+        Example:
+            >>> msg.to_dict()
+            {
+                'type': 'data',
+                'payload': [1, 2, 3],
+                'reply_to': 'sensor/ctl',
+                'metadata': {'channel': 'EH3'},
+                'timestamp': 1234567890000000000
+            }
         """
         return {
-            'kind': self.kind,
-            'timestamp': self.timestamp,
-            'reply_to': self.reply_to,
-            'payload': self.get_payload(),
-            'metadata': self.get_metadata(),
+            'type': self._type,
+            'payload': self._payload,
+            'reply_to': self._reply_to,
+            'metadata': self._metadata,
+            'timestamp': self.timestamp_ns,
         }
 
-    def to_json(self):
-        """Return a JSON string representation of :meth:`to_dict`.
+    def to_json(self) -> str:
+        """Convert message to JSON string.
 
         Returns:
-            str: JSON-encoded message summary.
+            str: JSON-encoded message.
+
+        Example:
+            >>> msg.to_json()
+            '{"type": "data", "payload": [1, 2, 3], ...}'
         """
-        val = self.to_dict()
-        json_str = json.dumps(val)
-        return json_str
+        return json.dumps(self.to_dict())
+
+    def to_bytes(self) -> bytes:
+        """Serialize message to bytes (JSON-encoded UTF-8).
+
+        Returns:
+            bytes: Serialized message suitable for transport.
+
+        Example:
+            >>> data = msg.to_bytes()
+            >>> restored = AciesMsg.from_bytes(data)
+        """
+        return self.to_json().encode('utf-8')
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'AciesMsg':
+        """Deserialize message from bytes.
+
+        Args:
+            data: Serialized message bytes (JSON-encoded UTF-8)
+
+        Returns:
+            AciesMsg: Deserialized message instance
+
+        Raises:
+            json.JSONDecodeError: If data is not valid JSON
+            UnicodeDecodeError: If data is not valid UTF-8
+
+        Example:
+            >>> data = msg.to_bytes()
+            >>> restored = AciesMsg.from_bytes(data)
+        """
+        d = json.loads(data.decode('utf-8'))
+        return cls(
+            type=d['type'],
+            payload=d['payload'],
+            reply_to=d['reply_to'],
+            metadata=d.get('metadata', {}),
+            timestamp=datetime.fromtimestamp(d['timestamp'] / 1e9),
+        )
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'AciesMsg':
+        """Create message from dictionary.
+
+        Args:
+            d: Dictionary with message fields
+
+        Returns:
+            AciesMsg: Message instance
+
+        Example:
+            >>> msg = AciesMsg.from_dict({
+            ...     'type': 'data',
+            ...     'payload': [1, 2, 3],
+            ...     'reply_to': 'sensor/ctl',
+            ...     'metadata': {},
+            ...     'timestamp': 1234567890000000000
+            ... })
+        """
+        return cls(
+            type=d['type'],
+            payload=d['payload'],
+            reply_to=d['reply_to'],
+            metadata=d.get('metadata', {}),
+            timestamp=datetime.fromtimestamp(d['timestamp'] / 1e9),
+        )
+
+    def copy(self) -> 'AciesMsg':
+        """Create a deep copy of this message.
+
+        Returns:
+            AciesMsg: New message instance with same data
+
+        Example:
+            >>> msg_copy = msg.copy()
+            >>> msg_copy.metadata['new_key'] = 'value'  # Doesn't affect original
+        """
+        # Use to_dict/from_dict for deep copy via serialization
+        return self.from_dict(self.to_dict())
+
+    def __repr__(self) -> str:
+        """String representation of message.
+
+        Returns:
+            str: Human-readable representation
+
+        Example:
+            >>> msg
+            AciesMsg(type='data', reply_to='sensor/ctl', timestamp=2024-01-15 10:30:45)
+        """
+        return (
+            f"AciesMsg(type='{self._type}', "
+            f"reply_to='{self._reply_to}', "
+            f'timestamp={self._timestamp.strftime("%Y-%m-%d %H:%M:%S")})'
+        )
+
+    def __eq__(self, other: object) -> bool:
+        """Check equality with another message.
+
+        Args:
+            other: Object to compare with
+
+        Returns:
+            bool: True if messages are equal
+        """
+        if not isinstance(other, AciesMsg):
+            return False
+        return self.to_dict() == other.to_dict()
+
+
+# ============================================================
+# Backward Compatibility Helpers
+# ============================================================
+# These functions help migrate from the old API to the new one
+
+
+def get_payload(msg: AciesMsg) -> Any:
+    """Get message payload (backward compatibility helper).
+
+    Args:
+        msg: Message instance
+
+    Returns:
+        Payload data
+
+    Note:
+        This is a backward compatibility helper.
+        New code should use msg.payload directly.
+    """
+    return msg.payload
+
+
+def get_metadata(msg: AciesMsg) -> dict:
+    """Get message metadata (backward compatibility helper).
+
+    Args:
+        msg: Message instance
+
+    Returns:
+        Metadata dict
+
+    Note:
+        This is a backward compatibility helper.
+        New code should use msg.metadata directly.
+    """
+    return msg.metadata
+
+
+def set_metadata(msg: AciesMsg, value: dict):
+    """Set message metadata (backward compatibility helper).
+
+    Args:
+        msg: Message instance
+        value: Metadata dict to set
+
+    Note:
+        This is a backward compatibility helper.
+        New code should use msg.metadata = value directly.
+    """
+    msg.metadata = value
