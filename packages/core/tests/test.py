@@ -1,4 +1,4 @@
-from acies.core.types import AciesMsg
+from acies.core.msg import AciesMsg
 
 # x = AciesMsg.new_array_msg([1, 2, 3], 'ns/n/ctl', {'key': 'value'}, 'i16')
 # print(x)

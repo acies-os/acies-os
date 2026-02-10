@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional
 
 import psutil
 import zenoh
-from acies.core.types import AciesMsg
+from acies.core.msg import AciesMsg
 from IPython.lib.pretty import pretty  # noqa: F401
 
 logger = logging.getLogger('acies.service')
