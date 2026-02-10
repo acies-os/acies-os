@@ -44,6 +44,8 @@ format = { quote-style = 'single' }
 
 [tool.basedpyright]
 reportAny = false
+reportExplicitAny = false
+reportImplicitOverride = false
 
 [dependency-groups]
 docs = [
