@@ -1,6 +1,6 @@
 import json
 
-from acies.core.types import AciesMsg
+from acies.core.msg import AciesMsg
 
 
 def test_types(snapshot):
