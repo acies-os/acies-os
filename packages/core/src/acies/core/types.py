@@ -9,6 +9,8 @@ import json
 from datetime import datetime
 from typing import Any, Literal
 
+MessageType = Literal['command', 'heartbeat', 'data']
+
 
 class AciesMsg:
     """Message for async channel (pub/sub) communication.
@@ -48,7 +50,7 @@ class AciesMsg:
 
     def __init__(
         self,
-        msg_type: Literal['command', 'heartbeat', 'data'],
+        msg_type: MessageType,
         payload: Any,
         *,
         reply_to: str,
@@ -72,11 +74,11 @@ class AciesMsg:
                 metadata={'model': 'ResNet50'}
             )
         """
-        self._type = msg_type
-        self._payload = payload
-        self._reply_to = reply_to
-        self._metadata = metadata if metadata is not None else {}
-        self._timestamp = timestamp if timestamp is not None else datetime.now()
+        self._type: MessageType = msg_type
+        self._payload: Any = payload
+        self._reply_to: str = reply_to
+        self._metadata: dict[str, Any] = metadata if metadata is not None else {}
+        self._timestamp: datetime = timestamp if timestamp is not None else datetime.now()
 
     @property
     def type(self) -> str:
@@ -89,7 +91,7 @@ class AciesMsg:
         return self._payload
 
     @payload.setter
-    def payload(self, value: Any):
+    def payload(self, value: Any) -> None:
         """Set message payload."""
         self._payload = value
 
@@ -99,15 +101,13 @@ class AciesMsg:
         return self._reply_to
 
     @property
-    def metadata(self) -> dict:
+    def metadata(self) -> dict[str, Any]:
         """Message metadata (always returns a dict)."""
         return self._metadata
 
     @metadata.setter
-    def metadata(self, value: dict):
+    def metadata(self, value: dict[str, Any]):
         """Set message metadata."""
-        if not isinstance(value, dict):
-            raise TypeError(f'Metadata must be a dict, got {type(value)}')
         self._metadata = value
 
     @property
@@ -138,7 +138,7 @@ class AciesMsg:
             }
         """
         return {
-            'type': self._type,
+            'msg_type': self._type,
             'payload': self._payload,
             'reply_to': self._reply_to,
             'metadata': self._metadata,
@@ -189,7 +189,7 @@ class AciesMsg:
         """
         d = json.loads(data.decode('utf-8'))
         return cls(
-            type=d['type'],
+            msg_type=d['msg_type'],
             payload=d['payload'],
             reply_to=d['reply_to'],
             metadata=d.get('metadata', {}),
@@ -197,7 +197,7 @@ class AciesMsg:
         )
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'AciesMsg':
+    def from_dict(cls, d: dict[str, Any]) -> 'AciesMsg':
         """Create message from dictionary.
 
         Args:
@@ -216,7 +216,7 @@ class AciesMsg:
             ... })
         """
         return cls(
-            type=d['type'],
+            msg_type=d['msg_type'],
             payload=d['payload'],
             reply_to=d['reply_to'],
             metadata=d.get('metadata', {}),
@@ -247,7 +247,7 @@ class AciesMsg:
             AciesMsg(type='data', reply_to='sensor/ctl', timestamp=2024-01-15 10:30:45)
         """
         return (
-            f"AciesMsg(type='{self._type}', "
+            f"AciesMsg(msg_type='{self._type}', "
             f"reply_to='{self._reply_to}', "
             f'timestamp={self._timestamp.strftime("%Y-%m-%d %H:%M:%S")})'
         )
@@ -264,55 +264,3 @@ class AciesMsg:
         if not isinstance(other, AciesMsg):
             return False
         return self.to_dict() == other.to_dict()
-
-
-# ============================================================
-# Backward Compatibility Helpers
-# ============================================================
-# These functions help migrate from the old API to the new one
-
-
-def get_payload(msg: AciesMsg) -> Any:
-    """Get message payload (backward compatibility helper).
-
-    Args:
-        msg: Message instance
-
-    Returns:
-        Payload data
-
-    Note:
-        This is a backward compatibility helper.
-        New code should use msg.payload directly.
-    """
-    return msg.payload
-
-
-def get_metadata(msg: AciesMsg) -> dict:
-    """Get message metadata (backward compatibility helper).
-
-    Args:
-        msg: Message instance
-
-    Returns:
-        Metadata dict
-
-    Note:
-        This is a backward compatibility helper.
-        New code should use msg.metadata directly.
-    """
-    return msg.metadata
-
-
-def set_metadata(msg: AciesMsg, value: dict):
-    """Set message metadata (backward compatibility helper).
-
-    Args:
-        msg: Message instance
-        value: Metadata dict to set
-
-    Note:
-        This is a backward compatibility helper.
-        New code should use msg.metadata = value directly.
-    """
-    msg.metadata = value
