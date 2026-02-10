@@ -43,9 +43,17 @@ lint.mccabe = { max-complexity = 13 }
 format = { quote-style = 'single' }
 
 [tool.basedpyright]
+include = ["packages/*/src"]
+extraPaths = [
+  "packages/core/src",
+  "packages/buffers/src",
+  "packages/controller/src",
+  "packages/vehicle-classifier/src"
+]
 reportAny = false
 reportExplicitAny = false
 reportImplicitOverride = false
+reportImplicitStringConcatenation = false
 
 [dependency-groups]
 docs = [
