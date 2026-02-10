@@ -100,7 +100,7 @@ class AciesMsg:
             )
         """
         # Read-only fields (internal)
-        self._type: MessageType = msg_type
+        self._msg_type: MessageType = msg_type
         self._reply_to: str = reply_to
         self._timestamp: datetime = timestamp if timestamp is not None else datetime.now()
 
@@ -113,9 +113,9 @@ class AciesMsg:
     # ============================================================
 
     @property
-    def type(self) -> str:
+    def msg_type(self) -> str:
         """Message type ('command', 'heartbeat', or 'data')."""
-        return self._type
+        return self._msg_type
 
     @property
     def reply_to(self) -> str:
@@ -185,7 +185,7 @@ class AciesMsg:
             }
         """
         return {
-            'msg_type': self._type,
+            'msg_type': self._msg_type,
             'payload': self._payload,
             'reply_to': self._reply_to,
             'metadata': self._metadata,
@@ -382,7 +382,7 @@ class AciesMsg:
             AciesMsg(msg_type='data', reply_to='sensor/ctl', timestamp=2024-01-15 10:30:45)
         """
         return (
-            f"AciesMsg(msg_type='{self._type}', "
+            f"AciesMsg(msg_type='{self._msg_type}', "
             f"reply_to='{self._reply_to}', "
             f'timestamp={self._timestamp.strftime("%Y-%m-%d %H:%M:%S")})'
         )
