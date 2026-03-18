@@ -1,5 +1,7 @@
 # Acies-OS 2.0 Design Document
 
+## Overview
+
 Acies-OS is a middileware designed for Edge AI applications. It assumes a
 computation graph model where nodes represent computational tasks and edges
 represent data dependencies between these tasks. The communication layer is
@@ -10,7 +12,8 @@ The refactor of the 2.0 version is to:
 1. Upgrade the pubsub layer to the latest version (zenoh >= 1.0)
 2. Provide a decorator-based API for users to define their computation graph
    (akin to Ray, Flask, FastAPI, etc.)
-3. Provide internal abstractions for future research and improvements
+3. Provide internal abstractions for future research and improvements, such as
+   different scheduling policies.
 
 The user code creates an instance of `AciesApp`, then defines functions that
 represent computational tasks, decorated by decorators provided by the library.
