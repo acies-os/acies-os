@@ -406,125 +406,157 @@ uv run pytest packages/core/tests/corev2/ -x -s   # stop on first failure, show 
 
 ## 7. Implementation Phases
 
-### Phase 1: Skeleton ✓ (complete)
+### Phase 1: Skeleton (update to latest design)
 
-**Goal**: All files created, core data structures fully implemented, everything
-else stubbed. The thread model and scheduling semantics are reflected in the
-code structure even before any thread runs.
+**Goal**: All files reflect the current design — sum type specs, `AppState`/
+`TaskState`, no `TaskKind` enum, no `PRODUCE`. Everything except `task.py` and
+`msg.py` remains a stub; thread wiring is deferred to Phase 3.
 
-1. Create `packages/core/src/acies/corev2/` with all 8 files
-2. `msg.py` — placeholder stub
-3. `task.py` — fully implement:
-   - `SubscriberSpec`, `ScheduleSpec`, `ServiceSpec` frozen dataclasses
-   - `TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec` type alias
-   - `Job` dataclass: `spec`, `msg`, `created_at`, `reply_fn` (only set for `ServiceSpec` jobs)
-4. `transport.py` — stub `Transport` Protocol with full interface:
-   `start(on_message)`, `stop()`, `can_handle(topic)`, `publish()`, `subscribe()`,
-   `query()`, `advertise()`; stub `LocalTransport` as a concrete implementation
-5. `router.py` — stub `Router`: owns an inbound queue and a router thread;
-   exposes `add(transport)`, `start(executor)`, `stop()`, `subscribe(topic, spec)`,
-   `advertise(topic, spec)`, `publish(topic, msg)`, `query(topic, msg, timeout)`
-6. `executor.py` — stub `Executor`: owns an internal queue, a dispatcher thread,
-   and a worker pool; exposes `enqueue(job)`, `start(dispatch, n_workers)`, `stop()`;
-   FIFO is the initial policy (extension point for future scheduling policies)
-7. `context.py` — stub `AppState`, `TaskState` (lock + data dict); stub
-   `AciesContext`: `publish()`, `query()`, `app`, `task`
-8. `app.py` — stub `AciesApp`: decorators (`subscribe`, `schedule`, `service`,
-   `on_startup`, `on_shutdown`) register `TaskSpec`s; `run()` and `stop()` stubbed
-9. `__init__.py` — export public API: `AciesApp`, `AciesContext`, `AciesMsg`,
-   `TaskSpec`, `SubscriberSpec`, `ScheduleSpec`, `ServiceSpec`
+Files and what changes:
 
-**Done when**: `from acies.corev2 import AciesApp` works; decorators register
-the correct spec type into `app._specs`; all classes instantiate without error.
+| File                                       | Change                                                                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `task.py`                                  | Replace `TaskKind` + single `TaskSpec` with `SubscriberSpec`, `ScheduleSpec`, `ServiceSpec` sum types; update `Job` comments |
+| `msg.py`                                   | Add `topic: str` field (set by router at delivery time — handlers need it to distinguish topics when subscribed to multiple) |
+| `context.py`                               | Add `AppState`, `TaskState` (lock + data dict); update `AciesContext` to carry `app` and `task`; remove `msg()` helper       |
+| `app.py`                                   | Remove `produce` decorator and `_specs_of`; decorators create the correct spec type                                          |
+| `__init__.py`                              | Export `SubscriberSpec`, `ScheduleSpec`, `ServiceSpec`, `AppState`, `TaskState`; remove `TaskKind`                           |
+| `executor.py`, `router.py`, `transport.py` | No change — stubs remain                                                                                                     |
+
+**Done when**: `from acies.corev2 import AciesApp, SubscriberSpec` works; all
+classes instantiate; decorators produce the correct spec type.
 
 ---
 
-### Phase 2: Tests
+### Phase 2: API Sketches and Reference Applications
 
-**Goal**: Write tests before implementation to define expected behaviour and
-catch API design issues early.
+**Goal**: Draft the new API by writing skeleton implementations of
+`packages/sensors/` and `packages/vehicle-classifier/` using `AciesApp`.
+These sketches surface design issues before tests are written, while the cost
+of changing the API is still low.
 
-1. Write `test_task.py` — pure data structure tests, no threads
-2. Write `test_executor.py` — threading, dispatch, reply_fn, FIFO ordering
-3. Write `test_router.py` — routing, LocalTransport roundtrip
-4. Write `test_app.py` — full lifecycle integration with LocalTransport
+Deliverables:
 
-**Done when**: All tests exist and fail cleanly (not error) against the stubs.
+- `packages/sensors/mic.py` — mic sensor as an `AciesApp`: source thread in
+  `on_startup`, `@service` for runtime config
+- `packages/sensors/geo.py` — same pattern for geophone
+- `packages/vehicle-classifier/.../classifier_v2.py` — `Classifier` base
+  reimplemented: `@subscribe` for sensor data, `@schedule` for inference,
+  `@service` for status/config; `load_model` and `infer` remain abstract
+
+Known design issues to resolve during this phase:
+
+1. **`msg.topic`** — handlers subscribed to multiple topics (e.g. `geo` and
+   `mic`) need to know which topic a message came from. Already added to
+   `AciesMsg` in Phase 1; confirm usage here.
+2. **Cross-handler shared state** — the sensor buffer is written by
+   `handle_sensor` and read by `run_inference`. These are different specs with
+   different `ctx.task` stores. Shared data must go in `ctx.app.data`. Establish
+   the pattern: `ctx.task` for handler-private state, `ctx.app` for
+   inter-handler coordination.
+3. **Wildcard topics** — `sensors/+/geo` style patterns needed by the
+   classifier. Confirm the `Transport` Protocol and `Router` must support
+   zenoh-style wildcards (`+`, `**`). `LocalTransport` needs basic wildcard
+   matching for tests.
+4. **App-per-node vs app-per-process** — the classifier mixes sensor
+   subscriptions and inference scheduling in one app. Confirm this is the
+   intended model (one `AciesApp` per logical node).
+
+**Done when**: Sketches compile and read clearly as the intended API; all
+design issues from the list above are resolved and documented.
 
 ---
 
-### Phase 3: Runtime
+### Phase 3: Tests
 
-**Goal**: Messages flow end-to-end using `LocalTransport`; all Phase 2 tests pass.
+**Goal**: Codify the API from Phase 2 as executable tests. Tests are written
+against the stubs from Phase 1 — they will fail, but must not error.
 
-1. Implement `LocalTransport` (in-process queues, receiver thread)
-2. Implement `Router` — inbound queue, router thread, prefix routing, exception on no match
-3. Implement `Executor` — internal FIFO queue, dispatcher thread, worker pool, `reply_fn` handling
-4. Implement `AppState`, `TaskState`, `AciesContext` — `publish()`, `query()`, `app`, `task`
-5. Implement shared timer thread in `AciesApp` using a priority queue
-6. Wire `AciesApp.run()` and `stop()` as sketched in §4 (per-spec ctx construction, two-branch dispatch)
+```
+packages/core/tests/corev2/
+    ├── __init__.py
+    ├── test_task.py       # spec construction, immutability, Job fields
+    ├── test_executor.py   # dispatch in worker thread, reply_fn, FIFO order
+    ├── test_router.py     # prefix routing, no-transport error, pub/sub roundtrip
+    └── test_app.py        # full lifecycle: startup, subscribe, schedule, service, stop
+```
 
-**Done when**: `uv run pytest packages/core/tests/corev2/` passes.
+Unit test coverage:
+
+| File               | Key cases                                                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_task.py`     | Each spec type construction and frozen; `Job` defaults; `reply_fn` only on service jobs                                                                         |
+| `test_executor.py` | Handler runs in worker thread (not main); `reply_fn(result)` called after dispatch returns; FIFO with `n_workers=1`; `stop()` after drain                       |
+| `test_router.py`   | `RuntimeError` with no transport; first-match routing; `subscribe` + `publish` delivers job; multiple subscribers on same topic; service job carries `reply_fn` |
+
+Integration test (`test_app.py` with `LocalTransport`):
+
+| Case                   | What it checks                                                |
+| ---------------------- | ------------------------------------------------------------- |
+| startup hook           | runs before `run()` blocks; `ctx` is live                     |
+| `@subscribe`           | message published inside app reaches handler                  |
+| `@schedule`            | handler fires ~N times in N×interval seconds                  |
+| `@service`             | `ctx.query()` returns handler's return value                  |
+| `ctx.app` / `ctx.task` | state persists across calls; app state shared across handlers |
+| `stop()`               | unblocks `run()`; shutdown hook runs                          |
+
+**Done when**: All test files exist; `uv run pytest packages/core/tests/corev2/ --collect-only`
+succeeds; tests fail (not error) against the stubs.
 
 ---
 
-### Phase 4: Production Transports
+### Phase 4: Runtime
+
+**Goal**: All Phase 3 tests pass using `LocalTransport`.
+
+1. `msg.py` — finalize `AciesMsg` (topic field, repr)
+2. `context.py` — implement `AppState`, `TaskState`; implement `AciesContext.publish()` and `query()`
+3. `transport.py` — implement `LocalTransport` (in-process queue, receiver thread, basic wildcard matching)
+4. `router.py` — implement inbound queue, router thread, topic→spec matching, `reply_fn` injection for service jobs
+5. `executor.py` — implement FIFO queue, dispatcher thread, worker pool, `reply_fn` call after dispatch
+6. `app.py` — implement `run()`: per-spec ctx construction, two-branch dispatch, timer thread, wiring loop; implement `stop()`
+
+**Done when**: `uv run pytest packages/core/tests/corev2/` is fully green.
+
+---
+
+### Phase 5: Production Transports
 
 **Goal**: Works with real backends.
 
-1. Implement `ZenohTransport` (zenoh 1.x pub/sub + queryable)
-2. `advertise` passes a `reply_fn` closure into the `Job` via the router
-3. Implement `WebSocketTransport` — WebSocket server thread; `ws://` topic prefix;
-   bridges connected browser/UI clients to the router
-4. Smoke test: two `AciesApp` instances over Zenoh (cross-process pub/sub + RPC)
-5. Smoke test: browser client receives a published message over WebSocket
+1. `ZenohTransport` — zenoh 1.x pub/sub + queryable; `reply_fn` closure via `advertise`
+2. `WebSocketTransport` — WebSocket server thread; `ws://` topic prefix; bridges browser clients to router
+3. Smoke test: two `AciesApp` instances over Zenoh (pub/sub + service RPC)
+4. Smoke test: browser client receives a published message over WebSocket
 
 **Done when**: Cross-process pub/sub, service RPC, and WebSocket delivery all work.
 
 ---
 
-### Phase 5: Refactor `acies.controller`
+### Phase 6: Refactor Application Packages
 
-**Goal**: `Controller` reimplemented as an `AciesApp` with decorators.
+**Goal**: `acies.sensors`, `acies.controller`, and `acies.vehicle_classifier`
+all use the new `AciesApp` API. Phase 2 sketches are the starting point.
 
-| Current (`Service` subclass)            | v2 equivalent                              |
-| --------------------------------------- | ------------------------------------------ |
-| `__init__` + manual `subscribe()` calls | `@app.subscribe(topic)` decorators         |
-| Periodic `schedule()` calls             | `@app.schedule(interval=...)`              |
-| External sensor callbacks               | source thread started in `@app.on_startup` |
-| `make_msg()` + `publish()`              | `ctx.publish(topic, payload=...)`          |
-| Zenoh queryable setup                   | `@app.service(topic)`                      |
-| Startup logic in `__init__`             | `@app.on_startup`                          |
+| Package                    | Key changes                                                                                               |
+| -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `acies.sensors`            | `mic.py`, `geo.py` become `AciesApp` instances; source threads in `on_startup`                            |
+| `acies.controller`         | `base.py` rewritten; `state.py`, `analysis.py`, `ns.py`, `buffer.py` unchanged                            |
+| `acies.vehicle_classifier` | `base.py` rewritten from Phase 2 sketch; `load_model`/`infer` stay abstract; concrete classifiers updated |
 
-Steps:
+Steps for each package:
 
-1. Add `acies-corev2` dependency to `packages/controller/pyproject.toml`
-2. Rewrite `base.py` using `AciesApp`
-3. Keep `state.py`, `analysis.py`, `ns.py`, `buffer.py` unchanged
-4. Update `__init__.py` exports
-5. Smoke test: run controller against a live Zenoh router
+1. Add `acies-corev2` dependency to `pyproject.toml`
+2. Rewrite using Phase 2 sketch as the blueprint
+3. Smoke test against a live Zenoh router
 
----
-
-### Phase 6: Refactor `acies.vehicle_classifier`
-
-**Goal**: `Classifier` base class reimplemented using `AciesApp`.
-
-Steps:
-
-1. Add `acies-corev2` dependency
-2. Rewrite `base.py`: `load_model()` and `infer()` remain abstract; sensor
-   subscription becomes `@app.subscribe(mic_topic, geo_topic)`; inference trigger
-   becomes `@app.schedule(interval=...)` or a source thread in `@app.on_startup`
-3. Update concrete classifiers (`vfm.py`, `ds.py`, `simple.py`) to use new base
-4. Keep model integration files (`deepsense.py`, `foundationsense.py`) unchanged
-5. Smoke test with recorded sensor data
+**Done when**: All three packages run end-to-end against Zenoh.
 
 ---
 
 ### Phase 7: Cleanup
 
-1. Remove `acies.core` imports from controller and vehicle-classifier
-2. Deprecation notice in `acies/core/__init__.py`
-3. Update docs
-4. Final full test run across all packages
+1. Remove `acies.core` imports from all refactored packages
+2. Add deprecation notice to `acies/core/__init__.py`
+3. Final full test run: `uv run pytest`
+4. Update user-facing docs
