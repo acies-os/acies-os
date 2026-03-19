@@ -143,14 +143,15 @@ class AciesContext:
 > is a simple two-branch callable. See `design_v2.md` § Handler Calling
 > Convention.
 
-### `Transport` ABC (transport.py)
+### `Transport` (transport.py)
 
-Base class for all messaging backends. Each backend owns its receiver thread(s)
-and pushes received messages into the router's inbound queue via a callback.
-`LocalTransport` (in-process queue) ships alongside the ABC and is used for testing.
+Protocol defining the interface for messaging backends. Backends implement the
+protocol structurally — no inheritance required. Each backend owns its receiver
+thread(s) and pushes received messages into the router's inbound queue via a
+callback.
 
 ```python
-class Transport(ABC):
+class Transport(Protocol):
     def start(self, on_message: Callable[[str, AciesMsg], None]) -> None: ...
     def stop(self) -> None: ...
     def can_handle(self, topic: str) -> bool: ...
@@ -163,12 +164,15 @@ class Transport(ABC):
 `start()` receives an `on_message` callback — the transport calls it from its
 receiver thread whenever a message arrives, passing `(topic, msg)` to the router.
 
-Concrete backends (extend `Transport`):
+Concrete backends (satisfy `Transport` structurally):
 
-- `ZenohTransport` — cross-node pub/sub + queryable; handles bare topics (default)
-- `LocalTransport` — in-process `queue.Queue`; used for tests
-- `WebSocketTransport` — browser/UI connections; topic prefix `ws://`
-- `IPCTransport` — inter-process on the same machine; topic prefix `ipc://`
+- `ZenohTransport` — cross-node pub/sub + queryable; primary production backend.
+  Same-host IPC is handled by configuring the session with a Unix domain socket
+  endpoint or enabling Zenoh SHM — no separate transport needed.
+- `WebSocketTransport` — browser/UI connections; runs its own WebSocket
+  server thread; bridges connected clients to the router's `on_message` callback.
+  Topic prefix `ws://` routes outbound messages to this transport.
+- `LocalTransport` — in-process queue; used for tests and single-process apps.
 
 ### `Router` (router.py)
 
@@ -383,8 +387,8 @@ app.run()
 
 ### Integration tests
 
-| File          | What it tests                                                                                                                                        |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File          | What it tests                                                                                                                                                   |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test_app.py` | Full `AciesApp` lifecycle with `LocalTransport`: startup hook, `@schedule`, `@subscribe`, `@service` reply, `ctx.task`/`ctx.app` state, `stop()`, shutdown hook |
 
 **Transport strategy for tests**: `AciesApp` accepts an optional `router=`
@@ -464,15 +468,18 @@ catch API design issues early.
 
 ---
 
-### Phase 4: ZenohTransport
+### Phase 4: Production Transports
 
-**Goal**: Works with a real Zenoh session.
+**Goal**: Works with real backends.
 
 1. Implement `ZenohTransport` (zenoh 1.x pub/sub + queryable)
 2. `advertise` passes a `reply_fn` closure into the `Job` via the router
-3. Smoke test: two `AciesApp` instances, one publishes, one subscribes
+3. Implement `WebSocketTransport` — WebSocket server thread; `ws://` topic prefix;
+   bridges connected browser/UI clients to the router
+4. Smoke test: two `AciesApp` instances over Zenoh (cross-process pub/sub + RPC)
+5. Smoke test: browser client receives a published message over WebSocket
 
-**Done when**: Cross-process pub/sub and service RPC work over Zenoh.
+**Done when**: Cross-process pub/sub, service RPC, and WebSocket delivery all work.
 
 ---
 
@@ -480,14 +487,14 @@ catch API design issues early.
 
 **Goal**: `Controller` reimplemented as an `AciesApp` with decorators.
 
-| Current (`Service` subclass)            | v2 equivalent                      |
-| --------------------------------------- | ---------------------------------- |
-| `__init__` + manual `subscribe()` calls | `@app.subscribe(topic)` decorators |
-| Periodic `schedule()` calls             | `@app.schedule(interval=...)`      |
+| Current (`Service` subclass)            | v2 equivalent                              |
+| --------------------------------------- | ------------------------------------------ |
+| `__init__` + manual `subscribe()` calls | `@app.subscribe(topic)` decorators         |
+| Periodic `schedule()` calls             | `@app.schedule(interval=...)`              |
 | External sensor callbacks               | source thread started in `@app.on_startup` |
-| `make_msg()` + `publish()`              | `ctx.publish(topic, payload=...)`  |
-| Zenoh queryable setup                   | `@app.service(topic)`              |
-| Startup logic in `__init__`             | `@app.on_startup`                  |
+| `make_msg()` + `publish()`              | `ctx.publish(topic, payload=...)`          |
+| Zenoh queryable setup                   | `@app.service(topic)`                      |
+| Startup logic in `__init__`             | `@app.on_startup`                          |
 
 Steps:
 

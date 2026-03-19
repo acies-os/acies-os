@@ -177,6 +177,8 @@ def teardown(ctx: AciesContext): ...
 - **Timer thread** — one shared thread for all SCHEDULE specs. Uses a priority
   queue of `(next_fire_time, spec)` to enqueue jobs at the right time.
 
-- **Transport layer** — indirection over the messaging backend. `LocalTransport`
-  (in-process queue) is the test backend; `ZenohTransport` is the production
-  backend.
+- **Transport layer** — indirection over the messaging backend, defined as a
+  `Protocol` (structural typing, no inheritance required). Three backends:
+  `ZenohTransport` (production pub/sub; same-host IPC via Zenoh UDS/SHM config),
+  `WebSocketTransport` (browser/UI; own server thread, `ws://` topic prefix),
+  `LocalTransport` (in-process queue, for tests).
