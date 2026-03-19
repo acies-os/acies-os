@@ -2,22 +2,33 @@
 default:
     @just --list
 
+# Format code with ruff
+fmt:
+    uvx ruff format .
+
+# Check code with ruff
+check:
+    uvx ruff check .
+
+# Fix code with ruff
+fix:
+    uvx ruff check --fix .
+
 # delete all *.log files
 clean:
     rm -f *.log
 
-RUNCMD := `command -v uv || command -v rye || (echo "Please install uv" >&2 && exit 1)`
 DOCS_SOURCE := "source"
 DOCS_BUILD := "_build"
 
 # Build HTML docs with Sphinx
 build-doc:
-    cd docs && {{ RUNCMD }} run sphinx-build -b html {{ DOCS_SOURCE }} {{ DOCS_BUILD }}
+    cd docs && uv run sphinx-build -b html {{ DOCS_SOURCE }} {{ DOCS_BUILD }}
     @echo "Docs built at docs/{{ DOCS_BUILD }}/index.html"
 
 live-doc:
     echo $PWD
-    {{ RUNCMD }} run docs/watch-doc.py
+    uv run docs/watch-doc.py
 
 # Open docs in a browser (Windows/mac/wsl compatible)
 view-doc:
