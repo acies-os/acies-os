@@ -3,16 +3,17 @@ default:
     @just --list
 
 # Format code with ruff
-fmt:
-    uvx ruff format .
+fmt path=".":
+    uvx ruff check --select I --fix {{ path }}
+    uvx ruff format {{ path }}
 
 # Check code with ruff
-check:
-    uvx ruff check .
+check path=".":
+    uvx ruff check {{ path }}
 
 # Fix code with ruff
-fix:
-    uvx ruff check --fix .
+fix path=".":
+    uvx ruff check --fix {{ path }}
 
 # delete all *.log files
 clean:
