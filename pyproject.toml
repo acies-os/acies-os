@@ -49,6 +49,7 @@ reportAny = false
 reportExplicitAny = false
 reportImplicitOverride = false
 reportImplicitStringConcatenation = false
+reportMissingTypeArgument = false
 
 [dependency-groups]
 dev = [
