@@ -17,15 +17,12 @@ Concrete backends (to be implemented):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Protocol
-
-if TYPE_CHECKING:
-    from .msg import AciesMsg
+from typing import Callable, Protocol
 
 
 class Transport(Protocol):
-    def start(self, on_message: Callable[[str, 'AciesMsg'], None]) -> None:
-        """Start receiver thread(s). Call on_message(topic, msg) on each arrival."""
+    def start(self, on_message: Callable[[str, bytes], None]) -> None:
+        """Start receiver thread(s). Call on_message(topic, raw_bytes) on each arrival."""
         ...
 
     def stop(self) -> None:
@@ -36,16 +33,16 @@ class Transport(Protocol):
         """Return True if this transport should handle the given topic."""
         ...
 
-    def publish(self, topic: str, msg: 'AciesMsg') -> None:
-        """Send a message. Called synchronously from worker threads."""
+    def publish(self, topic: str, raw: bytes) -> None:
+        """Send raw bytes. Called synchronously from the router."""
         ...
 
     def subscribe(self, topic: str) -> None:
         """Register interest in a topic so the receiver thread delivers it."""
         ...
 
-    def query(self, topic: str, msg: 'AciesMsg', timeout: float) -> 'AciesMsg | None':
-        """Synchronous RPC call. Blocks until reply or timeout."""
+    def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
+        """Synchronous RPC call. Blocks until reply bytes arrive or timeout."""
         ...
 
     def advertise(self, topic: str, reply_fn_factory: Callable[..., None]) -> None:
@@ -63,7 +60,7 @@ class LocalTransport:
     Full implementation in Phase 2.
     """
 
-    def start(self, on_message: Callable[[str, 'AciesMsg'], None]) -> None:
+    def start(self, on_message: Callable[[str, bytes], None]) -> None:
         # TODO: Phase 2 — start receiver thread, store on_message callback
         ...
 
@@ -74,7 +71,7 @@ class LocalTransport:
     def can_handle(self, topic: str) -> bool:
         return True
 
-    def publish(self, topic: str, msg: 'AciesMsg') -> None:
+    def publish(self, topic: str, raw: bytes) -> None:
         # TODO: Phase 2 — deliver directly to subscribers in-process
         ...
 
@@ -82,7 +79,7 @@ class LocalTransport:
         # TODO: Phase 2
         ...
 
-    def query(self, topic: str, msg: 'AciesMsg', timeout: float) -> 'AciesMsg | None':
+    def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
         # TODO: Phase 2
         ...
 

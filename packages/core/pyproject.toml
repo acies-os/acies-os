@@ -4,6 +4,9 @@ version = "0.4.0"
 description = "Core library for the Acies project"
 requires-python = ">=3.10"
 authors = [{ name = "Jinyang Li", email = "jinyang7@illinois.edu" }]
+dependencies = [
+    "msgspec>=0.20.0",
+]
 
 [build-system]
 requires = ["hatchling"]

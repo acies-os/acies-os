@@ -21,7 +21,7 @@ packages/core/src/acies/
     ├── transport.py        # Transport Protocol + LocalTransport (queue-based, for tests)
     ├── router.py           # Router: inbound queue, router thread, topic → Job dispatch
     ├── executor.py         # Executor: internal queue, dispatcher thread, worker pool
-    └── msg.py              # AciesMsg: message definition
+    └── msg.py              # control messages + built-in data types (AciesTensor, etc.)
 ```
 
 Tests:
@@ -71,6 +71,7 @@ class SubscriberSpec:
     name: str
     fn: Callable
     topics: tuple[str, ...]
+    msg_type: type | None = None  # extracted from fn annotation at decoration time
 
 @dataclass(frozen=True)
 class ScheduleSpec:
@@ -83,9 +84,15 @@ class ServiceSpec:
     name: str
     fn: Callable
     topics: tuple[str, ...]
+    msg_type: type | None = None  # extracted from fn annotation at decoration time
 
 TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
 ```
+
+`msg_type` is extracted by inspecting the `msg` parameter annotation of the
+handler at decoration time. The router uses it as the decode target:
+`msgspec.msgpack.decode(raw, type=spec.msg_type)`. Falls back to
+`msgspec.msgpack.decode(raw)` if `None`.
 
 Source nodes (threads that read from sensors, cameras, etc.) are not a task
 kind. They are plain threads started in `on_startup` hooks that call
@@ -102,7 +109,7 @@ the underlying query mechanism.
 @dataclass
 class Job:
     spec: TaskSpec
-    msg: AciesMsg | None                      # None for ScheduleSpec jobs
+    msg: msgspec.Struct | None                # decoded typed struct; None for ScheduleSpec jobs
     created_at: float                         # time.monotonic()
     reply_fn: Callable[[Any], None] | None    # only set for ServiceSpec jobs
 ```
@@ -134,8 +141,8 @@ class AciesContext:
     app: AppState   # one instance per AciesApp — shared across all handlers
     task: TaskState # one instance per TaskSpec — shared across jobs of this handler
 
-    def publish(self, topic: str, payload: Any, metadata: dict | None = None) -> None: ...
-    def query(self, topic: str, payload: Any = None, timeout: float = 1.0) -> AciesMsg | None: ...
+    def publish(self, topic: str, msg: msgspec.Struct) -> None: ...
+    def query(self, topic: str, msg: msgspec.Struct, timeout: float = 1.0) -> msgspec.Struct | None: ...
 ```
 
 > **Future extension**: `Depends(fn)` markers in the handler signature are a
@@ -153,17 +160,27 @@ callback.
 
 ```python
 class Transport(Protocol):
-    def start(self, on_message: Callable[[str, AciesMsg], None]) -> None: ...
+    def start(self, on_message: Callable[[str, bytes], None]) -> None: ...
     def stop(self) -> None: ...
     def can_handle(self, topic: str) -> bool: ...
-    def publish(self, topic: str, msg: AciesMsg) -> None: ...
+    def publish(self, topic: str, raw: bytes) -> None: ...
     def subscribe(self, topic: str) -> None: ...
-    def query(self, topic: str, msg: AciesMsg, timeout: float) -> AciesMsg | None: ...
+    def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None: ...
     def advertise(self, topic: str, reply_fn_factory: Callable) -> None: ...
 ```
 
+The transport layer deals exclusively in raw bytes — it has no knowledge of
+message types. Encoding (`msgspec.msgpack.encode`) and decoding
+(`msgspec.msgpack.decode`) happen in the router:
+
+- **Inbound**: transport calls `on_message(topic, raw_bytes)`; router decodes
+  using `spec.msg_type`.
+- **Outbound** (`publish`/`query`): router encodes the `msgspec.Struct` to
+  bytes before calling `transport.publish` / `transport.query`.
+
 `start()` receives an `on_message` callback — the transport calls it from its
-receiver thread whenever a message arrives, passing `(topic, msg)` to the router.
+receiver thread whenever a message arrives, passing `(topic, raw_bytes)` to the
+router.
 
 **Wildcard matching rules** (zenoh-style, required for `LocalTransport` in tests):
 
@@ -206,9 +223,17 @@ class Router:
     def advertise(self, topic: str, spec: TaskSpec) -> None: ...
 
     # Outbound (called directly from worker threads via AciesContext)
-    def publish(self, topic: str, msg: AciesMsg) -> None: ...
-    def query(self, topic: str, msg: AciesMsg, timeout: float) -> AciesMsg | None: ...
+    def publish(self, topic: str, msg: msgspec.Struct) -> None: ...
+    def query(self, topic: str, msg: msgspec.Struct, timeout: float) -> msgspec.Struct | None: ...
 ```
+
+Inbound flow in `_route_loop`:
+1. Receive `(topic, raw_bytes)` from the inbound queue.
+2. If topic starts with `acies/ctrl/`: handle control message internally (never
+   creates a Job).
+3. Otherwise: look up matching `SubscriberSpec`s / `ServiceSpec`; decode
+   `msgspec.msgpack.decode(raw, type=spec.msg_type)` (or untyped fallback);
+   create `Job(spec, decoded_msg)` and call `executor.enqueue(job)`.
 
 ### `Executor` (executor.py)
 
@@ -315,11 +340,11 @@ def run(self):
 All three task kinds flow through the executor:
 
 ```
-Transport thread → router inbound queue → router thread → executor.enqueue(Job(spec, msg))         [SUBSCRIBE]
-Transport thread → router inbound queue → router thread → executor.enqueue(Job(spec, msg, reply))  [SERVICE]
-Timer thread     →                                        executor.enqueue(Job(spec, msg=None))    [SCHEDULE]
+Transport thread → router inbound queue → router thread → decode → executor.enqueue(Job(spec, msg))         [SUBSCRIBE]
+Transport thread → router inbound queue → router thread → decode → executor.enqueue(Job(spec, msg, reply))  [SERVICE]
+Timer thread     →                                                  executor.enqueue(Job(spec, msg=None))    [SCHEDULE]
 
-Source threads (started in on_startup) call ctx.publish() → router.publish() → transport directly.
+Source threads (started in on_startup) call ctx.publish(msg) → router encodes → transport.publish(raw).
 ```
 
 ---
@@ -328,9 +353,20 @@ Source threads (started in on_startup) call ctx.publish() → router.publish() �
 
 ```python
 import threading
-from acies.corev2 import AciesApp, AciesContext, AciesMsg
+import msgspec
+from acies.corev2 import AciesApp, AciesContext
 
 app = AciesApp('my-node')
+
+# User-defined message types (msgspec.Struct, frozen=True)
+class TempReading(msgspec.Struct, frozen=True):
+    source: str
+    timestamp: int
+    value: float
+
+class StatusReply(msgspec.Struct, frozen=True):
+    source: str
+    ok: bool
 
 @app.on_startup
 def setup(ctx: AciesContext):
@@ -338,29 +374,29 @@ def setup(ctx: AciesContext):
     def mic_thread():
         while True:
             raw = audio_driver.read()
-            ctx.publish('sensors/audio', {'data': raw})
+            ctx.publish('sensors/audio', AciesTensor(source='my-node', timestamp=now_ns(), payload=raw))
     threading.Thread(target=mic_thread, daemon=True).start()
 
 # Timer-driven
 @app.schedule(interval=1.0)
 def poll_sensor(ctx: AciesContext):
-    ctx.publish('sensors/temperature', {'value': read_hw_sensor()})
+    ctx.publish('sensors/temperature', TempReading(source='my-node', timestamp=now_ns(), value=read_hw_sensor()))
 
-# Message-driven sink
+# Message-driven sink — msg type annotation drives decoding
 @app.subscribe('sensors/temperature')
-def log_temp(ctx: AciesContext, msg: AciesMsg):
-    print(msg.payload)
+def log_temp(ctx: AciesContext, msg: TempReading):
+    print(msg.value)
 
 # Message-driven transform
 @app.subscribe('sensors/temperature')
-def process(ctx: AciesContext, msg: AciesMsg):
-    ctx.publish('processed/temperature', {'value': msg.payload['value'] * 1.8 + 32})
+def process(ctx: AciesContext, msg: TempReading):
+    ctx.publish('processed/temperature', TempReading(source='my-node', timestamp=msg.timestamp, value=msg.value * 1.8 + 32))
 
 # Stateful handler: task-local accumulation across calls
 @app.subscribe('sensors/temperature')
-def accumulate(ctx: AciesContext, msg: AciesMsg):
+def accumulate(ctx: AciesContext, msg: TempReading):
     with ctx.task.lock:
-        ctx.task.data.setdefault('readings', []).append(msg.payload['value'])
+        ctx.task.data.setdefault('readings', []).append(msg.value)
 
 # Cross-handler: read a value written by another handler
 @app.schedule(interval=5.0)
@@ -368,12 +404,12 @@ def report(ctx: AciesContext):
     with ctx.app.lock:
         last = ctx.app.data.get('last_temp')
     if last is not None:
-        ctx.publish('reports/temp', {'last': last})
+        ctx.publish('reports/temp', TempReading(source='my-node', timestamp=now_ns(), value=last))
 
 # RPC: return value is sent as reply
 @app.service('rpc/status')
-def status(ctx: AciesContext, msg: AciesMsg) -> dict:
-    return {'node': app.name, 'status': 'ok'}
+def status(ctx: AciesContext, msg: msgspec.Struct) -> StatusReply:
+    return StatusReply(source=app.name, ok=True)
 
 @app.on_shutdown
 def teardown(ctx: AciesContext):
@@ -401,7 +437,7 @@ app.run()
 
 | Case                                                           | How to verify                                                       |
 | -------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `publish` triggers `on_message` with correct topic and payload | Use `threading.Event` to synchronize                                |
+| `publish` triggers `on_message` with correct topic and raw bytes | Use `threading.Event` to synchronize                               |
 | Unsubscribed topic is not delivered                            | Publish to two topics; subscribe to one; assert only one delivery   |
 | Wildcard `sensors/+/geo` matches `sensors/unit1/geo`           | Subscribe with pattern; publish to matching topic                   |
 | Wildcard `sensors/+/geo` does not match `sensors/geo`          | Publish; assert no delivery within short timeout                    |
@@ -488,7 +524,7 @@ public API surface change.
 ```bash
 uv run python -c "
 from acies.corev2 import (
-    AciesApp, AciesContext, AciesMsg, Job,
+    AciesApp, AciesContext, Job,
     SubscriberSpec, ScheduleSpec, ServiceSpec,
     AppState, TaskState,
 )
@@ -552,13 +588,13 @@ unchanged); `tests/corev2/test_transport.py` (create)
 
 Behavior:
 
-- `start(on_message)`: store callback; start receiver thread draining internal queue; call `on_message(topic, msg)` per item
+- `start(on_message)`: store callback; start receiver thread draining internal queue; call `on_message(topic, raw_bytes)` per item
 - `stop()`: put sentinel; join thread
 - `subscribe(topic)`: add pattern to active subscriptions set
 - `can_handle(topic)`: always `True`
-- `publish(topic, msg)`: if topic matches any subscription pattern, put into queue
+- `publish(topic, raw)`: if topic matches any subscription pattern, put `(topic, raw)` into queue
 - `advertise(topic, reply_fn_factory)`: register queryable
-- `query(topic, msg, timeout)`: put query into queue; block on `threading.Event`; return reply or `None`
+- `query(topic, raw, timeout)`: put query into queue; block on `threading.Event`; return reply bytes or `None`
 
 Wildcard matching follows the rules in §3 Transport above.
 
@@ -582,13 +618,16 @@ real `Executor`.
 Behavior:
 
 - `add(transport)`: append to `self._transports`
-- `start(executor)`: start each transport; start router thread running `_route_loop(executor)`
-- `_on_message(topic, msg)`: put `(topic, msg)` into `self._inbound`
-- `_route_loop(executor)`: for each `(topic, msg)`: create `Job(spec, msg)` for matching `SubscriberSpec`s; create `Job(spec, msg, reply_fn=...)` for matching `ServiceSpec`
+- `start(executor)`: start each transport with `_on_message` callback; start router thread running `_route_loop(executor)`
+- `_on_message(topic, raw)`: put `(topic, raw_bytes)` into `self._inbound`
+- `_route_loop(executor)`: for each `(topic, raw_bytes)`:
+  - If `topic` starts with `acies/ctrl/`: handle control message internally (never creates a Job)
+  - Otherwise: decode `msgspec.msgpack.decode(raw, type=spec.msg_type)` for each matching spec; create `Job(spec, decoded_msg)` or `Job(spec, decoded_msg, reply_fn=...)` for SERVICE; call `executor.enqueue(job)`
 - `subscribe(topic, spec)`: add to `_subscriptions`; call `transport.subscribe(topic)` on matching transports
 - `advertise(topic, spec)`: add to `_services`; call `transport.advertise(topic, reply_fn_factory)` on matching transport
 - `stop()`: set stop event; put sentinel; join thread; stop each transport
-- `publish`/`query`: delegate to `_transport_for(topic)`; raise `RuntimeError` if no match
+- `publish(topic, msg)`: encode `msgspec.msgpack.encode(msg)`; delegate bytes to `_transport_for(topic)`; raise `RuntimeError` if no match
+- `query(topic, msg, timeout)`: encode; delegate to transport; decode reply bytes if not `None`
 
 **Verification**:
 

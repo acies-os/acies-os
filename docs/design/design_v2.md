@@ -30,12 +30,23 @@ invalid states unrepresentable — a `ScheduleSpec` cannot have topics; a
 
 ### SUBSCRIBE — message-driven
 
-Triggered by an incoming message on one or more topics.
+Triggered by an incoming message on one or more topics. The `msg` parameter is
+annotated with a `msgspec.Struct` type; the router uses it to decode the wire
+bytes. Users define their own types or use built-in types like `AciesTensor`.
 
 ```python
+import msgspec
+
+class SensorReading(msgspec.Struct, frozen=True):
+    source: str
+    timestamp: int
+    value: float
+
 @app.subscribe('sensors/temp', 'sensors/humidity')
-def handle(ctx: AciesContext, msg: AciesMsg):
-    ctx.publish('processed/temp', {'value': msg.payload['value'] * 1.8 + 32})
+def handle(ctx: AciesContext, msg: SensorReading):
+    ctx.publish('processed/temp', SensorReading(
+        source='my-node', timestamp=msg.timestamp, value=msg.value * 1.8 + 32
+    ))
 ```
 
 ### SCHEDULE — timer-driven
@@ -45,7 +56,9 @@ Triggered at a fixed interval. No message is delivered.
 ```python
 @app.schedule(interval=1.0)
 def poll(ctx: AciesContext):
-    ctx.publish('sensors/temp', {'value': read_hw_sensor()})
+    ctx.publish('sensors/temp', SensorReading(
+        source='my-node', timestamp=now_ns(), value=read_hw_sensor()
+    ))
 ```
 
 ### SERVICE — RPC / queryable
@@ -54,9 +67,13 @@ Triggered by an incoming query. The handler's return value is sent as the
 reply. Implemented using zenoh's query/queryable mechanism.
 
 ```python
+class StatusReply(msgspec.Struct, frozen=True):
+    source: str
+    ok: bool
+
 @app.service('rpc/status')
-def status(ctx: AciesContext, msg: AciesMsg) -> dict:
-    return {'node': app.name, 'ok': True}
+def status(ctx: AciesContext, msg: msgspec.Struct) -> StatusReply:
+    return StatusReply(source=app.name, ok=True)
 ```
 
 ## Source Nodes
@@ -81,7 +98,8 @@ the thread.
 ## Handler Calling Convention
 
 `ctx` is constructed once at app startup and passed to every handler. `msg` is
-constructed by the router when it creates a `Job` for an incoming message.
+decoded and constructed by the router when it creates a `Job` for an incoming
+message, using the type annotation on the handler's `msg` parameter.
 
 Dispatch rule:
 
@@ -90,6 +108,11 @@ Dispatch rule:
 
 Determined at runtime by whether `job.msg is None`. No per-call inspection or
 injection machinery is needed.
+
+The `msg` type annotation is extracted at decoration time and stored as
+`spec.msg_type`. The router calls `msgspec.msgpack.decode(raw, type=spec.msg_type)`
+on each inbound message. If no annotation is provided, falls back to
+`msgspec.msgpack.decode(raw)` (plain dict/list).
 
 > **Future extension**: `Depends(fn)` markers in the handler signature (akin
 > to FastAPI) are a planned extension for injecting app-level resources
@@ -105,8 +128,8 @@ class AciesContext:
     app: AppState   # global store — shared across all handlers in this app
     task: TaskState # task store  — shared across all jobs of this handler only
 
-    def publish(self, topic: str, payload: Any, metadata: dict | None = None) -> None: ...
-    def query(self, topic: str, payload: Any = None, timeout: float = 1.0) -> AciesMsg | None: ...
+    def publish(self, topic: str, msg: msgspec.Struct) -> None: ...
+    def query(self, topic: str, msg: msgspec.Struct, timeout: float = 1.0) -> msgspec.Struct | None: ...
 ```
 
 Handlers never touch the transport directly.
@@ -133,10 +156,10 @@ Usage:
 
 ```python
 @app.subscribe('sensors/temp')
-def accumulate(ctx: AciesContext, msg: AciesMsg):
+def accumulate(ctx: AciesContext, msg: SensorReading):
     # task-local: only this handler's jobs touch this state
     with ctx.task.lock:
-        ctx.task.data.setdefault('readings', []).append(msg.payload['value'])
+        ctx.task.data.setdefault('readings', []).append(msg.value)
 
 @app.schedule(interval=5.0)
 def report(ctx: AciesContext):
@@ -165,10 +188,13 @@ def teardown(ctx: AciesContext): ...
 
 `AciesApp` owns:
 
-- **Router** — inbound queue + router thread. Transports push `(topic, msg)`
-  into the queue. The router thread matches topics to `TaskSpec`s, creates
-  `Job`s, and calls `executor.enqueue()`. Outbound (`publish`, `query`) is
-  synchronous, called directly from worker threads via `ctx`.
+- **Router** — inbound queue + router thread. Transports push `(topic, bytes)`
+  into the queue. The router thread checks for control topics (`acies/ctrl/*`,
+  handled internally), then matches remaining topics to `TaskSpec`s, decodes
+  the bytes using `spec.msg_type`, creates `Job`s, and calls
+  `executor.enqueue()`. Outbound (`publish`, `query`) is synchronous, called
+  directly from worker threads via `ctx`; the router encodes the struct to
+  bytes before handing off to the transport.
 
 - **Executor** — internal FIFO queue + dispatcher thread + worker thread pool.
   Dequeues `Job`s and submits them to the pool. After each handler returns,

@@ -15,12 +15,13 @@ Thread model (implemented in Phase 2):
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from typing import Any, Callable, get_type_hints
 
-from .context import AciesContext
+import msgspec
+
 from .executor import Executor
 from .router import Router
-from .task import ScheduleSpec, ServiceSpec, SubscriberSpec
+from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 
 
 class AciesApp:
@@ -58,7 +59,9 @@ class AciesApp:
         """Message-driven: handler is called for each message on any of the topics."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            self._specs.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics))
+            hints = get_type_hints(fn)
+            msg_type = hints.get('msg')
+            self._specs.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
             return fn
 
         return decorator
@@ -76,10 +79,40 @@ class AciesApp:
         """RPC/queryable: handler is called on queries to topic; return value is the reply."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            self._specs.append(ServiceSpec(name=fn.__name__, fn=fn, topics=(topic,)))
+            hints = get_type_hints(fn)
+            msg_type = hints.get('msg')
+            self._specs.append(ServiceSpec(name=fn.__name__, fn=fn, topics=(topic,), msg_type=msg_type))
             return fn
 
         return decorator
+
+    # ------------------------------------------------------------------
+    # Dispatch
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _decode(raw: Any, msg_type: type | None) -> Any:
+        """Decode a raw message into the expected type.
+
+        - LocalTransport: raw is already a typed object; returned as-is.
+        - ZenohTransport: raw is bytes; decoded with MessagePack.
+        - JSON fallback: raw is a dict; converted with msgspec.convert.
+        """
+        if msg_type is None or isinstance(raw, msg_type):
+            return raw
+        if isinstance(raw, bytes):
+            return msgspec.msgpack.decode(raw, type=msg_type)
+        return msgspec.convert(raw, msg_type)
+
+    def dispatch(self, job: Job) -> Any:
+        """Execute a job. Called by the Executor on a worker thread."""
+        # TODO: Phase 2 — build task_ctxs map and pass ctx to handlers
+        match job.spec:
+            case ScheduleSpec():
+                return job.spec.fn()
+            case SubscriberSpec() | ServiceSpec() as spec:
+                msg = self._decode(job.msg, spec.msg_type)
+                return spec.fn(msg)
 
     # ------------------------------------------------------------------
     # Run / stop

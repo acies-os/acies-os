@@ -18,6 +18,7 @@ class SubscriberSpec:
     name: str
     fn: Callable
     topics: tuple[str, ...]
+    msg_type: type | None = None  # extracted from fn annotation at decoration time
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class ServiceSpec:
     name: str
     fn: Callable
     topics: tuple[str, ...]
+    msg_type: type | None = None  # extracted from fn annotation at decoration time
 
 
 TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
@@ -47,6 +49,6 @@ class Job:
     """
 
     spec: TaskSpec
-    msg: Any | None  # AciesMsg | None; None for ScheduleSpec jobs
+    msg: Any | None  # decoded msgspec.Struct; None for ScheduleSpec jobs
     created_at: float = field(default_factory=time.monotonic)
     reply_fn: Callable[[Any], None] | None = None  # only set for ServiceSpec jobs

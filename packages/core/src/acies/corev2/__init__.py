@@ -1,16 +1,21 @@
 from .app import AciesApp
 from .context import AciesContext, AppState, TaskState
-from .msg import AciesMsg
+from .msg import AciesDelete, AciesGet, AciesHeartbeat, AciesRoute, AciesSet, AciesTensor
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 
 __all__ = [
     'AciesApp',
     'AciesContext',
-    'AciesMsg',
+    'AciesDelete',
+    'AciesGet',
+    'AciesHeartbeat',
+    'AciesRoute',
+    'AciesSet',
+    'AciesTensor',
+    'AppState',
     'Job',
     'ScheduleSpec',
     'ServiceSpec',
     'SubscriberSpec',
-    'AppState',
     'TaskState',
 ]
