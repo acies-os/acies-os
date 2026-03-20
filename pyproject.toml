@@ -51,6 +51,7 @@ reportExplicitAny = false
 reportImplicitOverride = false
 reportImplicitStringConcatenation = false
 reportMissingTypeArgument = false
+reportUnknownLambdaType = false
 
 [dependency-groups]
 dev = [

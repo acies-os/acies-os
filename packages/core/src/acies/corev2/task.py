@@ -50,5 +50,6 @@ class Job:
 
     spec: TaskSpec
     msg: Any | None  # decoded msgspec.Struct; None for ScheduleSpec jobs
+    deadline: float = 0.0  # seconds (monotonic); 0.0 = no deadline, FIFO ordering
     created_at: float = field(default_factory=time.monotonic)
     reply_fn: Callable[[Any], None] | None = None  # only set for ServiceSpec jobs

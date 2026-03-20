@@ -24,21 +24,26 @@ from typing import TYPE_CHECKING, Any, Callable
 if TYPE_CHECKING:
     from .task import Job
 
+_SENTINEL = object()
+# Sentinel tuple (deadline, created_at, sentinel) sorts last
+_SENTINEL_ENTRY = (float('inf'), float('inf'), _SENTINEL)
+
 
 class Executor:
     def __init__(self) -> None:
-        # FIFO queue — replace with PriorityQueue for priority scheduling
-        self._queue: queue.Queue['Job'] = queue.Queue()
+        # PriorityQueue ordered by (deadline, created_at).
+        # deadline=0.0 (default) degrades to FIFO via created_at.
+        # Set deadline to a future monotonic timestamp to enable EDF scheduling.
+        self._queue: queue.PriorityQueue[tuple[float, float, Job | object]] = queue.PriorityQueue()
         self._pool: ThreadPoolExecutor | None = None
         self._dispatcher: threading.Thread | None = None
-        self._stop_event = threading.Event()
-        self._dispatch: Callable[['Job'], Any] | None = None
+        self._dispatch: Callable[[Job], Any] | None = None
 
-    def enqueue(self, job: 'Job') -> None:
+    def enqueue(self, job: Job) -> None:
         """Called by the router thread and timer thread to submit a job."""
-        self._queue.put(job)
+        self._queue.put((job.deadline, job.created_at, job))
 
-    def start(self, dispatch: Callable[['Job'], Any], n_workers: int = 4) -> None:
+    def start(self, dispatch: Callable[[Job], Any], n_workers: int = 4) -> None:
         """Start the dispatcher thread and worker pool.
 
         dispatch — callable provided by AciesApp that runs a job:
@@ -46,17 +51,52 @@ class Executor:
         Keeping dispatch as a plain callable means Executor has no knowledge
         of AciesContext, breaking the context → router → executor → context cycle.
         """
-        # TODO: Phase 2 — store dispatch, start pool and dispatcher thread
-        ...
+        self._dispatch = dispatch
+        self._pool = ThreadPoolExecutor(max_workers=n_workers)
+        self._dispatcher = threading.Thread(target=self._dispatch_loop, name='executor-dispatcher', daemon=True)
+        self._dispatcher.start()
 
     def stop(self) -> None:
-        # TODO: Phase 2 — signal dispatcher, drain queue, shut down pool
-        ...
+        """Drain the queue, then shut down. All enqueued jobs will complete."""
+        self._queue.put(_SENTINEL_ENTRY)
+        if self._dispatcher:
+            self._dispatcher.join()
+        if self._pool:
+            self._pool.shutdown(wait=True)
+
+    def abort(self) -> None:
+        """Stop immediately, discarding queued-but-not-yet-dispatched jobs.
+
+        Jobs already running in worker threads will complete — Python threads
+        cannot be forcibly killed. cancel_futures=True cancels pool futures
+        that haven't started yet (Python 3.9+).
+
+        There is a small unavoidable race: if the dispatcher has already
+        dequeued a job but not yet submitted it to the pool when abort() drains
+        the queue, that job will still be submitted.
+        """
+        while True:
+            try:
+                _ = self._queue.get_nowait()
+            except queue.Empty:
+                break
+        self._queue.put(_SENTINEL_ENTRY)
+        if self._dispatcher:
+            self._dispatcher.join()
+        if self._pool:
+            self._pool.shutdown(cancel_futures=True, wait=False)
 
     def _dispatch_loop(self) -> None:
-        # TODO: Phase 2 — drain self._queue, submit each job to self._pool
-        ...
+        assert self._pool is not None, '_dispatch_loop started before pool was initialized'
+        while True:
+            _, _, item = self._queue.get()
+            if item is _SENTINEL:
+                break
+            assert isinstance(item, Job), f'Expected Job, got {type(item)}'
+            _ = self._pool.submit(self._run_job, item)
 
-    def _run_job(self, job: 'Job') -> None:
-        # TODO: Phase 2 — call self._dispatch(job), then job.reply_fn(result)
-        ...
+    def _run_job(self, job: Job) -> None:
+        assert self._dispatch is not None, '_run_job called before dispatch was initialized'
+        result = self._dispatch(job)
+        if job.reply_fn is not None:
+            job.reply_fn(result)
