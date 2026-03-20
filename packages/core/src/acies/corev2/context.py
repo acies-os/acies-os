@@ -11,10 +11,9 @@ This avoids any circular imports between context, router, and executor.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Callable
 
-if TYPE_CHECKING:
-    from .msg import AciesMsg
+import msgspec
 
 
 class AppState:
@@ -46,13 +45,14 @@ class AciesContext:
         self.app: AppState = app
         self.task: TaskState = task
 
-    def publish(self, topic: str, payload: Any, metadata: dict | None = None) -> None:
-        """Publish a message to a topic. Synchronous — returns after the
-        transport has accepted the message."""
-        # TODO: Phase 2 — build AciesMsg, call self._publish_fn
+    def publish(self, topic: str, msg: msgspec.Struct) -> None:
+        """Publish a typed msgspec.Struct to a topic. Synchronous — returns
+        after the router has accepted the message for encoding and dispatch."""
+        # TODO: Phase 2 — call self._publish_fn(topic, msg)
         ...
 
-    def query(self, topic: str, payload: Any = None, timeout: float = 1.0) -> 'AciesMsg | None':
-        """Synchronous RPC. Blocks until a reply arrives or timeout expires."""
-        # TODO: Phase 2 — build AciesMsg, call self._query_fn
+    def query(self, topic: str, msg: msgspec.Struct, timeout: float = 1.0) -> msgspec.Struct | None:
+        """Synchronous RPC. Blocks until a reply arrives or timeout expires.
+        Returns the decoded reply struct, or None on timeout."""
+        # TODO: Phase 2 — call self._query_fn(topic, msg, timeout)
         ...

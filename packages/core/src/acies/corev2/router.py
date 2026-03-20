@@ -18,18 +18,19 @@ import queue
 import threading
 from typing import TYPE_CHECKING
 
+import msgspec
+
 from .task import TaskSpec
 from .transport import Transport
 
 if TYPE_CHECKING:
     from .executor import Executor
-    from .msg import AciesMsg
 
 
 class Router:
     def __init__(self) -> None:
         self._transports: list[Transport] = []
-        self._inbound: queue.Queue[tuple[str, 'AciesMsg', object]] = queue.Queue()
+        self._inbound: queue.Queue[tuple[str, bytes]] = queue.Queue()
         self._subscriptions: dict[str, list[TaskSpec]] = {}
         self._services: dict[str, TaskSpec] = {}
         self._thread: threading.Thread | None = None
@@ -43,7 +44,7 @@ class Router:
 
     def start(self, executor: 'Executor') -> None:
         """Start all transports and the router thread."""
-        # TODO: Phase 2 — start each transport with on_message callback,
+        # TODO: Phase 2 — start each transport with _on_message callback,
         # start self._thread running _route_loop(executor)
         ...
 
@@ -62,15 +63,24 @@ class Router:
         self._services[topic] = spec
         # TODO: Phase 2 — call transport.advertise(topic, reply_fn_factory)
 
-    def publish(self, topic: str, msg: 'AciesMsg') -> None:
-        """Send a message. Called synchronously from worker threads."""
+    def publish(self, topic: str, msg: msgspec.Struct) -> None:
+        """Encode msg and send. Called synchronously from worker threads via AciesContext."""
         transport = self._transport_for(topic)
-        transport.publish(topic, msg)
+        transport.publish(topic, msgspec.msgpack.encode(msg))
 
-    def query(self, topic: str, msg: 'AciesMsg', timeout: float) -> 'AciesMsg | None':
-        """Synchronous RPC. Called from worker threads via AciesContext."""
+    def query(self, topic: str, msg: msgspec.Struct, timeout: float) -> msgspec.Struct | None:
+        """Synchronous RPC. Encodes request, sends, decodes reply.
+        Called from worker threads via AciesContext."""
         transport = self._transport_for(topic)
-        return transport.query(topic, msg, timeout)
+        raw = transport.query(topic, msgspec.msgpack.encode(msg), timeout)
+        if raw is None:
+            return None
+        # TODO: Phase 2 — decode with the reply type once reply typing is defined
+        return msgspec.msgpack.decode(raw)
+
+    def _on_message(self, topic: str, raw: bytes) -> None:
+        """Transport callback — push raw bytes into the inbound queue."""
+        self._inbound.put((topic, raw))
 
     def _transport_for(self, topic: str) -> Transport:
         for t in self._transports:
@@ -79,6 +89,8 @@ class Router:
         raise RuntimeError(f'No transport can handle topic: {topic!r}')
 
     def _route_loop(self, executor: 'Executor') -> None:
-        # TODO: Phase 2 — drain self._inbound, match topic → specs,
-        # create Job(spec, msg) or Job(spec, msg, reply_fn), call executor.enqueue()
+        # TODO: Phase 2 — drain self._inbound; skip acies/ctrl/* (handle internally);
+        # decode msgspec.msgpack.decode(raw, type=spec.msg_type) for each matching spec;
+        # create Job(spec, decoded_msg) or Job(spec, decoded_msg, reply_fn);
+        # call executor.enqueue(job)
         ...
