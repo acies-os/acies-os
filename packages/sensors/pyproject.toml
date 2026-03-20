@@ -1,0 +1,14 @@
+[project]
+name = "sensors"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10.13"
+dependencies = [
+    "acies-core",
+    "rawshake",
+]
+
+[tool.uv.sources]
+acies-core = { workspace = true }
+rawshake = { git = "https://github.com/jinyangustc/rawshake.git" }
