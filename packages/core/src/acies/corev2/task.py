@@ -1,52 +1,52 @@
-"""TaskKind, TaskSpec, Job — core data structures.
+"""SubscriberSpec, ScheduleSpec, ServiceSpec, Job — core data structures.
 
-TaskKind describes the trigger mechanism (not topology). Whether a handler
-is a sink or transform depends on whether it calls ctx.publish(), not on
-the decorator used.
+Three distinct frozen dataclasses, one per trigger kind. Their union is the
+TaskSpec type alias. The sum type pattern makes invalid states unrepresentable:
+a ScheduleSpec cannot have topics; a SubscriberSpec cannot have an interval.
+No TaskKind enum is needed — the type itself is the discriminant.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Callable
 
 
-class TaskKind(Enum):
-    # triggered by an incoming message on a topic
-    SUBSCRIBE = 'subscribe'
-    # triggered by a timer
-    SCHEDULE = 'schedule'
-    # triggered by an external event (sensor thread)
-    PRODUCE = 'produce'
-    # triggered by an RPC query (zenoh queryable)
-    SERVICE = 'service'
+@dataclass(frozen=True)
+class SubscriberSpec:
+    name: str
+    fn: Callable
+    topics: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class TaskSpec:
-    """Immutable description of a task, registered at decoration time."""
-
+class ScheduleSpec:
     name: str
-    kind: TaskKind
-    fn: Callable[..., None]
-    # non-empty for SUBSCRIBE and SERVICE
-    topics: tuple[str, ...] = ()
-    # set for SCHEDULE
-    interval: float | None = None
+    fn: Callable
+    interval: float
+
+
+@dataclass(frozen=True)
+class ServiceSpec:
+    name: str
+    fn: Callable
+    topics: tuple[str, ...]
+
+
+TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
 
 
 @dataclass
 class Job:
     """One unit of work, created at runtime from a TaskSpec.
 
-    All four task kinds flow through the executor. SERVICE jobs carry a
+    All three task kinds flow through the executor. ServiceSpec jobs carry a
     reply_fn so the executor can send the reply after the handler returns,
     without the handler needing to know about the underlying query mechanism.
     """
 
     spec: TaskSpec
-    msg: Any | None  # AciesMsg | None; None for SCHEDULE and PRODUCE
+    msg: Any | None  # AciesMsg | None; None for ScheduleSpec jobs
     created_at: float = field(default_factory=time.monotonic)
-    reply_fn: Callable[[Any], None] | None = None  # only set for SERVICE jobs
+    reply_fn: Callable[[Any], None] | None = None  # only set for ServiceSpec jobs

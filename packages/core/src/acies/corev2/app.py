@@ -20,21 +20,15 @@ from typing import Callable
 from .context import AciesContext
 from .executor import Executor
 from .router import Router
-from .task import TaskKind, TaskSpec
+from .task import ScheduleSpec, ServiceSpec, SubscriberSpec
 
 
 class AciesApp:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, router: Router | None = None) -> None:
         self._name: str = name
-        self._router: Router = Router()
+        self._router: Router = router if router is not None else Router()
         self._executor: Executor = Executor()
-        # AciesContext receives router capabilities as plain callables —
-        # no direct import of Router in context.py, breaking the import cycle.
-        self._ctx: AciesContext = AciesContext(
-            publish_fn=self._router.publish,
-            query_fn=self._router.query,
-        )
-        self._specs: list[TaskSpec] = []
+        self._specs: list[SubscriberSpec | ScheduleSpec | ServiceSpec] = []
         self._startup_hooks: list[Callable[..., None]] = []
         self._shutdown_hooks: list[Callable[..., None]] = []
         self._stop_event: threading.Event = threading.Event()
@@ -57,14 +51,14 @@ class AciesApp:
         return fn
 
     # ------------------------------------------------------------------
-    # Task decorators — register TaskSpecs by trigger mechanism
+    # Task decorators
     # ------------------------------------------------------------------
 
     def subscribe(self, *topics: str) -> Callable[..., Callable[..., None]]:
         """Message-driven: handler is called for each message on any of the topics."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            self._specs.append(TaskSpec(name=fn.__name__, kind=TaskKind.SUBSCRIBE, fn=fn, topics=topics))
+            self._specs.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics))
             return fn
 
         return decorator
@@ -73,23 +67,16 @@ class AciesApp:
         """Timer-driven: handler is called every `interval` seconds."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            self._specs.append(TaskSpec(name=fn.__name__, kind=TaskKind.SCHEDULE, fn=fn, interval=interval))
+            self._specs.append(ScheduleSpec(name=fn.__name__, fn=fn, interval=interval))
             return fn
 
         return decorator
-
-    def produce(self, fn: Callable[..., None]) -> Callable[..., Callable[..., None]]:
-        """External event-driven: wraps fn so it receives AciesContext.
-        The decorated function is called by user code or an external SDK callback."""
-        # FIXME: this is not quit right. Think a thread getting data from microphone driver, and send to a topic.
-        self._specs.append(TaskSpec(name=fn.__name__, kind=TaskKind.PRODUCE, fn=fn))
-        return fn
 
     def service(self, topic: str) -> Callable[..., Callable[..., None]]:
         """RPC/queryable: handler is called on queries to topic; return value is the reply."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            self._specs.append(TaskSpec(name=fn.__name__, kind=TaskKind.SERVICE, fn=fn, topics=(topic,)))
+            self._specs.append(ServiceSpec(name=fn.__name__, fn=fn, topics=(topic,)))
             return fn
 
         return decorator
@@ -101,14 +88,15 @@ class AciesApp:
     def run(self) -> None:
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
         # TODO: Phase 2 —
-        #   1. executor.start(dispatch=lambda job: job.spec.fn(self._ctx, job.msg))
-        #   2. router.start(executor)
-        #   3. call startup hooks
-        #   4. router.subscribe / router.advertise for each spec
-        #   5. start timer thread (_timer_loop)
-        #   6. self._stop_event.wait()
-        #   7. router.stop(), executor.stop()
-        #   8. call shutdown hooks
+        #   1. Build one AciesContext per spec (reused across all jobs of that spec)
+        #   2. executor.start(dispatch)
+        #   3. router.start(executor)
+        #   4. call startup hooks
+        #   5. router.subscribe / router.advertise for each spec
+        #   6. start timer thread (_timer_loop)
+        #   7. self._stop_event.wait()
+        #   8. router.stop(), executor.stop()
+        #   9. call shutdown hooks
         ...
 
     def stop(self) -> None:
@@ -116,11 +104,8 @@ class AciesApp:
         self._stop_event.set()
 
     def _timer_loop(self) -> None:
-        """Single shared timer thread. Manages all SCHEDULE specs via a
-        priority queue of (next_fire_time, spec). Blocks on executor.enqueue()
-        with a dynamic timeout so it wakes exactly when the next timer is due."""
+        """Single shared timer thread. Manages all ScheduleSpecs via a
+        priority queue of (next_fire_time, spec). Wakes exactly when the
+        next timer is due."""
         # TODO: Phase 2
         ...
-
-    def _specs_of(self, kind: TaskKind) -> list[TaskSpec]:
-        return [s for s in self._specs if s.kind == kind]

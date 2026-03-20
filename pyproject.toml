@@ -16,7 +16,7 @@ requires-python = ">= 3.10"
 
 [tool.uv.workspace]
 members = [
-  "packages/*"
+  "packages/*",
 ]
 
 [build-system]
@@ -41,6 +41,7 @@ format = { quote-style = 'single' }
 include = ["packages/*/src"]
 extraPaths = [
   "packages/core/src",
+  "packages/sensors/src",
   "packages/buffers/src",
   "packages/controller/src",
   "packages/vehicle-classifier/src"
