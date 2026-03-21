@@ -32,7 +32,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from .task import Job, ServiceSpec, SubscriberSpec
-from .transport import SendBytes, Transport, _topic_matches
+from .transport import ReplyFn, Transport, _topic_matches
 
 if TYPE_CHECKING:
     from .executor import Executor
@@ -51,7 +51,7 @@ class Router:
         # Explicit prefix routes, e.g. ('ws://', ws_transport). First match wins.
         self._prefix_routes: list[tuple[str, Transport]] = []
 
-        self._inbound: queue.Queue[tuple[str, bytes, SendBytes | None] | _Sentinel] = queue.Queue()
+        self._inbound: queue.Queue[tuple[str, bytes, ReplyFn | None] | _Sentinel] = queue.Queue()
         self._subscriptions: dict[str, list[SubscriberSpec]] = {}
         self._services: dict[str, ServiceSpec] = {}
         self._thread: threading.Thread | None = None
@@ -117,9 +117,9 @@ class Router:
         """
         return self._transport_for(topic).query(topic, raw, timeout)
 
-    def _on_message(self, topic: str, raw: bytes, send_bytes: SendBytes | None = None) -> None:
+    def _on_message(self, topic: str, raw: bytes, reply_fn: ReplyFn | None = None) -> None:
         """Transport callback — push into the inbound queue."""
-        self._inbound.put((topic, raw, send_bytes))
+        self._inbound.put((topic, raw, reply_fn))
 
     def _transport_for(self, topic: str) -> Transport:
         for prefix, transport in self._prefix_routes:
@@ -146,7 +146,7 @@ class Router:
             if item is _SENTINEL:
                 break
             assert isinstance(item, tuple)
-            topic, raw, send_bytes = item
+            topic, raw, reply_fn = item
 
             if topic.startswith('acies/ctrl/'):
                 # TODO: it should be '**/ctl/**', or do we need this?
@@ -154,11 +154,11 @@ class Router:
                 raise NotImplementedError('Control messages handling not implemented yet')
 
             # TODO: log/warn unmatched messages
-            if send_bytes is not None:
+            if reply_fn is not None:
                 # Incoming query — route to the matching service spec
                 for pattern, spec in self._services.items():
                     if _topic_matches(pattern, topic):
-                        executor.enqueue(Job(spec=spec, raw=raw, send_bytes=send_bytes))
+                        executor.enqueue(Job(spec=spec, raw=raw, reply_fn=reply_fn))
                         break
             else:
                 # Incoming pub — fan out to all matching subscriber specs

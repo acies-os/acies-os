@@ -113,8 +113,8 @@ class AciesApp:
                     else msgspec.msgpack.decode(job.raw)
                 )
                 result = spec.fn(msg)
-                if job.send_bytes is not None:
-                    job.send_bytes(msgspec.msgpack.encode(result))
+                if job.reply_fn is not None:
+                    job.reply_fn(msgspec.msgpack.encode(result))
 
     # ------------------------------------------------------------------
     # Run / stop
