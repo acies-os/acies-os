@@ -25,8 +25,9 @@ from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 
 
 class AciesApp:
-    def __init__(self, name: str, router: Router | None = None) -> None:
+    def __init__(self, name: str, host: str, router: Router | None = None) -> None:
         self._name: str = name
+        self._host: str = host
         self._router: Router = router if router is not None else Router()
         self._executor: Executor = Executor()
         self._specs: list[SubscriberSpec | ScheduleSpec | ServiceSpec] = []
@@ -38,6 +39,10 @@ class AciesApp:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def host(self) -> str:
+        return self._host
 
     # ------------------------------------------------------------------
     # Lifecycle hooks

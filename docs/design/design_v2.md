@@ -42,10 +42,10 @@ class SensorReading(msgspec.Struct, frozen=True):
     timestamp: int
     value: float
 
-@app.subscribe('sensors/temp', 'sensors/humidity')
+@app.subscribe('*/sensor/temp', '*/sensor/humidity')
 def handle(ctx: AciesContext, msg: SensorReading):
-    ctx.publish('processed/temp', SensorReading(
-        source='my-node', timestamp=msg.timestamp, value=msg.value * 1.8 + 32
+    ctx.publish('edge-01/processor/temp', SensorReading(
+        source='edge-01', timestamp=msg.timestamp, value=msg.value * 1.8 + 32
     ))
 ```
 
@@ -56,8 +56,8 @@ Triggered at a fixed interval. No message is delivered.
 ```python
 @app.schedule(interval=1.0)
 def poll(ctx: AciesContext):
-    ctx.publish('sensors/temp', SensorReading(
-        source='my-node', timestamp=now_ns(), value=read_hw_sensor()
+    ctx.publish('edge-01/sensor/temp', SensorReading(
+        source='edge-01', timestamp=now_ns(), value=read_hw_sensor()
     ))
 ```
 
@@ -71,9 +71,86 @@ class StatusReply(msgspec.Struct, frozen=True):
     source: str
     ok: bool
 
-@app.service('rpc/status')
+@app.service('edge-01/controller/rpc/status')
 def status(ctx: AciesContext, msg: msgspec.Struct) -> StatusReply:
-    return StatusReply(source=app.name, ok=True)
+    return StatusReply(source='edge-01', ok=True)
+```
+
+## Topic Namespace
+
+All topics follow a three-part hierarchical convention inspired by
+Named Data Networking (NDN) / content-centric networking: the name IS the
+system. Routing, transport selection, access control, and service discovery
+are all derived from the name structure rather than being separate mechanisms.
+
+```
+<host>/<service>/<name>
+```
+
+| Segment     | Meaning                                   | Example                           |
+| ----------- | ----------------------------------------- | --------------------------------- |
+| `<host>`    | Unique logical device name                | `edge-01`, `truck-7`              |
+| `<service>` | `AciesApp` name                           | `mic`, `classifier`, `controller` |
+| `<name>`    | Output name; may contain `/` sub-segments | `audio/raw`, `temp`, `rpc/status` |
+
+`<host>` is assigned at deployment time — by configuration, a UUID combined
+with a device label, or a fleet management system. The framework assumes it is
+unique within the deployment and stable for the lifetime of the device.
+
+### Transport selection
+
+The router uses a simple default-plus-prefix-override rule — no topology
+inference in application code:
+
+| Topic         | Transport used                                                            |
+| ------------- | ------------------------------------------------------------------------- |
+| `ws://...`    | `WebSocketTransport` (browser/UI)                                         |
+| anything else | default transport (ZenohTransport in production, LocalTransport in tests) |
+
+Locality is handled transparently by the zenoh infrastructure (see
+[Zenoh Network Topology](#zenoh-network-topology) below), not by the
+application or router.
+
+Application code never specifies a transport. Handlers write plain topic
+strings. Moving a service between processes or hosts requires no code changes.
+
+### Convention enforcement
+
+All `ctx.publish()` and `ctx.query()` calls in production code must use
+fully-qualified topics. The framework validates the `<host>/<service>/`
+prefix at publish time and raises if the topic is malformed. The `ws://`
+prefix is the only exception (WebSocket topics are browser-facing and do
+not follow the three-part convention).
+
+### Cross-device subscriptions and wildcards
+
+Zenoh-style wildcards apply to the full topic path:
+
+```python
+# All temperature readings from any device
+@app.subscribe('*/sensor/temp')
+
+# All outputs from service 'mic' on any device
+@app.subscribe('*/mic/**')
+
+# A specific device's classifier output
+@app.subscribe('edge-01/classifier/result')
+```
+
+### Example topics
+
+```python
+app = AciesApp(name='mic', host='edge-01')
+
+# This service's outputs
+ctx.publish('edge-01/mic/audio/raw', AciesTensor(...))
+ctx.publish('edge-01/mic/rms', SensorReading(...))
+
+# Calling a service on the same host (routes via zenoh UDS)
+ctx.query('edge-01/classifier/rpc/infer', payload, timeout=0.5)
+
+# Calling a service on a remote host (routes via zenoh network)
+ctx.query('edge-02/controller/rpc/status', payload, timeout=1.0)
 ```
 
 ## Source Nodes
@@ -88,7 +165,7 @@ def start_mic(ctx: AciesContext):
     def mic_thread():
         while True:
             raw = audio_driver.read()
-            ctx.publish('sensors/audio', {'data': raw})
+            ctx.publish('edge-01/mic/audio/raw', AciesTensor(...))
     threading.Thread(target=mic_thread, daemon=True).start()
 ```
 
@@ -155,7 +232,7 @@ class TaskState:
 Usage:
 
 ```python
-@app.subscribe('sensors/temp')
+@app.subscribe('*/sensor/temp')
 def accumulate(ctx: AciesContext, msg: SensorReading):
     # task-local: only this handler's jobs touch this state
     with ctx.task.lock:
@@ -167,7 +244,7 @@ def report(ctx: AciesContext):
     with ctx.app.lock:
         last = ctx.app.data.get('last_temp')
     if last is not None:
-        ctx.publish('reports/temp', {'last': last})
+        ctx.publish('edge-01/aggregator/reports/temp', SensorReading(...))
 ```
 
 ## Lifecycle Hooks
@@ -204,7 +281,55 @@ def teardown(ctx: AciesContext): ...
   queue of `(next_fire_time, spec)` to enqueue jobs at the right time.
 
 - **Transport layer** — indirection over the messaging backend, defined as a
-  `Protocol` (structural typing, no inheritance required). Three backends:
-  `ZenohTransport` (production pub/sub; same-host IPC via Zenoh UDS/SHM config),
-  `WebSocketTransport` (browser/UI; own server thread, `ws://` topic prefix),
-  `LocalTransport` (in-process queue, for tests).
+  `Protocol` (structural typing, no inheritance required). Two backends in
+  practice: `ZenohTransport` (production; one session per process, connected
+  via unix domain socket to the local zenohd — locality is handled by the
+  zenoh network, not the application) and `LocalTransport` (in-process queue;
+  test-only, replaces ZenohTransport when no zenoh daemon is available).
+  `WebSocketTransport` handles browser/UI connections via the `ws://` prefix.
+  The router selects transport by prefix rule only — no topology inference.
+
+## Zenoh Network Topology
+
+Each device runs a local `zenohd` daemon. All processes on the device connect
+to it via a unix domain socket (`unix-stream://`). The local daemons are
+peered to a server-side `zenohd` that bridges all devices together.
+
+```
+Device A                          Device B
+┌─────────────────────────┐       ┌─────────────────────────┐
+│ [mic]──┐                │       │ [classifier]──┐         │
+│        ├──UDS── zenohd ─┼─net───┼─ zenohd ──────┤         │
+│ [geo]──┘                │       │ [controller]──┘         │
+└─────────────────────────┘       └─────────────────────────┘
+                  └──────── server zenohd ────────┘
+                       (optional, for bridging)
+```
+
+**Locality is handled by the infrastructure:**
+
+- A message from `mic` to `classifier` on the same device travels
+  mic → UDS → local zenohd → UDS → classifier. No network traversal.
+- A message to a subscriber on Device B goes through the server zenohd.
+- The application code and the router are identical in both cases — one
+  `ZenohTransport` session per process, always connecting via UDS to the
+  local zenohd.
+
+**`LocalTransport` is test-only.** It replaces `ZenohTransport` in unit and
+integration tests so no zenoh daemon is required. In production every process
+uses `ZenohTransport`.
+
+### Transport registration
+
+Production:
+
+```python
+router.add_transport(ZenohTransport('unix-stream:///run/zenoh/local.sock'))
+router.add_transport(WebSocketTransport(), prefix='ws://')
+```
+
+Tests:
+
+```python
+router.add_transport(LocalTransport())   # replaces ZenohTransport; no daemon needed
+```

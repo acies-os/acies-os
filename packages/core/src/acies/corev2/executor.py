@@ -19,10 +19,9 @@ from __future__ import annotations
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
-if TYPE_CHECKING:
-    from .task import Job
+from .task import Job
 
 _SENTINEL = object()
 # Sentinel tuple (deadline, created_at, sentinel) sorts last
