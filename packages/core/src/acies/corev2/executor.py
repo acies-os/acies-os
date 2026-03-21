@@ -23,7 +23,12 @@ from typing import Any, Callable
 
 from .task import Job
 
-_SENTINEL = object()
+
+class _Sentinel:
+    pass
+
+
+_SENTINEL = _Sentinel()
 # Sentinel tuple (deadline, created_at, sentinel) sorts last
 _SENTINEL_ENTRY = (float('inf'), float('inf'), _SENTINEL)
 
@@ -33,7 +38,7 @@ class Executor:
         # PriorityQueue ordered by (deadline, created_at).
         # deadline=0.0 (default) degrades to FIFO via created_at.
         # Set deadline to a future monotonic timestamp to enable EDF scheduling.
-        self._queue: queue.PriorityQueue[tuple[float, float, Job | object]] = queue.PriorityQueue()
+        self._queue: queue.PriorityQueue[tuple[float, float, Job | _Sentinel]] = queue.PriorityQueue()
         self._pool: ThreadPoolExecutor | None = None
         self._dispatcher: threading.Thread | None = None
         self._dispatch: Callable[[Job], Any] | None = None
@@ -42,13 +47,14 @@ class Executor:
         """Called by the router thread and timer thread to submit a job."""
         self._queue.put((job.deadline, job.created_at, job))
 
-    def start(self, dispatch: Callable[[Job], Any], n_workers: int = 4) -> None:
+    def start(self, dispatch: Callable[[Job], None], n_workers: int = 4) -> None:
         """Start the dispatcher thread and worker pool.
 
-        dispatch — callable provided by AciesApp that runs a job:
-            lambda job: job.spec.fn(ctx, job.msg)
+        dispatch — callable provided by AciesApp that runs a job. It is
+        responsible for decoding job.raw, calling the handler, and — for
+        ServiceSpec jobs — encoding the result and calling job.send_bytes.
         Keeping dispatch as a plain callable means Executor has no knowledge
-        of AciesContext, breaking the context → router → executor → context cycle.
+        of AciesContext or message encoding, breaking any circular dependency.
         """
         self._dispatch = dispatch
         self._pool = ThreadPoolExecutor(max_workers=n_workers)
@@ -96,6 +102,4 @@ class Executor:
 
     def _run_job(self, job: Job) -> None:
         assert self._dispatch is not None, '_run_job called before dispatch was initialized'
-        result = self._dispatch(job)
-        if job.reply_fn is not None:
-            job.reply_fn(result)
+        self._dispatch(job)

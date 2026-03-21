@@ -106,28 +106,20 @@ class _Reply(msgspec.Struct, frozen=True):
     value: int
 
 
-def _make_reply_fn_factory():
-    """Returns a reply_fn_factory that encodes the handler result with msgspec."""
-
-    def reply_fn_factory(send_bytes):
-        def reply_fn(result):
-            send_bytes(msgspec.msgpack.encode(result))
-
-        return reply_fn
-
-    return reply_fn_factory
-
-
 def test_query_returns_reply():
     transport = LocalTransport()
 
-    def on_message(topic: str, raw: bytes, reply_fn=None) -> None:
-        # Simulate executor: handler returns a reply struct; executor calls reply_fn.
-        if reply_fn is not None:
-            threading.Thread(target=reply_fn, args=(_Reply(value=42),), daemon=True).start()
+    def on_message(topic: str, raw: bytes, send_bytes=None) -> None:
+        # Simulate dispatch: decode request, compute reply, encode and send.
+        if send_bytes is not None:
+            threading.Thread(
+                target=send_bytes,
+                args=(msgspec.msgpack.encode(_Reply(value=42)),),
+                daemon=True,
+            ).start()
 
     transport.start(on_message)
-    transport.advertise('rpc/test', _make_reply_fn_factory())
+    transport.advertise('rpc/test')
 
     result = transport.query('rpc/test', b'query_raw', timeout=2.0)
 
@@ -137,7 +129,7 @@ def test_query_returns_reply():
 
 def test_query_returns_none_on_timeout():
     transport = LocalTransport()
-    transport.start(lambda t, r, f=None: None)
+    transport.start(lambda t, r, sb=None: None)
     # No advertiser registered — query should time out and return None.
 
     result = transport.query('rpc/nonexistent', b'query', timeout=0.05)
@@ -150,12 +142,16 @@ def test_query_with_wildcard_advertiser():
     """Advertise on a wildcard pattern; query on a matching concrete topic."""
     transport = LocalTransport()
 
-    def on_message(topic: str, raw: bytes, reply_fn=None) -> None:
-        if reply_fn is not None:
-            threading.Thread(target=reply_fn, args=(_Reply(value=7),), daemon=True).start()
+    def on_message(topic: str, raw: bytes, send_bytes=None) -> None:
+        if send_bytes is not None:
+            threading.Thread(
+                target=send_bytes,
+                args=(msgspec.msgpack.encode(_Reply(value=7)),),
+                daemon=True,
+            ).start()
 
     transport.start(on_message)
-    transport.advertise('rpc/*/status', _make_reply_fn_factory())
+    transport.advertise('rpc/*/status')
 
     result = transport.query('rpc/node1/status', b'', timeout=2.0)
 

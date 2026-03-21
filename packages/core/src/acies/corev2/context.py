@@ -35,24 +35,31 @@ class TaskState:
 class AciesContext:
     def __init__(
         self,
-        publish_fn: Callable[..., None],
-        query_fn: Callable[..., None],
+        publish_fn: Callable[[str, bytes], None],
+        query_fn: Callable[[str, bytes, float], bytes | None],
         app: AppState,
         task: TaskState,
     ) -> None:
-        self._publish_fn: Callable[..., None] = publish_fn
-        self._query_fn: Callable[..., None] = query_fn
+        self._publish_fn = publish_fn
+        self._query_fn = query_fn
         self.app: AppState = app
         self.task: TaskState = task
 
     def publish(self, topic: str, msg: msgspec.Struct) -> None:
-        """Publish a typed msgspec.Struct to a topic. Synchronous — returns
-        after the router has accepted the message for encoding and dispatch."""
-        # TODO: Phase 2 — call self._publish_fn(topic, msg)
-        ...
+        """Encode msg and publish raw bytes to topic.
+
+        Encoding happens here (worker thread) so the router stays byte-only.
+        """
+        self._publish_fn(topic, msgspec.msgpack.encode(msg))
 
     def query(self, topic: str, msg: msgspec.Struct, timeout: float = 1.0) -> msgspec.Struct | None:
-        """Synchronous RPC. Blocks until a reply arrives or timeout expires.
-        Returns the decoded reply struct, or None on timeout."""
-        # TODO: Phase 2 — call self._query_fn(topic, msg, timeout)
-        ...
+        """Synchronous RPC. Encodes the request, blocks until a reply arrives
+        or timeout expires, then decodes and returns the reply struct.
+
+        Returns None on timeout.
+        """
+        raw = self._query_fn(topic, msgspec.msgpack.encode(msg), timeout)
+        if raw is None:
+            return None
+        # TODO: decode with the reply type once reply typing is wired through specs
+        return msgspec.msgpack.decode(raw)

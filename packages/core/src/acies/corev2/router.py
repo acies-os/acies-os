@@ -1,11 +1,14 @@
 """Router — inbound queue, router thread, topic-to-Job dispatch.
 
-The Router sits between the transport layer and the executor:
-  - Transport receiver threads push (topic, raw, reply_fn) into the inbound queue.
-  - The router thread drains the queue, matches topics to TaskSpecs,
-    creates Jobs, and calls executor.enqueue().
-  - Outbound messages (publish, query) are synchronous — called directly
-    from worker threads via AciesContext, no router thread involved.
+The Router connects transport topics to handler specs and vice versa.
+It deliberately has no knowledge of message encoding:
+
+  Inbound:  receive raw bytes from transport → match topic to specs
+            → create Job(spec, raw) → enqueue in executor
+            → dispatch (worker thread) decodes raw and calls the handler
+
+  Outbound: AciesContext.publish encodes struct → bytes → router forwards
+            bytes to the right transport
 
 Transport selection
 -------------------
@@ -26,17 +29,20 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import msgspec
-
-from .task import TaskSpec
-from .transport import Transport
+from .task import Job, ServiceSpec, SubscriberSpec
+from .transport import SendBytes, Transport, _topic_matches
 
 if TYPE_CHECKING:
     from .executor import Executor
 
-_SENTINEL = object()
+
+class _Sentinel:
+    pass
+
+
+_SENTINEL = _Sentinel()
 
 
 class Router:
@@ -45,11 +51,10 @@ class Router:
         # Explicit prefix routes, e.g. ('ws://', ws_transport). First match wins.
         self._prefix_routes: list[tuple[str, Transport]] = []
 
-        self._inbound: queue.Queue[tuple[str, bytes, Any]] = queue.Queue()
-        self._subscriptions: dict[str, list[TaskSpec]] = {}
-        self._services: dict[str, TaskSpec] = {}
+        self._inbound: queue.Queue[tuple[str, bytes, SendBytes | None] | _Sentinel] = queue.Queue()
+        self._subscriptions: dict[str, list[SubscriberSpec]] = {}
+        self._services: dict[str, ServiceSpec] = {}
         self._thread: threading.Thread | None = None
-        self._stop_event: threading.Event = threading.Event()
 
     def add_transport(
         self,
@@ -74,43 +79,47 @@ class Router:
 
     def start(self, executor: 'Executor') -> None:
         """Start all transports and the router thread."""
-        # TODO: Phase 2 — start each transport with _on_message callback,
-        # start self._thread running _route_loop(executor)
-        ...
+        for transport in self._all_transports():
+            transport.start(self._on_message)
+        self._thread = threading.Thread(target=self._route_loop, args=(executor,), name='router', daemon=True)
+        self._thread.start()
 
     def stop(self) -> None:
         """Stop router thread and all transports."""
-        # TODO: Phase 2
-        ...
+        self._inbound.put(_SENTINEL)
+        if self._thread:
+            self._thread.join()
+        for transport in self._all_transports():
+            transport.stop()
 
-    def subscribe(self, topic: str, spec: TaskSpec) -> None:
-        """Register a TaskSpec to receive messages on topic."""
+    def subscribe(self, topic: str, spec: SubscriberSpec) -> None:
+        """Register a SubscriberSpec to receive messages on topic."""
         self._subscriptions.setdefault(topic, []).append(spec)
-        # TODO: Phase 2 — call transport.subscribe(topic) on the matching transport
+        self._transport_for(topic).subscribe(topic)
 
-    def advertise(self, topic: str, spec: TaskSpec) -> None:
-        """Register a TaskSpec as a queryable service on topic."""
+    def advertise(self, topic: str, spec: ServiceSpec) -> None:
+        """Register a ServiceSpec as a queryable service on topic."""
         self._services[topic] = spec
-        # TODO: Phase 2 — call transport.advertise(topic, reply_fn_factory)
+        self._transport_for(topic).advertise(topic)
 
-    def publish(self, topic: str, msg: msgspec.Struct) -> None:
-        """Encode msg and send. Called synchronously from worker threads via AciesContext."""
-        transport = self._transport_for(topic)
-        transport.publish(topic, msgspec.msgpack.encode(msg))
+    def publish(self, topic: str, raw: bytes) -> None:
+        """Forward raw bytes to the transport for topic.
 
-    def query(self, topic: str, msg: msgspec.Struct, timeout: float) -> msgspec.Struct | None:
-        """Synchronous RPC. Encodes request, sends, decodes reply.
-        Called from worker threads via AciesContext."""
-        transport = self._transport_for(topic)
-        raw = transport.query(topic, msgspec.msgpack.encode(msg), timeout)
-        if raw is None:
-            return None
-        # TODO: Phase 2 — decode with the reply type once reply typing is defined
-        return msgspec.msgpack.decode(raw)
+        Called from worker threads via AciesContext, which handles encoding.
+        """
+        self._transport_for(topic).publish(topic, raw)
 
-    def _on_message(self, topic: str, raw: bytes, reply_fn: Any = None) -> None:
+    def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
+        """Forward a raw query to the transport; return raw reply bytes or None.
+
+        Called from worker threads via AciesContext, which handles encoding
+        and decoding of the request and reply structs.
+        """
+        return self._transport_for(topic).query(topic, raw, timeout)
+
+    def _on_message(self, topic: str, raw: bytes, send_bytes: SendBytes | None = None) -> None:
         """Transport callback — push into the inbound queue."""
-        self._inbound.put((topic, raw, reply_fn))
+        self._inbound.put((topic, raw, send_bytes))
 
     def _transport_for(self, topic: str) -> Transport:
         for prefix, transport in self._prefix_routes:
@@ -120,9 +129,40 @@ class Router:
             return self._default_transport
         raise RuntimeError(f'No transport for topic: {topic!r}')
 
+    def _all_transports(self) -> list[Transport]:
+        seen: set[int] = set()
+        result: list[Transport] = []
+        for _, t in self._prefix_routes:
+            if id(t) not in seen:
+                seen.add(id(t))
+                result.append(t)
+        if self._default_transport is not None and id(self._default_transport) not in seen:
+            result.append(self._default_transport)
+        return result
+
     def _route_loop(self, executor: 'Executor') -> None:
-        # TODO: Phase 2 — drain self._inbound; skip acies/ctrl/* (handle internally);
-        # decode msgspec.msgpack.decode(raw, type=spec.msg_type) for each matching spec;
-        # create Job(spec, decoded_msg) or Job(spec, decoded_msg, reply_fn);
-        # call executor.enqueue(job)
-        ...
+        while True:
+            item = self._inbound.get()
+            if item is _SENTINEL:
+                break
+            assert isinstance(item, tuple)
+            topic, raw, send_bytes = item
+
+            if topic.startswith('acies/ctrl/'):
+                # TODO: it should be '**/ctl/**', or do we need this?
+                # TODO: should all control be done via RPC? Or both RPC and pub/sub?
+                raise NotImplementedError('Control messages handling not implemented yet')
+
+            # TODO: log/warn unmatched messages
+            if send_bytes is not None:
+                # Incoming query — route to the matching service spec
+                for pattern, spec in self._services.items():
+                    if _topic_matches(pattern, topic):
+                        executor.enqueue(Job(spec=spec, raw=raw, send_bytes=send_bytes))
+                        break
+            else:
+                # Incoming pub — fan out to all matching subscriber specs
+                for pattern, specs in self._subscriptions.items():
+                    if _topic_matches(pattern, topic):
+                        for spec in specs:
+                            executor.enqueue(Job(spec=spec, raw=raw))
