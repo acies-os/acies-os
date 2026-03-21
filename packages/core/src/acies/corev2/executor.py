@@ -19,9 +19,13 @@ from __future__ import annotations
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable
+from typing import Callable, TypeAlias
 
 from .task import Job
+
+# Injected by AciesApp; responsible for decoding, calling the handler,
+# and sending the reply for ServiceSpec jobs.
+Dispatcher: TypeAlias = Callable[[Job], None]
 
 
 class _Sentinel:
@@ -41,13 +45,13 @@ class Executor:
         self._queue: queue.PriorityQueue[tuple[float, float, Job | _Sentinel]] = queue.PriorityQueue()
         self._pool: ThreadPoolExecutor | None = None
         self._dispatcher: threading.Thread | None = None
-        self._dispatch: Callable[[Job], Any] | None = None
+        self._dispatch: Dispatcher | None = None
 
     def enqueue(self, job: Job) -> None:
         """Called by the router thread and timer thread to submit a job."""
         self._queue.put((job.deadline, job.created_at, job))
 
-    def start(self, dispatch: Callable[[Job], None], n_workers: int = 4) -> None:
+    def start(self, dispatch: Dispatcher, n_workers: int = 4) -> None:
         """Start the dispatcher thread and worker pool.
 
         dispatch — callable provided by AciesApp that runs a job. It is

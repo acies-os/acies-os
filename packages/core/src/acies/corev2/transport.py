@@ -17,7 +17,7 @@ on_message callback convention
 -------------------------------
 The callback passed to start() has signature:
 
-    on_message(topic: str, raw: bytes, reply_fn: ReplyFn | None) -> None
+    on_message(topic: str, raw: bytes, reply_fn: ReplyCallback | None) -> None
 
 reply_fn is None for regular pub messages. For queries, it is a
 transport-owned closure that delivers encoded reply bytes back to the waiting
@@ -33,8 +33,12 @@ import re
 import threading
 from typing import Callable, Protocol, TypeAlias
 
-# Callable that sends encoded reply bytes back to a waiting query() caller.
-ReplyFn: TypeAlias = Callable[[bytes], None]
+# Delivers encoded reply bytes back to a waiting query() caller.
+ReplyCallback: TypeAlias = Callable[[bytes], None]
+
+# Callback passed to Transport.start(); called on every inbound message.
+# reply_callback is None for pub messages, set for incoming queries.
+MessageHandler: TypeAlias = Callable[[str, bytes, ReplyCallback | None], None]
 
 
 def _topic_matches(pattern: str, topic: str) -> bool:
@@ -63,7 +67,7 @@ def _topic_matches(pattern: str, topic: str) -> bool:
 
 
 class Transport(Protocol):
-    def start(self, on_message: Callable[[str, bytes, ReplyFn | None], None]) -> None:
+    def start(self, on_message: MessageHandler) -> None:
         """Start receiver thread(s).
 
         Calls on_message(topic, raw_bytes, reply_fn) on each arrival.
@@ -130,11 +134,11 @@ class LocalTransport:
     def __init__(self) -> None:
         self._subscriptions: set[str] = set()
         self._advertisers: set[str] = set()
-        self._queue: queue.SimpleQueue[tuple[str, bytes, ReplyFn | None] | _Sentinel] = queue.SimpleQueue()
-        self._on_message: Callable[[str, bytes, ReplyFn | None], None] | None = None
+        self._queue: queue.SimpleQueue[tuple[str, bytes, ReplyCallback | None] | _Sentinel] = queue.SimpleQueue()
+        self._on_message: MessageHandler | None = None
         self._thread: threading.Thread | None = None
 
-    def start(self, on_message: Callable[[str, bytes, ReplyFn | None], None]) -> None:
+    def start(self, on_message: MessageHandler) -> None:
         self._on_message = on_message
         self._thread = threading.Thread(target=self._receiver_loop, name='local-transport', daemon=True)
         self._thread.start()
