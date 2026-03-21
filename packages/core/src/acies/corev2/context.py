@@ -11,9 +11,13 @@ This avoids any circular imports between context, router, and executor.
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from typing import Any, Callable, TypeAlias
 
 import msgspec
+
+# Matches router.publish / router.query signatures; injected into AciesContext.
+Publisher: TypeAlias = Callable[[str, bytes], None]
+Querier: TypeAlias = Callable[[str, bytes, float], bytes | None]
 
 
 class AppState:
@@ -21,7 +25,7 @@ class AppState:
 
     def __init__(self) -> None:
         self.lock: threading.RLock = threading.RLock()
-        self.data: dict = {}
+        self.data: dict[str, Any] = {}
 
 
 class TaskState:
@@ -29,19 +33,19 @@ class TaskState:
 
     def __init__(self) -> None:
         self.lock: threading.RLock = threading.RLock()
-        self.data: dict = {}
+        self.data: dict[str, Any] = {}
 
 
 class AciesContext:
     def __init__(
         self,
-        publish_fn: Callable[[str, bytes], None],
-        query_fn: Callable[[str, bytes, float], bytes | None],
+        publish_fn: Publisher,
+        query_fn: Querier,
         app: AppState,
         task: TaskState,
     ) -> None:
-        self._publish_fn = publish_fn
-        self._query_fn = query_fn
+        self._publish_fn: Publisher = publish_fn
+        self._query_fn: Querier = query_fn
         self.app: AppState = app
         self.task: TaskState = task
 

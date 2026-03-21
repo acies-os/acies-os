@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Any, Callable, TypeAlias
+
+if TYPE_CHECKING:
+    from .context import AciesContext
+
+    ScheduleHandler: TypeAlias = Callable[[AciesContext], None]
+    SubscriberHandler: TypeAlias = Callable[[AciesContext, Any], None]
+    ServiceHandler: TypeAlias = Callable[[AciesContext, Any], Any]
 
 
 @dataclass(frozen=True)
 class SubscriberSpec:
     name: str
-    fn: Callable
+    fn: SubscriberHandler
     topics: tuple[str, ...]
     msg_type: type | None = None  # extracted from fn annotation at decoration time
 
@@ -24,14 +31,14 @@ class SubscriberSpec:
 @dataclass(frozen=True)
 class ScheduleSpec:
     name: str
-    fn: Callable
+    fn: ScheduleHandler
     interval: float
 
 
 @dataclass(frozen=True)
 class ServiceSpec:
     name: str
-    fn: Callable
+    fn: ServiceHandler
     topics: tuple[str, ...]
     msg_type: type | None = None  # extracted from fn annotation at decoration time
 

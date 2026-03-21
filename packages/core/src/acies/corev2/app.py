@@ -3,25 +3,28 @@
 Owns the Router, Executor, timer thread, and TaskSpec registry.
 Decorators register TaskSpecs; run() wires everything together and blocks.
 
-Thread model (implemented in Phase 2):
-  Main thread      — runs run(); blocks on _stop_event after wiring
+Thread model:
+  Main thread       — runs run(); blocks on _stop_event after wiring
   Transport threads — owned by each Transport; push to router inbound queue
-  Router thread    — drains inbound queue; creates Jobs; calls executor.enqueue()
-  Timer thread     — one shared thread; fires SCHEDULE jobs into executor
+  Router thread     — drains inbound queue; creates Jobs; calls executor.enqueue()
+  Timer thread      — one shared thread; fires SCHEDULE jobs into executor
   Dispatcher thread — owned by Executor; drains internal queue; submits to pool
-  Worker threads   — execute handlers; call ctx.publish() synchronously
+  Worker threads    — execute handlers; call ctx.publish() synchronously
 """
 
 from __future__ import annotations
 
+import heapq
 import threading
+import time
 from typing import Callable, get_type_hints
 
 import msgspec
 
+from .context import AciesContext, AppState, TaskState
 from .executor import Executor
 from .router import Router
-from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
+from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 
 
 class AciesApp:
@@ -30,11 +33,13 @@ class AciesApp:
         self._host: str = host
         self._router: Router = router if router is not None else Router()
         self._executor: Executor = Executor()
-        self._specs: list[SubscriberSpec | ScheduleSpec | ServiceSpec] = []
+        self._specs: list[TaskSpec] = []
         self._startup_hooks: list[Callable[..., None]] = []
         self._shutdown_hooks: list[Callable[..., None]] = []
         self._stop_event: threading.Event = threading.Event()
         self._timer_thread: threading.Thread | None = None
+        self._task_ctxs: dict[TaskSpec, AciesContext] = {}
+        self._app_state: AppState = AppState()
 
     @property
     def name(self) -> str:
@@ -44,9 +49,7 @@ class AciesApp:
     def host(self) -> str:
         return self._host
 
-    # ------------------------------------------------------------------
-    # Lifecycle hooks
-    # ------------------------------------------------------------------
+    # ----------------------------- Lifecyle hooks -----------------------------
 
     def on_startup(self, fn: Callable[..., None]) -> Callable[..., None]:
         self._startup_hooks.append(fn)
@@ -56,9 +59,7 @@ class AciesApp:
         self._shutdown_hooks.append(fn)
         return fn
 
-    # ------------------------------------------------------------------
-    # Task decorators
-    # ------------------------------------------------------------------
+    # ---------------------------- task decorators ----------------------------
 
     def subscribe(self, *topics: str) -> Callable[..., Callable[..., None]]:
         """Message-driven: handler is called for each message on any of the topics."""
@@ -91,9 +92,7 @@ class AciesApp:
 
         return decorator
 
-    # ------------------------------------------------------------------
-    # Dispatch
-    # ------------------------------------------------------------------
+    # -------------------------------- Dispatch --------------------------------
 
     def dispatch(self, job: Job) -> None:
         """Decode, execute, and reply. Called by the Executor on a worker thread.
@@ -101,46 +100,98 @@ class AciesApp:
         This is the only place in the system where msgpack decoding and
         encoding happen — keeping the router and executor byte-agnostic.
         """
-        # TODO: Phase 2 — build task_ctxs map and pass ctx to handlers
+        ctx = self._task_ctxs[job.spec]
         match job.spec:
             case ScheduleSpec():
-                job.spec.fn()
+                job.spec.fn(ctx)
             case SubscriberSpec() | ServiceSpec() as spec:
-                assert job.raw is not None, 'Expected raw bytes message for SubscriberSpec or ServiceSpec, but got None'
+                assert job.raw is not None, 'SubscriberSpec/ServiceSpec job must have raw bytes'
                 msg = (
                     msgspec.msgpack.decode(job.raw, type=spec.msg_type)
                     if spec.msg_type is not None
                     else msgspec.msgpack.decode(job.raw)
                 )
-                result = spec.fn(msg)
+                result = spec.fn(ctx, msg)
                 if job.reply_fn is not None:
                     job.reply_fn(msgspec.msgpack.encode(result))
 
-    # ------------------------------------------------------------------
-    # Run / stop
-    # ------------------------------------------------------------------
+    # ------------------------------- Run & Stop -------------------------------
 
     def run(self) -> None:
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
-        # TODO: Phase 2
-        #   1. Build one AciesContext per spec (reused across all jobs of that spec)
-        #   2. executor.start(dispatch)
-        #   3. router.start(executor)
-        #   4. call startup hooks
-        #   5. router.subscribe / router.advertise for each spec
-        #   6. start timer thread (_timer_loop)
-        #   7. self._stop_event.wait()
-        #   8. router.stop(), executor.stop()
-        #   9. call shutdown hooks
-        ...
+        self._task_ctxs = {
+            spec: AciesContext(
+                publish_fn=self._router.publish,
+                query_fn=self._router.query,
+                app=self._app_state,
+                task=TaskState(),
+            )
+            for spec in self._specs
+        }
+        self._executor.start(self.dispatch)
+        self._router.start(self._executor)
+
+        # Register specs before startup hooks so the app is fully wired
+        # when user code in on_startup runs.
+        for spec in self._specs:
+            match spec:
+                case SubscriberSpec():
+                    for topic in spec.topics:
+                        self._router.subscribe(topic, spec)
+                case ServiceSpec():
+                    self._router.advertise(spec.topics[0], spec)
+                case ScheduleSpec():
+                    pass  # handled by timer thread
+
+        schedule_specs = [s for s in self._specs if isinstance(s, ScheduleSpec)]
+        if schedule_specs:
+            self._timer_thread = threading.Thread(
+                target=self._timer_loop,
+                args=(schedule_specs,),
+                name='timer',
+                daemon=True,
+            )
+            self._timer_thread.start()
+
+        lifecyle_hook_ctx = AciesContext(
+            publish_fn=self._router.publish,
+            query_fn=self._router.query,
+            app=self._app_state,
+            task=TaskState(),
+        )
+
+        for hook in self._startup_hooks:
+            hook(lifecyle_hook_ctx)
+
+        _ = self._stop_event.wait()
+
+        self._router.stop()
+        self._executor.stop()
+
+        for hook in self._shutdown_hooks:
+            hook(lifecyle_hook_ctx)
 
     def stop(self) -> None:
         """Signal run() to begin shutdown. Safe to call from any thread."""
         self._stop_event.set()
 
-    def _timer_loop(self) -> None:
-        """Single shared timer thread. Manages all ScheduleSpecs via a
-        priority queue of (next_fire_time, spec). Wakes exactly when the
-        next timer is due."""
-        # TODO: Phase 2
-        ...
+    def _timer_loop(self, schedule_specs: list[ScheduleSpec]) -> None:
+        """Fire ScheduleSpec jobs at their configured intervals.
+
+        Uses a min-heap of (next_fire_time, spec) so a single thread handles
+        all timers. Sleeps exactly until the next due time via
+        _stop_event.wait(timeout), which also serves as the shutdown signal.
+        """
+        now = time.monotonic()
+        heap: list[tuple[float, ScheduleSpec]] = [(now + spec.interval, spec) for spec in schedule_specs]
+        heapq.heapify(heap)
+
+        while True:
+            next_fire, spec = heap[0]
+            delay = next_fire - time.monotonic()
+            if delay > 0 and self._stop_event.wait(timeout=delay):
+                break  # shutdown signalled during sleep
+            if self._stop_event.is_set():
+                break
+            _ = heapq.heapreplace(heap, (time.monotonic() + spec.interval, spec))
+            self._executor.enqueue(Job(spec=spec, raw=None))
