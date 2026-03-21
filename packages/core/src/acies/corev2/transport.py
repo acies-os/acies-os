@@ -5,8 +5,8 @@ need to implement the required methods. The type checker enforces correctness
 structurally, and new backends can be added anywhere in the repo without
 touching this file.
 
-Routing between transports is prefix-based: the Router calls can_handle()
-on each transport to decide where to send outbound messages.
+Routing between transports is prefix-based: the Router uses prefix rules
+to decide which transport handles a given topic.
 
 Concrete backends:
   ZenohTransport     — cross-node pub/sub + queryable; handles bare topics (default)
@@ -17,11 +17,13 @@ on_message callback convention
 -------------------------------
 The callback passed to start() has signature:
 
-    on_message(topic: str, raw: bytes, reply_fn: Callable | None) -> None
+    on_message(topic: str, raw: bytes, send_bytes: SendBytes | None) -> None
 
-reply_fn is None for regular pub messages. For queries, it is a callable the
-executor will invoke with the handler's return value; it encodes the result and
-sends it back to the waiting query() caller.
+send_bytes is None for regular pub messages. For queries, it is a
+transport-owned closure that delivers encoded reply bytes back to the waiting
+query() caller (e.g. sets a threading.Event). The dispatch function encodes
+the handler's return value and calls send_bytes(encoded_bytes) to complete
+the reply.
 """
 
 from __future__ import annotations
@@ -29,19 +31,10 @@ from __future__ import annotations
 import queue
 import re
 import threading
-from typing import Any, Callable, Protocol, TypeAlias
+from typing import Callable, Protocol, TypeAlias
 
 # Callable that sends encoded reply bytes back to a waiting query() caller.
 SendBytes: TypeAlias = Callable[[bytes], None]
-
-# Callable the executor invokes with the handler's return value.
-# Encodes the result and calls SendBytes to unblock the query() caller.
-ReplyFn: TypeAlias = Callable[[Any], None]
-
-# Factory called once per incoming query to produce a ReplyFn.
-# The transport supplies the SendBytes closure; the factory wires it to the
-# executor's call convention (encode result → send bytes).
-ReplyFnFactory: TypeAlias = Callable[[SendBytes], ReplyFn]
 
 
 def _topic_matches(pattern: str, topic: str) -> bool:
@@ -70,11 +63,11 @@ def _topic_matches(pattern: str, topic: str) -> bool:
 
 
 class Transport(Protocol):
-    def start(self, on_message: Callable[[str, bytes, ReplyFn | None], None]) -> None:
+    def start(self, on_message: Callable[[str, bytes, SendBytes | None], None]) -> None:
         """Start receiver thread(s).
 
-        Calls on_message(topic, raw_bytes, reply_fn) on each arrival.
-        reply_fn is None for pub messages; set for incoming queries.
+        Calls on_message(topic, raw_bytes, send_bytes) on each arrival.
+        send_bytes is None for pub messages; set for incoming queries.
         """
         ...
 
@@ -98,12 +91,13 @@ class Transport(Protocol):
         """Synchronous RPC call. Blocks until reply bytes arrive or timeout."""
         ...
 
-    def advertise(self, topic: str, reply_fn_factory: ReplyFnFactory) -> None:
+    def advertise(self, topic: str) -> None:
         """Register a queryable endpoint.
 
-        reply_fn_factory(send_bytes) -> reply_fn
-          send_bytes  — transport-provided closure that delivers the encoded reply
-          reply_fn    — callable the executor will call with the handler's return value
+        Marks topic as queryable. When a query arrives, the transport creates
+        a send_bytes closure for that specific caller and passes it as the
+        third argument to on_message. The dispatch function encodes the
+        handler result and calls send_bytes(encoded) to deliver the reply.
         """
         ...
 
@@ -115,32 +109,32 @@ class _Sentinel:
 class LocalTransport:
     """In-process queue-based transport for testing and single-process apps.
 
-    Always handles all topics (can_handle returns True). Add to Router last so
-    prefixed transports like WebSocketTransport take priority.
+    Always handles all topics. Add to Router last so prefixed transports like
+    WebSocketTransport take priority.
 
     Query flow
     ----------
     1. Caller calls query(topic, raw, timeout).
-    2. LocalTransport finds the registered reply_fn_factory for the topic.
+    2. LocalTransport checks that the topic is advertised.
     3. Creates a send_bytes closure backed by a threading.Event.
-    4. Calls factory(send_bytes) to produce a reply_fn the executor will invoke.
-    5. Puts (topic, raw, reply_fn) into the inbound queue.
-    6. Receiver thread delivers it via on_message(topic, raw, reply_fn).
-    7. Router creates a Job with that reply_fn; executor calls reply_fn(result).
-    8. reply_fn encodes result and calls send_bytes(encoded), which sets the event.
-    9. query() unblocks and returns the encoded bytes.
+    4. Puts (topic, raw, send_bytes) directly into the inbound queue.
+    5. Receiver thread delivers it via on_message(topic, raw, send_bytes).
+    6. Router creates a Job with send_bytes; dispatch encodes the result and
+       calls job.send_bytes(encoded_bytes).
+    7. send_bytes sets result[0] and the event; query() unblocks and returns
+       the encoded bytes.
     """
 
     _SENTINEL: _Sentinel = _Sentinel()
 
     def __init__(self) -> None:
         self._subscriptions: set[str] = set()
-        self._advertisers: dict[str, ReplyFnFactory] = {}
-        self._queue: queue.SimpleQueue[tuple[str, bytes, ReplyFn | None] | _Sentinel] = queue.SimpleQueue()
-        self._on_message: Callable[[str, bytes, ReplyFn | None], None] | None = None
+        self._advertisers: set[str] = set()
+        self._queue: queue.SimpleQueue[tuple[str, bytes, SendBytes | None] | _Sentinel] = queue.SimpleQueue()
+        self._on_message: Callable[[str, bytes, SendBytes | None], None] | None = None
         self._thread: threading.Thread | None = None
 
-    def start(self, on_message: Callable[[str, bytes, ReplyFn | None], None]) -> None:
+    def start(self, on_message: Callable[[str, bytes, SendBytes | None], None]) -> None:
         self._on_message = on_message
         self._thread = threading.Thread(target=self._receiver_loop, name='local-transport', daemon=True)
         self._thread.start()
@@ -168,23 +162,21 @@ class LocalTransport:
         if any(_topic_matches(pattern, topic) for pattern in self._subscriptions):
             self._queue.put((topic, raw, None))
 
-    def advertise(self, topic: str, reply_fn_factory: ReplyFnFactory) -> None:
-        self._advertisers[topic] = reply_fn_factory
+    def advertise(self, topic: str) -> None:
+        self._advertisers.add(topic)
 
     def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
         """Send a query and block until a reply arrives or timeout elapses."""
-        factory = self._find_advertiser(topic)
         event = threading.Event()
         result: list[bytes | None] = [None]
 
-        if factory is not None:
+        if self._is_advertised(topic):
 
             def send_bytes(b: bytes) -> None:
                 result[0] = b
                 event.set()
 
-            reply_fn: ReplyFn = factory(send_bytes)
-            self._queue.put((topic, raw, reply_fn))
+            self._queue.put((topic, raw, send_bytes))
 
         _ = event.wait(timeout)
         return result[0]
@@ -193,11 +185,8 @@ class LocalTransport:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _find_advertiser(self, topic: str) -> ReplyFnFactory | None:
-        for pattern, factory in self._advertisers.items():
-            if _topic_matches(pattern, topic):
-                return factory
-        return None
+    def _is_advertised(self, topic: str) -> bool:
+        return any(_topic_matches(pattern, topic) for pattern in self._advertisers)
 
     def _receiver_loop(self) -> None:
         while True:

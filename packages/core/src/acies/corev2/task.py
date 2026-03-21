@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -43,13 +43,15 @@ TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
 class Job:
     """One unit of work, created at runtime from a TaskSpec.
 
-    All three task kinds flow through the executor. ServiceSpec jobs carry a
-    reply_fn so the executor can send the reply after the handler returns,
-    without the handler needing to know about the underlying query mechanism.
+    All three task kinds flow through the executor. The router passes raw bytes
+    straight through — decoding happens in the dispatch function (worker thread).
+    ServiceSpec jobs carry send_bytes so dispatch can encode and deliver the
+    reply after the handler returns, without the handler knowing about the
+    underlying query mechanism.
     """
 
     spec: TaskSpec
-    msg: Any | None  # decoded msgspec.Struct; None for ScheduleSpec jobs
+    raw: bytes | None  # raw msgpack bytes from transport; None for ScheduleSpec jobs
     deadline: float = 0.0  # seconds (monotonic); 0.0 = no deadline, FIFO ordering
     created_at: float = field(default_factory=time.monotonic)
-    reply_fn: Callable[[Any], None] | None = None  # only set for ServiceSpec jobs
+    send_bytes: Callable[[bytes], None] | None = None  # only set for ServiceSpec jobs

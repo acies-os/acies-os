@@ -15,7 +15,7 @@ Thread model (implemented in Phase 2):
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, get_type_hints
+from typing import Callable, get_type_hints
 
 import msgspec
 
@@ -95,29 +95,26 @@ class AciesApp:
     # Dispatch
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _decode(raw: Any, msg_type: type | None) -> Any:
-        """Decode a raw message into the expected type.
+    def dispatch(self, job: Job) -> None:
+        """Decode, execute, and reply. Called by the Executor on a worker thread.
 
-        - LocalTransport: raw is already a typed object; returned as-is.
-        - ZenohTransport: raw is bytes; decoded with MessagePack.
-        - JSON fallback: raw is a dict; converted with msgspec.convert.
+        This is the only place in the system where msgpack decoding and
+        encoding happen — keeping the router and executor byte-agnostic.
         """
-        if msg_type is None or isinstance(raw, msg_type):
-            return raw
-        if isinstance(raw, bytes):
-            return msgspec.msgpack.decode(raw, type=msg_type)
-        return msgspec.convert(raw, msg_type)
-
-    def dispatch(self, job: Job) -> Any:
-        """Execute a job. Called by the Executor on a worker thread."""
         # TODO: Phase 2 — build task_ctxs map and pass ctx to handlers
         match job.spec:
             case ScheduleSpec():
-                return job.spec.fn()
+                job.spec.fn()
             case SubscriberSpec() | ServiceSpec() as spec:
-                msg = self._decode(job.msg, spec.msg_type)
-                return spec.fn(msg)
+                assert job.raw is not None, 'Expected raw bytes message for SubscriberSpec or ServiceSpec, but got None'
+                msg = (
+                    msgspec.msgpack.decode(job.raw, type=spec.msg_type)
+                    if spec.msg_type is not None
+                    else msgspec.msgpack.decode(job.raw)
+                )
+                result = spec.fn(msg)
+                if job.send_bytes is not None:
+                    job.send_bytes(msgspec.msgpack.encode(result))
 
     # ------------------------------------------------------------------
     # Run / stop
@@ -125,7 +122,7 @@ class AciesApp:
 
     def run(self) -> None:
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
-        # TODO: Phase 2 —
+        # TODO: Phase 2
         #   1. Build one AciesContext per spec (reused across all jobs of that spec)
         #   2. executor.start(dispatch)
         #   3. router.start(executor)
