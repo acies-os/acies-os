@@ -52,7 +52,7 @@ class Executor:
 
         dispatch — callable provided by AciesApp that runs a job. It is
         responsible for decoding job.raw, calling the handler, and — for
-        ServiceSpec jobs — encoding the result and calling job.send_bytes.
+        ServiceSpec jobs — encoding the result and calling job.reply_fn.
         Keeping dispatch as a plain callable means Executor has no knowledge
         of AciesContext or message encoding, breaking any circular dependency.
         """

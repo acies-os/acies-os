@@ -173,7 +173,7 @@ def test_multiple_subscribers_same_topic():
     _stop(router, ex)
 
 
-def test_service_job_send_bytes_end_to_end():
+def test_service_job_reply_fn_end_to_end():
     """query() returns the handler's return value after encode/decode round-trip."""
     router = Router()
     transport = LocalTransport()
@@ -188,8 +188,8 @@ def test_service_job_send_bytes_end_to_end():
         msg = msgspec.msgpack.decode(job.raw, type=_Ping)
         result = _Pong(value=msg.value * 2)
         handler_done.set()
-        if job.send_bytes is not None:
-            job.send_bytes(msgspec.msgpack.encode(result))
+        if job.reply_fn is not None:
+            job.reply_fn(msgspec.msgpack.encode(result))
 
     ex.start(dispatch)
     router.start(ex)

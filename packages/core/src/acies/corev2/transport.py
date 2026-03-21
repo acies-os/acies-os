@@ -17,12 +17,12 @@ on_message callback convention
 -------------------------------
 The callback passed to start() has signature:
 
-    on_message(topic: str, raw: bytes, send_bytes: SendBytes | None) -> None
+    on_message(topic: str, raw: bytes, reply_fn: ReplyFn | None) -> None
 
-send_bytes is None for regular pub messages. For queries, it is a
+reply_fn is None for regular pub messages. For queries, it is a
 transport-owned closure that delivers encoded reply bytes back to the waiting
 query() caller (e.g. sets a threading.Event). The dispatch function encodes
-the handler's return value and calls send_bytes(encoded_bytes) to complete
+the handler's return value and calls reply_fn(encoded_bytes) to complete
 the reply.
 """
 
@@ -34,7 +34,7 @@ import threading
 from typing import Callable, Protocol, TypeAlias
 
 # Callable that sends encoded reply bytes back to a waiting query() caller.
-SendBytes: TypeAlias = Callable[[bytes], None]
+ReplyFn: TypeAlias = Callable[[bytes], None]
 
 
 def _topic_matches(pattern: str, topic: str) -> bool:
@@ -63,11 +63,11 @@ def _topic_matches(pattern: str, topic: str) -> bool:
 
 
 class Transport(Protocol):
-    def start(self, on_message: Callable[[str, bytes, SendBytes | None], None]) -> None:
+    def start(self, on_message: Callable[[str, bytes, ReplyFn | None], None]) -> None:
         """Start receiver thread(s).
 
-        Calls on_message(topic, raw_bytes, send_bytes) on each arrival.
-        send_bytes is None for pub messages; set for incoming queries.
+        Calls on_message(topic, raw_bytes, reply_fn) on each arrival.
+        reply_fn is None for pub messages; set for incoming queries.
         """
         ...
 
@@ -95,9 +95,9 @@ class Transport(Protocol):
         """Register a queryable endpoint.
 
         Marks topic as queryable. When a query arrives, the transport creates
-        a send_bytes closure for that specific caller and passes it as the
+        a reply_fn closure for that specific caller and passes it as the
         third argument to on_message. The dispatch function encodes the
-        handler result and calls send_bytes(encoded) to deliver the reply.
+        handler result and calls reply_fn(encoded) to deliver the reply.
         """
         ...
 
@@ -116,12 +116,12 @@ class LocalTransport:
     ----------
     1. Caller calls query(topic, raw, timeout).
     2. LocalTransport checks that the topic is advertised.
-    3. Creates a send_bytes closure backed by a threading.Event.
-    4. Puts (topic, raw, send_bytes) directly into the inbound queue.
-    5. Receiver thread delivers it via on_message(topic, raw, send_bytes).
-    6. Router creates a Job with send_bytes; dispatch encodes the result and
-       calls job.send_bytes(encoded_bytes).
-    7. send_bytes sets result[0] and the event; query() unblocks and returns
+    3. Creates a reply_fn closure backed by a threading.Event.
+    4. Puts (topic, raw, reply_fn) directly into the inbound queue.
+    5. Receiver thread delivers it via on_message(topic, raw, reply_fn).
+    6. Router creates a Job with reply_fn; dispatch encodes the result and
+       calls job.reply_fn(encoded_bytes).
+    7. reply_fn sets result[0] and the event; query() unblocks and returns
        the encoded bytes.
     """
 
@@ -130,11 +130,11 @@ class LocalTransport:
     def __init__(self) -> None:
         self._subscriptions: set[str] = set()
         self._advertisers: set[str] = set()
-        self._queue: queue.SimpleQueue[tuple[str, bytes, SendBytes | None] | _Sentinel] = queue.SimpleQueue()
-        self._on_message: Callable[[str, bytes, SendBytes | None], None] | None = None
+        self._queue: queue.SimpleQueue[tuple[str, bytes, ReplyFn | None] | _Sentinel] = queue.SimpleQueue()
+        self._on_message: Callable[[str, bytes, ReplyFn | None], None] | None = None
         self._thread: threading.Thread | None = None
 
-    def start(self, on_message: Callable[[str, bytes, SendBytes | None], None]) -> None:
+    def start(self, on_message: Callable[[str, bytes, ReplyFn | None], None]) -> None:
         self._on_message = on_message
         self._thread = threading.Thread(target=self._receiver_loop, name='local-transport', daemon=True)
         self._thread.start()
@@ -172,11 +172,11 @@ class LocalTransport:
 
         if self._is_advertised(topic):
 
-            def send_bytes(b: bytes) -> None:
+            def reply_fn(b: bytes) -> None:
                 result[0] = b
                 event.set()
 
-            self._queue.put((topic, raw, send_bytes))
+            self._queue.put((topic, raw, reply_fn))
 
         _ = event.wait(timeout)
         return result[0]

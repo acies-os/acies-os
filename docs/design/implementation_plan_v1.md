@@ -109,9 +109,9 @@ the underlying query mechanism.
 @dataclass
 class Job:
     spec: TaskSpec
-    msg: msgspec.Struct | None                # decoded typed struct; None for ScheduleSpec jobs
+    raw: bytes | None                         # raw msgpack bytes; None for ScheduleSpec jobs
     created_at: float                         # time.monotonic()
-    reply_fn: Callable[[Any], None] | None    # only set for ServiceSpec jobs
+    reply_fn: ReplyFn | None                  # only set for ServiceSpec jobs; dispatch calls reply_fn(encoded_bytes)
 ```
 
 ### `AppState` and `TaskState` (context.py)
@@ -566,7 +566,7 @@ Behavior:
 - `start(dispatch, n_workers=4)`: start `ThreadPoolExecutor`; start dispatcher thread running `_dispatch_loop`
 - `enqueue(job)`: put `job` into `self._queue`
 - `_dispatch_loop`: drain queue; submit each job to pool; exit when stop event set and queue empty
-- `_run_job(job)`: call `result = self._dispatch(job)`; if `job.reply_fn is not None`, call `job.reply_fn(result)`
+- `_run_job(job)`: call `self._dispatch(job)`; dispatch is responsible for calling `job.reply_fn` if set
 - `stop()`: set stop event; put sentinel to unblock dispatcher; join thread; shutdown pool with `wait=True`
 
 **Verification**:

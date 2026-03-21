@@ -265,17 +265,18 @@ def teardown(ctx: AciesContext): ...
 
 `AciesApp` owns:
 
-- **Router** — inbound queue + router thread. Transports push `(topic, bytes)`
-  into the queue. The router thread checks for control topics (`acies/ctrl/*`,
-  handled internally), then matches remaining topics to `TaskSpec`s, decodes
-  the bytes using `spec.msg_type`, creates `Job`s, and calls
-  `executor.enqueue()`. Outbound (`publish`, `query`) is synchronous, called
-  directly from worker threads via `ctx`; the router encodes the struct to
-  bytes before handing off to the transport.
+- **Router** — inbound queue + router thread. Transports push
+  `(topic, raw_bytes, reply_fn | None)` into the queue; `reply_fn` is `None`
+  for pub messages and set (by the transport) for incoming queries. The router
+  thread matches topics to `TaskSpec`s and creates `Job`s — it does not encode
+  or decode. Outbound (`publish`, `query`) forwards raw bytes directly to the
+  transport; `AciesContext` handles encoding before calling the router.
 
 - **Executor** — internal FIFO queue + dispatcher thread + worker thread pool.
-  Dequeues `Job`s and submits them to the pool. After each handler returns,
-  calls `job.reply_fn(result)` if set (SERVICE jobs only).
+  Dequeues `Job`s and calls `dispatch(job)`. The dispatch function (provided
+  by `AciesApp`) decodes `job.raw`, calls the handler, and — for SERVICE jobs
+  — encodes the result and calls `job.reply_fn(encoded_bytes)` to deliver the
+  reply.
 
 - **Timer thread** — one shared thread for all SCHEDULE specs. Uses a priority
   queue of `(next_fire_time, spec)` to enqueue jobs at the right time.

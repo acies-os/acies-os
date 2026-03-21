@@ -31,21 +31,21 @@ def test_handler_runs_in_worker_thread():
     assert worker_thread[0] is not threading.main_thread()
 
 
-def test_dispatch_receives_send_bytes():
-    """Executor passes send_bytes in the Job intact; dispatch can invoke it."""
+def test_dispatch_receives_reply_fn():
+    """Executor passes reply_fn in the Job intact; dispatch can invoke it."""
     received: list[bytes] = []
     done = threading.Event()
 
-    def send_bytes(b: bytes) -> None:
+    def reply_fn(b: bytes) -> None:
         received.append(b)
         done.set()
 
     def dispatch(job: Job):
-        if job.send_bytes is not None:
-            job.send_bytes(b'reply')
+        if job.reply_fn is not None:
+            job.reply_fn(b'reply')
 
     ex = _make_executor(dispatch)
-    ex.enqueue(Job(spec=_SPEC, raw=None, send_bytes=send_bytes))
+    ex.enqueue(Job(spec=_SPEC, raw=None, reply_fn=reply_fn))
     assert done.wait(timeout=2.0)
     ex.stop()
 

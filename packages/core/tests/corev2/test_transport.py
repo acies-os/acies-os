@@ -109,11 +109,11 @@ class _Reply(msgspec.Struct, frozen=True):
 def test_query_returns_reply():
     transport = LocalTransport()
 
-    def on_message(topic: str, raw: bytes, send_bytes=None) -> None:
+    def on_message(topic: str, raw: bytes, reply_fn=None) -> None:
         # Simulate dispatch: decode request, compute reply, encode and send.
-        if send_bytes is not None:
+        if reply_fn is not None:
             threading.Thread(
-                target=send_bytes,
+                target=reply_fn,
                 args=(msgspec.msgpack.encode(_Reply(value=42)),),
                 daemon=True,
             ).start()
@@ -142,10 +142,10 @@ def test_query_with_wildcard_advertiser():
     """Advertise on a wildcard pattern; query on a matching concrete topic."""
     transport = LocalTransport()
 
-    def on_message(topic: str, raw: bytes, send_bytes=None) -> None:
-        if send_bytes is not None:
+    def on_message(topic: str, raw: bytes, reply_fn=None) -> None:
+        if reply_fn is not None:
             threading.Thread(
-                target=send_bytes,
+                target=reply_fn,
                 args=(msgspec.msgpack.encode(_Reply(value=7)),),
                 daemon=True,
             ).start()
