@@ -33,7 +33,7 @@ def _make_service(topic: str, msg_type: type | None = None) -> ServiceSpec:
     def handler(ctx, msg):
         return _Pong(value=msg.value * 2)
 
-    return ServiceSpec(name='svc', fn=handler, topics=(topic,), msg_type=msg_type)
+    return ServiceSpec(name='svc', fn=handler, topic=topic, msg_type=msg_type)
 
 
 def _stop(router: Router, executor: Executor) -> None:

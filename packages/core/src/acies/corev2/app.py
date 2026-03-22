@@ -33,7 +33,7 @@ class AciesApp:
         self._host: str = host
         self._router: Router = router if router is not None else Router()
         self._executor: Executor = Executor()
-        self._specs: list[TaskSpec] = []
+        self._tasks: list[TaskSpec] = []
         self._startup_hooks: list[Callable[..., None]] = []
         self._shutdown_hooks: list[Callable[..., None]] = []
         self._stop_event: threading.Event = threading.Event()
@@ -67,7 +67,7 @@ class AciesApp:
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
-            self._specs.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
+            self._tasks.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
             return fn
 
         return decorator
@@ -76,7 +76,7 @@ class AciesApp:
         """Timer-driven: handler is called every `interval` seconds."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            self._specs.append(ScheduleSpec(name=fn.__name__, fn=fn, interval=interval))
+            self._tasks.append(ScheduleSpec(name=fn.__name__, fn=fn, interval=interval))
             return fn
 
         return decorator
@@ -87,7 +87,7 @@ class AciesApp:
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
-            self._specs.append(ServiceSpec(name=fn.__name__, fn=fn, topics=(topic,), msg_type=msg_type))
+            self._tasks.append(ServiceSpec(name=fn.__name__, fn=fn, topic=topic, msg_type=msg_type))
             return fn
 
         return decorator
@@ -120,40 +120,40 @@ class AciesApp:
     def run(self) -> None:
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
         self._task_ctxs = {
-            spec: AciesContext(
+            task: AciesContext(
                 publish_fn=self._router.publish,
                 query_fn=self._router.query,
                 app=self._app_state,
                 task=TaskState(),
             )
-            for spec in self._specs
+            for task in self._tasks
         }
         self._executor.start(self.dispatch)
         self._router.start(self._executor)
 
-        # Register specs before startup hooks so the app is fully wired
+        # Register tasks before startup hooks so the app is fully wired
         # when user code in on_startup runs.
-        for spec in self._specs:
-            match spec:
+        for task in self._tasks:
+            match task:
                 case SubscriberSpec():
-                    for topic in spec.topics:
-                        self._router.subscribe(topic, spec)
+                    for topic in task.topics:
+                        self._router.subscribe(topic, task)
                 case ServiceSpec():
-                    self._router.advertise(spec.topics[0], spec)
+                    self._router.advertise(task.topic, task)
                 case ScheduleSpec():
                     pass  # handled by timer thread
 
-        schedule_specs = [s for s in self._specs if isinstance(s, ScheduleSpec)]
-        if schedule_specs:
+        periodic_tasks = [t for t in self._tasks if isinstance(t, ScheduleSpec)]
+        if periodic_tasks:
             self._timer_thread = threading.Thread(
                 target=self._timer_loop,
-                args=(schedule_specs,),
+                args=(periodic_tasks,),
                 name='timer',
                 daemon=True,
             )
             self._timer_thread.start()
 
-        lifecyle_hook_ctx = AciesContext(
+        hook_ctx = AciesContext(
             publish_fn=self._router.publish,
             query_fn=self._router.query,
             app=self._app_state,
@@ -161,7 +161,7 @@ class AciesApp:
         )
 
         for hook in self._startup_hooks:
-            hook(lifecyle_hook_ctx)
+            hook(hook_ctx)
 
         _ = self._stop_event.wait()
 
@@ -169,7 +169,7 @@ class AciesApp:
         self._executor.stop()
 
         for hook in self._shutdown_hooks:
-            hook(lifecyle_hook_ctx)
+            hook(hook_ctx)
 
     def stop(self) -> None:
         """Signal run() to begin shutdown. Safe to call from any thread."""
