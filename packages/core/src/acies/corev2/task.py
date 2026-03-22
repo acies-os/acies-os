@@ -39,7 +39,7 @@ class ScheduleSpec:
 class ServiceSpec:
     name: str
     fn: ServiceHandler
-    topics: tuple[str, ...]
+    topic: str
     msg_type: type | None = None  # extracted from fn annotation at decoration time
 
 
