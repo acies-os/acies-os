@@ -15,13 +15,15 @@ Thread model:
 from __future__ import annotations
 
 import heapq
+import socket
 import threading
 import time
+import uuid
 from typing import Any, Callable, get_type_hints
 
 import msgspec
 
-from ._cli import make_cli_decorator
+from ._cli import create_acies_cli
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
 from .router import Router
@@ -30,7 +32,14 @@ from .transport import ZenohTransport
 
 
 class AciesApp:
-    def __init__(self, name: str, host: str, router: Router | None = None) -> None:
+    def __init__(
+        self,
+        name: str | None = None,
+        host: str | None = None,
+        router: Router | None = None,
+    ) -> None:
+        resolved_name = name or uuid.uuid4().hex[:6]
+        resolved_host = host or socket.gethostname()
         if router is not None:
             self._router: Router = router
         else:
@@ -44,7 +53,7 @@ class AciesApp:
         self._timer_thread: threading.Thread | None = None
         self._task_ctxs: dict[TaskSpec, AciesContext] = {}
         self._app_state: AppState = AppState()
-        self._app_state.config['sys'] = {'host': host, 'name': name}
+        self._app_state.config['sys'] = {'host': resolved_host, 'name': resolved_name}
 
     @property
     def name(self) -> str:
@@ -86,7 +95,7 @@ class AciesApp:
         def configure(values: dict[str, Any]) -> None:
             deep_merge(self._app_state.config, values)
 
-        return make_cli_decorator(configure, **kwargs)
+        return create_acies_cli(configure, **kwargs)
 
     # ----------------------------- Lifecyle hooks -----------------------------
 
