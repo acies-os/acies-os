@@ -25,13 +25,18 @@ from .context import AciesContext, AppState, TaskState
 from .executor import Executor
 from .router import Router
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
+from .transport import ZenohTransport
 
 
 class AciesApp:
     def __init__(self, name: str, host: str, router: Router | None = None) -> None:
         self._name: str = name
         self._host: str = host
-        self._router: Router = router if router is not None else Router()
+        if router is not None:
+            self._router: Router = router
+        else:
+            self._router = Router()
+            self._router.add_transport(ZenohTransport())
         self._executor: Executor = Executor()
         self._tasks: list[TaskSpec] = []
         self._startup_hooks: list[Callable[..., None]] = []
