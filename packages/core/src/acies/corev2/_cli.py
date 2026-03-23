@@ -35,7 +35,7 @@ def _load_defaults(config_path: str) -> dict[str, Any]:
         return json.load(f)
 
 
-def make_cli_decorator(
+def create_acies_cli(
     configure: Callable[[dict[str, Any]], None], **kwargs: Any
 ) -> Callable[[Callable[..., None]], Callable[..., None]]:
     """Return a decorator that turns a function into a Click command.
