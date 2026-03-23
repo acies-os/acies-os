@@ -21,6 +21,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, TypeAlias
 
+from ._concurrency import SENTINEL, Sentinel
 from .task import Job
 
 # Injected by AciesApp; responsible for decoding, calling the handler,
@@ -28,13 +29,8 @@ from .task import Job
 Dispatcher: TypeAlias = Callable[[Job], None]
 
 
-class _Sentinel:
-    pass
-
-
-_SENTINEL = _Sentinel()
 # Sentinel tuple (deadline, created_at, sentinel) sorts last
-_SENTINEL_ENTRY = (float('inf'), float('inf'), _SENTINEL)
+_SENTINEL_ENTRY = (float('inf'), float('inf'), SENTINEL)
 
 
 class Executor:
@@ -42,7 +38,7 @@ class Executor:
         # PriorityQueue ordered by (deadline, created_at).
         # deadline=0.0 (default) degrades to FIFO via created_at.
         # Set deadline to a future monotonic timestamp to enable EDF scheduling.
-        self._queue: queue.PriorityQueue[tuple[float, float, Job | _Sentinel]] = queue.PriorityQueue()
+        self._queue: queue.PriorityQueue[tuple[float, float, Job | Sentinel]] = queue.PriorityQueue()
         self._pool: ThreadPoolExecutor | None = None
         self._dispatcher: threading.Thread | None = None
         self._dispatch: Dispatcher | None = None

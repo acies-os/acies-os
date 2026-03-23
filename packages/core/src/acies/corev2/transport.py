@@ -35,6 +35,8 @@ from typing import Callable, Protocol, TypeAlias
 
 import zenoh
 
+from ._concurrency import SENTINEL, Sentinel
+
 # Delivers encoded reply bytes back to a waiting query() caller.
 ReplyCallback: TypeAlias = Callable[[bytes], None]
 
@@ -108,10 +110,6 @@ class Transport(Protocol):
         ...
 
 
-class _Sentinel:
-    pass
-
-
 class LocalTransport:
     """In-process queue-based transport for testing and single-process apps.
 
@@ -131,12 +129,10 @@ class LocalTransport:
        the encoded bytes.
     """
 
-    _SENTINEL: _Sentinel = _Sentinel()
-
     def __init__(self) -> None:
         self._subscriptions: set[str] = set()
         self._advertisers: set[str] = set()
-        self._queue: queue.SimpleQueue[tuple[str, bytes, ReplyCallback | None] | _Sentinel] = queue.SimpleQueue()
+        self._queue: queue.SimpleQueue[tuple[str, bytes, ReplyCallback | None] | Sentinel] = queue.SimpleQueue()
         self._on_message: MessageHandler | None = None
         self._thread: threading.Thread | None = None
 
@@ -146,7 +142,7 @@ class LocalTransport:
         self._thread.start()
 
     def stop(self) -> None:
-        self._queue.put(self._SENTINEL)
+        self._queue.put(SENTINEL)
         if self._thread:
             self._thread.join()
 
@@ -156,7 +152,7 @@ class LocalTransport:
                 _ = self._queue.get(block=False)
             except queue.Empty:
                 break
-        self._queue.put(self._SENTINEL)
+        self._queue.put(SENTINEL)
         if self._thread:
             self._thread.join()
 
@@ -197,7 +193,7 @@ class LocalTransport:
     def _receiver_loop(self) -> None:
         while True:
             item = self._queue.get()
-            if item is self._SENTINEL:
+            if item is SENTINEL:
                 break
             assert isinstance(item, tuple)
             topic, raw, reply_fn = item
