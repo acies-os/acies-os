@@ -11,6 +11,7 @@ This avoids any circular imports between context, router, and executor.
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass, field
 from typing import Any, Callable, TypeAlias
 
 import msgspec
@@ -33,6 +34,7 @@ def deep_merge(target: dict[str, Any], source: dict[str, Any]) -> None:
             target[key] = value
 
 
+@dataclass
 class AppState:
     """Shared state across all handlers in an app.
 
@@ -41,18 +43,17 @@ class AppState:
     data   — free-form transient state; internal to the app, not externally controlled.
     """
 
-    def __init__(self) -> None:
-        self.lock: threading.RLock = threading.RLock()
-        self.config: dict[str, Any] = {}
-        self.data: dict[str, Any] = {}
+    lock: threading.RLock = field(default_factory=threading.RLock)
+    config: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
 class TaskState:
     """Per-task state, shared across all jobs of the same task."""
 
-    def __init__(self) -> None:
-        self.lock: threading.RLock = threading.RLock()
-        self.data: dict[str, Any] = {}
+    lock: threading.RLock = field(default_factory=threading.RLock)
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 class AciesContext:
