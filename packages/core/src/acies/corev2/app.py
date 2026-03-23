@@ -17,11 +17,12 @@ from __future__ import annotations
 import heapq
 import threading
 import time
-from typing import Callable, get_type_hints
+from typing import Any, Callable, get_type_hints
 
 import msgspec
 
-from .context import AciesContext, AppState, TaskState
+from ._cli import make_cli_decorator
+from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
 from .router import Router
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
@@ -30,8 +31,6 @@ from .transport import ZenohTransport
 
 class AciesApp:
     def __init__(self, name: str, host: str, router: Router | None = None) -> None:
-        self._name: str = name
-        self._host: str = host
         if router is not None:
             self._router: Router = router
         else:
@@ -45,14 +44,49 @@ class AciesApp:
         self._timer_thread: threading.Thread | None = None
         self._task_ctxs: dict[TaskSpec, AciesContext] = {}
         self._app_state: AppState = AppState()
+        self._app_state.config['sys'] = {'host': host, 'name': name}
 
     @property
     def name(self) -> str:
-        return self._name
+        return self._app_state.config['sys']['name']  # type: ignore[no-any-return]
 
     @property
     def host(self) -> str:
-        return self._host
+        return self._app_state.config['sys']['host']  # type: ignore[no-any-return]
+
+    @property
+    def state(self) -> AppState:
+        return self._app_state
+
+    # --------------------------------- CLI -----------------------------------
+
+    def cli(self, **kwargs: Any) -> Callable[[Callable[..., None]], Callable[..., None]]:
+        """Decorator that turns a function into a Click command with middleware options.
+
+        Middleware options (--acies-host, --acies-name) are injected and consumed
+        before the user's function runs; they never appear in the user's kwargs.
+        Parsed values are stored in app_state.config['sys'] and are accessible
+        to handlers via ctx.app.config['sys'].
+
+        Usage::
+
+            acies = AciesApp('mic', 'placeholder')
+            cli = acies.cli()
+
+            @cli
+            @click.option('--threshold', default=0.5)
+            def main(**kwargs):
+                acies.state.data.update(kwargs)
+                acies.run()
+
+            if __name__ == '__main__':
+                main()
+        """
+
+        def configure(values: dict[str, Any]) -> None:
+            deep_merge(self._app_state.config, values)
+
+        return make_cli_decorator(configure, **kwargs)
 
     # ----------------------------- Lifecyle hooks -----------------------------
 
@@ -111,7 +145,7 @@ class AciesApp:
                 job.spec.fn(ctx)
             case SubscriberSpec() | ServiceSpec() as spec:
                 assert job.raw is not None, 'SubscriberSpec/ServiceSpec job must have raw bytes'
-                msg = (
+                msg = (  # pyright: ignore[reportUnknownVariableType]
                     msgspec.msgpack.decode(job.raw, type=spec.msg_type)
                     if spec.msg_type is not None
                     else msgspec.msgpack.decode(job.raw)
