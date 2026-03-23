@@ -20,11 +20,30 @@ Publisher: TypeAlias = Callable[[str, bytes], None]
 Querier: TypeAlias = Callable[[str, bytes, float], bytes | None]
 
 
+def deep_merge(target: dict[str, Any], source: dict[str, Any]) -> None:
+    """Recursively merge source into target in-place.
+
+    If both target and source have a dict at the same key, recurse.
+    Otherwise overwrite the target value with the source value.
+    """
+    for key, value in source.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            deep_merge(target[key], value)
+        else:
+            target[key] = value
+
+
 class AppState:
-    """Shared state across all handlers in an app."""
+    """Shared state across all handlers in an app.
+
+    config — nested dict; externally controllable via AciesGet/Set.
+             The 'sys' key is reserved for middleware (host, name, etc.).
+    data   — free-form transient state; internal to the app, not externally controlled.
+    """
 
     def __init__(self) -> None:
         self.lock: threading.RLock = threading.RLock()
+        self.config: dict[str, Any] = {}
         self.data: dict[str, Any] = {}
 
 

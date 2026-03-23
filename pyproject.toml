@@ -38,6 +38,7 @@ lint.mccabe = { max-complexity = 13 }
 format = { quote-style = 'single' }
 
 [tool.basedpyright]
+typeCheckingMode = "recommended"
 include = ["packages/*/src"]
 extraPaths = [
   "packages/core/src",
