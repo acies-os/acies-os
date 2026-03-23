@@ -95,7 +95,7 @@ class Executor:
         assert self._pool is not None, '_dispatch_loop started before pool was initialized'
         while True:
             _, _, item = self._queue.get()
-            if item is _SENTINEL:
+            if item is SENTINEL:
                 break
             assert isinstance(item, Job), f'Expected Job, got {type(item)}'
             _ = self._pool.submit(self._run_job, item)

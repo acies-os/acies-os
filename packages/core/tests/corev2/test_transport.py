@@ -3,34 +3,35 @@ import time
 
 import msgspec
 
-from acies.corev2.transport import LocalTransport, _topic_matches
+from acies.corev2._topics import matches
+from acies.corev2.transport import LocalTransport
 
 # ---------------------------------------------------------------------------
-# _topic_matches unit tests
+# matches unit tests
 # ---------------------------------------------------------------------------
 
 
 def test_exact_match():
-    assert _topic_matches('sensors/temp', 'sensors/temp')
-    assert not _topic_matches('sensors/temp', 'sensors/other')
+    assert matches('sensors/temp', 'sensors/temp')
+    assert not matches('sensors/temp', 'sensors/other')
 
 
 def test_single_wildcard_matches_one_chunk():
-    assert _topic_matches('sensors/*/geo', 'sensors/unit1/geo')
-    assert _topic_matches('sensors/*/geo', 'sensors/abc/geo')
+    assert matches('sensors/*/geo', 'sensors/unit1/geo')
+    assert matches('sensors/*/geo', 'sensors/abc/geo')
 
 
 def test_single_wildcard_does_not_match_wrong_depth():
     # * must match exactly one chunk — sensors/geo has no middle chunk
-    assert not _topic_matches('sensors/*/geo', 'sensors/geo')
+    assert not matches('sensors/*/geo', 'sensors/geo')
     # * does not span slashes
-    assert not _topic_matches('sensors/*/geo', 'sensors/unit1/unit2/geo')
+    assert not matches('sensors/*/geo', 'sensors/unit1/unit2/geo')
 
 
 def test_double_star_wildcard_matches_multiple_segments():
-    assert _topic_matches('sensors/**', 'sensors/mic')
-    assert _topic_matches('sensors/**', 'sensors/unit1/geo')
-    assert _topic_matches('sensors/**', 'sensors/a/b/c')
+    assert matches('sensors/**', 'sensors/mic')
+    assert matches('sensors/**', 'sensors/unit1/geo')
+    assert matches('sensors/**', 'sensors/a/b/c')
 
 
 # ---------------------------------------------------------------------------
