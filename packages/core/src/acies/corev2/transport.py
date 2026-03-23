@@ -1,4 +1,4 @@
-"""Transport protocol and LocalTransport.
+"""Transport protocol, LocalTransport, and ZenohTransport.
 
 Transport is a Protocol — backends don't need to inherit from it, they just
 need to implement the required methods. The type checker enforces correctness
@@ -10,7 +10,7 @@ to decide which transport handles a given topic.
 
 Concrete backends:
   ZenohTransport     — cross-node pub/sub + queryable; handles bare topics (default)
-  LocalTransport     — in-process queue; used for tests (implemented here)
+  LocalTransport     — in-process queue; used for tests
   WebSocketTransport — browser/UI; topic prefix 'ws://'
 
 on_message callback convention
@@ -32,6 +32,8 @@ import queue
 import re
 import threading
 from typing import Callable, Protocol, TypeAlias
+
+import zenoh
 
 # Delivers encoded reply bytes back to a waiting query() caller.
 ReplyCallback: TypeAlias = Callable[[bytes], None]
@@ -201,3 +203,99 @@ class LocalTransport:
             topic, raw, reply_fn = item
             if self._on_message is not None:
                 self._on_message(topic, raw, reply_fn)
+
+
+class ZenohTransport:
+    """Zenoh-backed transport — the primary production backend.
+
+    Each AciesApp holds one ZenohTransport. Cross-node and cross-process
+    routing is handled transparently by the zenoh network. Same-host IPC
+    uses UDP multicast discovery (no daemon required); for explicit
+    endpoints pass a custom zenoh.Config.
+
+    Args:
+        config: Optional zenoh.Config. Defaults to zenoh.Config() (peer
+                mode, UDP multicast discovery).
+    """
+
+    def __init__(self, config: zenoh.Config | None = None) -> None:
+        self._config: zenoh.Config = config if config is not None else zenoh.Config()
+        self._session: zenoh.Session | None = None
+        self._on_message: MessageHandler | None = None
+        self._subscribers: list[zenoh.Subscriber[None]] = []
+        self._queryables: list[zenoh.Queryable[None]] = []
+
+    def start(self, on_message: MessageHandler) -> None:
+        """Open the zenoh session and store the inbound message callback."""
+        self._on_message = on_message
+        self._session = zenoh.open(self._config)
+
+    def stop(self) -> None:
+        """Undeclare all subscribers/queryables and close the session."""
+        for sub in self._subscribers:
+            sub.undeclare()  # pyright: ignore[reportUnknownMemberType]
+        self._subscribers.clear()
+        for qb in self._queryables:
+            qb.undeclare()  # pyright: ignore[reportUnknownMemberType]
+        self._queryables.clear()
+        if self._session is not None:
+            self._session.close()  # pyright: ignore[reportUnknownMemberType]
+            self._session = None
+
+    def abort(self) -> None:
+        """Immediate shutdown — same as stop() for zenoh."""
+        self.stop()
+
+    def subscribe(self, topic: str) -> None:
+        """Declare a zenoh subscriber that forwards samples to on_message."""
+        assert self._session is not None, 'call start() before subscribe()'
+
+        def _on_sample(sample: zenoh.Sample) -> None:
+            assert self._on_message is not None, 'on_message callback must be set before subscribing'
+            self._on_message(str(sample.key_expr), bytes(sample.payload), None)
+
+        self._subscribers.append(self._session.declare_subscriber(topic, _on_sample))
+
+    def publish(self, topic: str, raw: bytes) -> None:
+        """Put raw bytes to topic."""
+        assert self._session is not None, 'call start() before publish()'
+        self._session.put(topic, raw)  # pyright: ignore[reportUnknownMemberType]
+
+    def advertise(self, topic: str) -> None:
+        """Declare a zenoh queryable.
+
+        Creates a reply_fn closure over query.reply() and passes it as the
+        third argument to on_message so the dispatch layer can call it after
+        the handler returns.
+        """
+        assert self._session is not None, 'call start() before advertise()'
+
+        def _on_query(query: zenoh.Query) -> None:
+            if self._on_message is None:
+                return
+            raw = bytes(query.payload) if query.payload is not None else b''
+
+            def reply_fn(encoded: bytes) -> None:
+                query.reply(query.key_expr, encoded)  # pyright: ignore[reportUnknownMemberType]
+
+            self._on_message(str(query.key_expr), raw, reply_fn)
+
+        self._queryables.append(self._session.declare_queryable(topic, _on_query))
+
+    def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
+        """Send a zenoh get and block until a reply arrives or timeout elapses."""
+        assert self._session is not None, 'call start() before query()'
+
+        event = threading.Event()
+        result: list[bytes | None] = [None]
+
+        def _on_reply(reply: zenoh.Reply) -> None:
+            sample = reply.ok
+            if sample is not None:
+                result[0] = bytes(sample.payload)
+                event.set()
+
+        self._session.get(topic, _on_reply, payload=raw, timeout=timeout)
+        # Wait slightly longer than zenoh's own timeout so zenoh fires first.
+        _ = event.wait(timeout + 0.5)
+        return result[0]
