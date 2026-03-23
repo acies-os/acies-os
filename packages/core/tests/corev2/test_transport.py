@@ -3,7 +3,7 @@ import time
 
 import msgspec
 
-from acies.corev2._topics import matches
+from acies.corev2.namespace import matches
 from acies.corev2.transport import LocalTransport
 
 # ---------------------------------------------------------------------------
