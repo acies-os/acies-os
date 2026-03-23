@@ -20,17 +20,6 @@ import pytest
 
 from acies.corev2.transport import ZenohTransport
 
-# ---------------------------------- helpers ----------------------------------
-
-
-def _make_pair() -> tuple[ZenohTransport, ZenohTransport]:
-    """Return two started ZenohTransport instances."""
-    publisher = ZenohTransport()
-    subscriber = ZenohTransport()
-    publisher.start(lambda t, r, f=None: None)  # publisher doesn't need inbound
-    return publisher, subscriber
-
-
 # ---------------------------- pub/sub smoke tests ----------------------------
 
 
