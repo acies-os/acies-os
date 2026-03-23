@@ -32,8 +32,9 @@ import threading
 from typing import TYPE_CHECKING
 
 from ._concurrency import SENTINEL, Sentinel
+from ._topics import matches
 from .task import Job, ServiceSpec, SubscriberSpec
-from .transport import ReplyCallback, Transport, _topic_matches
+from .transport import ReplyCallback, Transport
 
 if TYPE_CHECKING:
     from .executor import Executor
@@ -151,12 +152,12 @@ class Router:
             if reply_fn is not None:
                 # Incoming query — route to the matching service spec
                 for pattern, spec in self._services.items():
-                    if _topic_matches(pattern, topic):
+                    if matches(pattern, topic):
                         executor.enqueue(Job(spec=spec, raw=raw, reply_fn=reply_fn))
                         break
             else:
                 # Incoming pub — fan out to all matching subscriber specs
                 for pattern, specs in self._subscriptions.items():
-                    if _topic_matches(pattern, topic):
+                    if matches(pattern, topic):
                         for spec in specs:
                             executor.enqueue(Job(spec=spec, raw=raw))

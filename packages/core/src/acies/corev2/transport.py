@@ -29,13 +29,13 @@ the reply.
 from __future__ import annotations
 
 import queue
-import re
 import threading
 from typing import Callable, Protocol, TypeAlias
 
 import zenoh
 
 from ._concurrency import SENTINEL, Sentinel
+from ._topics import matches
 
 # Delivers encoded reply bytes back to a waiting query() caller.
 ReplyCallback: TypeAlias = Callable[[bytes], None]
@@ -43,31 +43,6 @@ ReplyCallback: TypeAlias = Callable[[bytes], None]
 # Callback passed to Transport.start(); called on every inbound message.
 # reply_callback is None for pub messages, set for incoming queries.
 MessageHandler: TypeAlias = Callable[[str, bytes, ReplyCallback | None], None]
-
-
-def _topic_matches(pattern: str, topic: str) -> bool:
-    """Return True if topic matches pattern.
-
-    Supports zenoh-style wildcards:
-      *   — exactly one chunk (non-empty sequence of non-'/' chars)
-      **  — any number of chunks, including zero (may span multiple '/' separators)
-    Exact match always works.
-    """
-    if pattern == topic:
-        return True
-    regex = ''
-    i = 0
-    while i < len(pattern):
-        if pattern[i : i + 2] == '**':
-            regex += '.*'
-            i += 2
-        elif pattern[i] == '*':
-            regex += '[^/]+'
-            i += 1
-        else:
-            regex += re.escape(pattern[i])
-            i += 1
-    return bool(re.fullmatch(regex, topic))
 
 
 class Transport(Protocol):
@@ -161,7 +136,7 @@ class LocalTransport:
 
     def publish(self, topic: str, raw: bytes) -> None:
         """Deliver raw bytes if topic matches any active subscription."""
-        if any(_topic_matches(pattern, topic) for pattern in self._subscriptions):
+        if any(matches(pattern, topic) for pattern in self._subscriptions):
             self._queue.put((topic, raw, None))
 
     def advertise(self, topic: str) -> None:
@@ -188,7 +163,7 @@ class LocalTransport:
     # ------------------------------------------------------------------
 
     def _is_advertised(self, topic: str) -> bool:
-        return any(_topic_matches(pattern, topic) for pattern in self._advertisers)
+        return any(matches(pattern, topic) for pattern in self._advertisers)
 
     def _receiver_loop(self) -> None:
         while True:
