@@ -31,18 +31,12 @@ import queue
 import threading
 from typing import TYPE_CHECKING
 
+from ._concurrency import SENTINEL, Sentinel
 from .task import Job, ServiceSpec, SubscriberSpec
 from .transport import ReplyCallback, Transport, _topic_matches
 
 if TYPE_CHECKING:
     from .executor import Executor
-
-
-class _Sentinel:
-    pass
-
-
-_SENTINEL = _Sentinel()
 
 
 class Router:
@@ -51,7 +45,7 @@ class Router:
         # Explicit prefix routes, e.g. ('ws://', ws_transport). First match wins.
         self._prefix_routes: list[tuple[str, Transport]] = []
 
-        self._inbound: queue.Queue[tuple[str, bytes, ReplyCallback | None] | _Sentinel] = queue.Queue()
+        self._inbound: queue.Queue[tuple[str, bytes, ReplyCallback | None] | Sentinel] = queue.Queue()
         self._subscriptions: dict[str, list[SubscriberSpec]] = {}
         self._services: dict[str, ServiceSpec] = {}
         self._thread: threading.Thread | None = None
@@ -86,7 +80,7 @@ class Router:
 
     def stop(self) -> None:
         """Stop router thread and all transports."""
-        self._inbound.put(_SENTINEL)
+        self._inbound.put(SENTINEL)
         if self._thread:
             self._thread.join()
         for transport in self._all_transports():
@@ -143,7 +137,7 @@ class Router:
     def _route_loop(self, executor: 'Executor') -> None:
         while True:
             item = self._inbound.get()
-            if item is _SENTINEL:
+            if item is SENTINEL:
                 break
             assert isinstance(item, tuple)
             topic, raw, reply_fn = item
