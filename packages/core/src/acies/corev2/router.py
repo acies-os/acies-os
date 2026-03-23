@@ -32,7 +32,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from ._concurrency import SENTINEL, Sentinel
-from ._topics import matches
+from .namespace import matches
 from .task import Job, ServiceSpec, SubscriberSpec
 from .transport import ReplyCallback, Transport
 

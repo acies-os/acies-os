@@ -35,7 +35,7 @@ from typing import Callable, Protocol, TypeAlias
 import zenoh
 
 from ._concurrency import SENTINEL, Sentinel
-from ._topics import matches
+from .namespace import matches
 
 # Delivers encoded reply bytes back to a waiting query() caller.
 ReplyCallback: TypeAlias = Callable[[bytes], None]
