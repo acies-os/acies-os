@@ -26,6 +26,7 @@ import msgspec
 from ._cli import create_acies_cli
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
+from .namespace import Namespace
 from .router import Router
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ZenohTransport
@@ -54,6 +55,7 @@ class AciesApp:
         self._task_ctxs: dict[TaskSpec, AciesContext] = {}
         self._app_state: AppState = AppState()
         self._app_state.config['sys'] = {'host': resolved_host, 'name': resolved_name}
+        self._ns: Namespace = Namespace(resolved_host, resolved_name)
 
     @property
     def name(self) -> str:
@@ -173,6 +175,7 @@ class AciesApp:
                 query_fn=self._router.query,
                 app=self._app_state,
                 task=TaskState(),
+                ns=self._ns,
             )
             for task in self._tasks
         }
@@ -206,6 +209,7 @@ class AciesApp:
             query_fn=self._router.query,
             app=self._app_state,
             task=TaskState(),
+            ns=self._ns,
         )
 
         for hook in self._startup_hooks:

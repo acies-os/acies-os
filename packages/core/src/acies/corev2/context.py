@@ -16,6 +16,8 @@ from typing import Any, Callable, TypeAlias
 
 import msgspec
 
+from .namespace import Namespace
+
 # Matches router.publish / router.query signatures; injected into AciesContext.
 Publisher: TypeAlias = Callable[[str, bytes], None]
 Querier: TypeAlias = Callable[[str, bytes, float], bytes | None]
@@ -63,11 +65,13 @@ class AciesContext:
         query_fn: Querier,
         app: AppState,
         task: TaskState,
+        ns: Namespace,
     ) -> None:
         self._publish_fn: Publisher = publish_fn
         self._query_fn: Querier = query_fn
         self.app: AppState = app
         self.task: TaskState = task
+        self.ns: Namespace = ns
 
     def publish(self, topic: str, msg: msgspec.Struct) -> None:
         """Encode msg and publish raw bytes to topic.
