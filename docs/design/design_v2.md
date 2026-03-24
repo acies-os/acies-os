@@ -36,15 +36,17 @@ bytes. Users define their own types or use built-in types like `AciesTensor`.
 
 ```python
 import msgspec
+from acies.corev2 import Topic
 
 class SensorReading(msgspec.Struct, frozen=True):
     source: str
     timestamp: int
     value: float
 
-@app.subscribe('*/sensor/temp', '*/sensor/humidity')
+@app.subscribe(Topic('sensor/temp'), Topic('sensor/humidity'))
 def handle(ctx: AciesContext, msg: SensorReading):
-    ctx.publish('edge-01/processor/temp', SensorReading(
+    # Inside handlers, use ctx.ns to construct topics as plain strings
+    ctx.publish(ctx.ns.topic('processor/temp'), SensorReading(
         source='edge-01', timestamp=msg.timestamp, value=msg.value * 1.8 + 32
     ))
 ```
@@ -56,7 +58,7 @@ Triggered at a fixed interval. No message is delivered.
 ```python
 @app.schedule(interval=1.0)
 def poll(ctx: AciesContext):
-    ctx.publish('edge-01/sensor/temp', SensorReading(
+    ctx.publish(ctx.ns.topic('sensor/temp'), SensorReading(
         source='edge-01', timestamp=now_ns(), value=read_hw_sensor()
     ))
 ```
@@ -67,90 +69,105 @@ Triggered by an incoming query. The handler's return value is sent as the
 reply. Implemented using zenoh's query/queryable mechanism.
 
 ```python
+from acies.corev2 import CtlTopic
+
 class StatusReply(msgspec.Struct, frozen=True):
     source: str
     ok: bool
 
-@app.service('edge-01/controller/rpc/status')
+@app.service(CtlTopic('status'))
 def status(ctx: AciesContext, msg: msgspec.Struct) -> StatusReply:
     return StatusReply(source='edge-01', ok=True)
 ```
 
 ## Topic Namespace
 
-All topics follow a three-part hierarchical convention inspired by
-Named Data Networking (NDN) / content-centric networking: the name IS the
-system. Routing, transport selection, access control, and service discovery
-are all derived from the name structure rather than being separate mechanisms.
+Topics are free-form zenoh key expressions. The framework imposes no mandatory
+structure on data topics — applications may organise them domain-centrically
+(ROS/MQTT style) or device-centrically, or mix both.
 
+Control topics are the only exception: they are always addressed to a specific
+device/service instance and follow `<host>/<name>/ctl/<service>`.
+
+### Topic types
+
+Four forms are accepted wherever a topic is expected (`app.subscribe`,
+`app.service`, `ctx.publish`, `ctx.query`):
+
+| Form | Example | Resolves to |
+|------|---------|-------------|
+| `str` | `'building/a/temperature'` | used as-is |
+| `str` with `{key}` | `'{sys[host]}/{sys[name]}/audio'` | resolved from `app.state.config` at `run()` |
+| `Topic(path, prefix=True)` | `Topic('audio/raw')` | `edge-01/mic/audio/raw` |
+| `CtlTopic(path)` | `CtlTopic('kv')` | `edge-01/mic/ctl/kv` |
+| `TopicVar(key)` | `TopicVar('input_topic')` | `app.state.config['input_topic']` at `run()` |
+
+`Topic` and `CtlTopic` are resolved lazily at `run()` time, so CLI-overridden
+`host`/`name` are always reflected correctly.
+
+`Topic` prefix options:
+- `prefix=True` (default) — prepends `<host>/<name>`
+- `prefix=''` or `False` — no prefix (domain-centric)
+- `prefix='org/site'` — custom prefix string (verbatim)
+
+### Wildcards
+
+Zenoh key expression wildcards apply to the full topic path:
+
+```python
+# All temperature from any device/service
+@app.subscribe('**/temperature')
+
+# All outputs from this app
+@app.subscribe(Topic('**'))                  # → edge-01/mic/**
+
+# All ctl heartbeats across all devices
+@app.subscribe('**/ctl/heartbeat')
+
+# Domain-centric: all room temperature sensors
+@app.subscribe('building/*/room/*/temperature')
 ```
-<host>/<service>/<name>
-```
 
-| Segment     | Meaning                                   | Example                           |
-| ----------- | ----------------------------------------- | --------------------------------- |
-| `<host>`    | Unique logical device name                | `edge-01`, `truck-7`              |
-| `<service>` | `AciesApp` name                           | `mic`, `classifier`, `controller` |
-| `<name>`    | Output name; may contain `/` sub-segments | `audio/raw`, `temp`, `rpc/status` |
-
-`<host>` is assigned at deployment time — by configuration, a UUID combined
-with a device label, or a fleet management system. The framework assumes it is
-unique within the deployment and stable for the lifetime of the device.
+Wildcard rules: `*` matches one non-empty, non-`/` segment; `**` matches any
+number of segments; `$*` is an infix pattern within a segment (e.g.
+`thermo$*`). Selector characters `?` and `#` are forbidden.
 
 ### Transport selection
 
-The router uses a simple default-plus-prefix-override rule — no topology
-inference in application code:
+The router uses a simple default-plus-prefix-override rule:
 
-| Topic         | Transport used                                                            |
-| ------------- | ------------------------------------------------------------------------- |
-| `ws://...`    | `WebSocketTransport` (browser/UI)                                         |
-| anything else | default transport (ZenohTransport in production, LocalTransport in tests) |
+| Topic      | Transport used                                                            |
+| ---------- | ------------------------------------------------------------------------- |
+| `ws://...` | `WebSocketTransport` (browser/UI)                                         |
+| everything else | default transport (ZenohTransport in production, LocalTransport in tests) |
 
-Locality is handled transparently by the zenoh infrastructure (see
-[Zenoh Network Topology](#zenoh-network-topology) below), not by the
-application or router.
+Application code never specifies a transport. Moving a service between
+processes or hosts requires no code changes.
 
-Application code never specifies a transport. Handlers write plain topic
-strings. Moving a service between processes or hosts requires no code changes.
+### Two topic APIs
 
-### Convention enforcement
-
-All `ctx.publish()` and `ctx.query()` calls in production code must use
-fully-qualified topics. The framework validates the `<host>/<service>/`
-prefix at publish time and raises if the topic is malformed. The `ws://`
-prefix is the only exception (WebSocket topics are browser-facing and do
-not follow the three-part convention).
-
-### Cross-device subscriptions and wildcards
-
-Zenoh-style wildcards apply to the full topic path:
+**Decorator time** — `app.subscribe()` and `app.service()` run at import time,
+before CLI arguments are available. Use lazy types that resolve at `run()`:
 
 ```python
-# All temperature readings from any device
-@app.subscribe('*/sensor/temp')
+from acies.corev2 import Topic, CtlTopic, TopicVar
 
-# All outputs from service 'mic' on any device
-@app.subscribe('*/mic/**')
-
-# A specific device's classifier output
-@app.subscribe('edge-01/classifier/result')
+@app.subscribe(Topic('audio/raw'))          # → edge-01/mic/audio/raw
+@app.subscribe(Topic('**'))                 # → edge-01/mic/**
+@app.subscribe(Topic('room/5', prefix=''))  # → room/5  (domain-centric)
+@app.service(CtlTopic('kv'))               # → edge-01/mic/ctl/kv
+@app.subscribe(TopicVar('input_topic'))     # → app.state.config['input_topic']
 ```
 
-### Example topics
+**Handler time** — inside handlers, `ctx.ns` is a resolved `Namespace`.
+`ctx.publish()` and `ctx.query()` accept plain `str` only:
 
 ```python
-app = AciesApp(name='mic', host='edge-01')
-
-# This service's outputs
-ctx.publish('edge-01/mic/audio/raw', AciesTensor(...))
-ctx.publish('edge-01/mic/rms', SensorReading(...))
-
-# Calling a service on the same host (routes via zenoh UDS)
-ctx.query('edge-01/classifier/rpc/infer', payload, timeout=0.5)
-
-# Calling a service on a remote host (routes via zenoh network)
-ctx.query('edge-02/controller/rpc/status', payload, timeout=1.0)
+def handler(ctx: AciesContext, msg: SensorReading):
+    ctx.publish(ctx.ns.topic('audio/raw'), AciesTensor(...))  # edge-01/mic/audio/raw
+    ctx.publish('building/a/room/5/temp', msg)                # domain-centric
+    ctx.query(ctx.ns.ctl.kv, payload, timeout=0.5)            # edge-01/mic/ctl/kv
+    ctx.query('edge-02/classifier/ctl/infer', payload, timeout=1.0)  # cross-device
 ```
 
 ## Source Nodes
@@ -216,35 +233,41 @@ reused across all jobs of that spec — no per-job allocation.
 
 ## AppState and TaskState
 
-Both are a `lock` + `data` dict. Thread safety is the caller's responsibility:
-acquire the lock for any compound read-modify-write operation.
+`AppState` has two dicts and a lock. Thread safety is the caller's
+responsibility: acquire the lock for any compound read-modify-write operation.
 
 ```python
 class AppState:
     lock: threading.RLock
-    data: dict
+    config: dict   # externally controllable; 'sys' key reserved for middleware
+    data: dict     # free-form transient state; internal to the app
 
 class TaskState:
     lock: threading.RLock
     data: dict
 ```
 
-Usage:
+`config` is populated from CLI arguments (via `app.cli()`) and may be updated
+externally via AciesSet (planned). The `sys` key is reserved:
 
 ```python
-@app.subscribe('*/sensor/temp')
+app.state.config['sys']  # {'host': ..., 'name': ..., 'state': ..., ...}
+```
+
+`data` is free-form transient state not externally controlled. Usage:
+
+```python
+@app.subscribe('**/sensor/temp')
 def accumulate(ctx: AciesContext, msg: SensorReading):
-    # task-local: only this handler's jobs touch this state
     with ctx.task.lock:
         ctx.task.data.setdefault('readings', []).append(msg.value)
 
 @app.schedule(interval=5.0)
 def report(ctx: AciesContext):
-    # cross-handler: share a value produced by another handler
     with ctx.app.lock:
         last = ctx.app.data.get('last_temp')
     if last is not None:
-        ctx.publish('edge-01/aggregator/reports/temp', SensorReading(...))
+        ctx.publish(ctx.ns.topic('aggregator/reports/temp'), SensorReading(...))
 ```
 
 ## Lifecycle Hooks
