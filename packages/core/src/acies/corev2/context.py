@@ -16,11 +16,13 @@ from typing import Any, Callable, TypeAlias
 
 import msgspec
 
+from .msg import NanoSecond
 from .namespace import Namespace
 
-# Matches router.publish / router.query signatures; injected into AciesContext.
+# Matches router.publish / router.query / time.time_ns signatures; injected into AciesContext.
 Publisher: TypeAlias = Callable[[str, bytes], None]
 Querier: TypeAlias = Callable[[str, bytes, float], bytes | None]
+NowFn: TypeAlias = Callable[[], NanoSecond]
 
 
 def deep_merge(target: dict[str, Any], source: dict[str, Any]) -> None:
@@ -63,15 +65,21 @@ class AciesContext:
         self,
         publish_fn: Publisher,
         query_fn: Querier,
+        now_fn: NowFn,
         app: AppState,
         task: TaskState,
         ns: Namespace,
     ) -> None:
         self._publish_fn: Publisher = publish_fn
         self._query_fn: Querier = query_fn
+        self._now_fn: NowFn = now_fn
         self.app: AppState = app
         self.task: TaskState = task
         self.ns: Namespace = ns
+
+    def now(self) -> NanoSecond:
+        """Return current time in nanoseconds. Mockable in tests via now_fn injection."""
+        return self._now_fn()
 
     def publish(self, topic: str, msg: msgspec.Struct) -> None:
         """Encode msg and publish raw bytes to topic.

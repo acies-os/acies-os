@@ -15,8 +15,15 @@ _DEFAULT_HEARTBEAT_INTERVAL: float = 5.0
 
 
 def _heartbeat(ctx: AciesContext) -> None:
-    state = ctx.app.config.get('sys', {}).get('state', 'active')
-    ctx.publish(ctx.ns.ctl.heartbeat, AciesHeartbeat(state=state))
+    sys = ctx.app.config.get('sys', {})
+    ctx.publish(
+        ctx.ns.ctl.heartbeat,
+        AciesHeartbeat(
+            source=ctx.ns.base,
+            state=sys.get('state', 'active'),
+            timestamp=ctx.now(),
+        ),
+    )
 
 
 def make_heartbeat_spec(interval: float = _DEFAULT_HEARTBEAT_INTERVAL) -> ScheduleSpec:
