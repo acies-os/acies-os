@@ -30,8 +30,7 @@ import msgspec
 
 
 class AciesHeartbeat(msgspec.Struct, frozen=True):
-    source: str
-    timestamp: int
+    state: str
 
 
 class AciesGet(msgspec.Struct, frozen=True):
