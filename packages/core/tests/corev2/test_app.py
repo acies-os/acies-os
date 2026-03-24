@@ -5,9 +5,11 @@ import time
 from contextlib import contextmanager
 
 import msgspec
+import pytest
 
 from acies.corev2.app import AciesApp
 from acies.corev2.context import AciesContext
+from acies.corev2.namespace import CtlTopic, Topic, TopicVar
 from acies.corev2.router import Router
 from acies.corev2.transport import LocalTransport
 
@@ -205,6 +207,115 @@ def test_ctx_app_state_shared_across_handlers():
         assert done.wait(timeout=2.0), 'handler_b never read shared state'
 
     assert read_by_b == [99]
+
+
+def test_subscribe_topic_template_resolved_from_config():
+    """A {placeholder} topic is resolved from app.state.config before wiring."""
+    app, router, ready = _make_app()
+
+    class Msg(msgspec.Struct):
+        value: int
+
+    received: list[int] = []
+    done = threading.Event()
+
+    @app.subscribe('{input_topic}')
+    def handler(ctx: AciesContext, msg: Msg):
+        received.append(msg.value)
+        done.set()
+
+    app.state.config['input_topic'] = 'sensors/temp'
+
+    with running(app, ready=ready):
+        router.publish('sensors/temp', msgspec.msgpack.encode(Msg(value=7)))
+        assert done.wait(timeout=2.0), 'templated subscriber never fired'
+
+    assert received == [7]
+
+
+def test_subscribe_topic():
+    """Topic resolves to host/name/... at run() time."""
+    app, router, ready = _make_app()
+
+    class Msg(msgspec.Struct):
+        value: int
+
+    received: list[int] = []
+    done = threading.Event()
+
+    @app.subscribe(Topic('audio/raw'))
+    def handler(ctx: AciesContext, msg: Msg):
+        received.append(msg.value)
+        done.set()
+
+    with running(app, ready=ready):
+        router.publish('test-host/test-app/audio/raw', msgspec.msgpack.encode(Msg(value=1)))
+        assert done.wait(timeout=2.0), 'Topic subscriber never fired'
+
+    assert received == [1]
+
+
+def test_service_ctl_topic():
+    """CtlTopic resolves to host/name/ctl/... at run() time."""
+    app, router, ready = _make_app()
+
+    class Req(msgspec.Struct):
+        x: int
+
+    class Resp(msgspec.Struct):
+        y: int
+
+    @app.service(CtlTopic('double'))
+    def double(ctx: AciesContext, msg: Req) -> Resp:
+        return Resp(y=msg.x * 2)
+
+    with running(app, ready=ready):
+        raw = router.query(
+            'test-host/test-app/ctl/double',
+            msgspec.msgpack.encode(Req(x=5)),
+            timeout=2.0,
+        )
+
+    assert raw is not None
+    assert msgspec.msgpack.decode(raw, type=Resp).y == 10
+
+
+def test_subscribe_topic_var():
+    """TopicVar resolves from app.state.config at run() time."""
+    app, router, ready = _make_app()
+
+    class Msg(msgspec.Struct):
+        value: int
+
+    received: list[int] = []
+    done = threading.Event()
+
+    @app.subscribe(TopicVar('input_topic'))
+    def handler(ctx: AciesContext, msg: Msg):
+        received.append(msg.value)
+        done.set()
+
+    app.state.config['input_topic'] = 'sensors/temp'
+
+    with running(app, ready=ready):
+        router.publish('sensors/temp', msgspec.msgpack.encode(Msg(value=3)))
+        assert done.wait(timeout=2.0), 'TopicVar subscriber never fired'
+
+    assert received == [3]
+
+
+def test_subscribe_unresolved_template_raises():
+    """run() raises ValueError if a topic template key is missing from config."""
+    router = Router()
+    router.add_transport(LocalTransport())
+    app = AciesApp('test', 'host', router=router)
+
+    @app.subscribe('{missing_key}')
+    def handler(ctx: AciesContext, msg: object) -> None:
+        pass
+
+    with pytest.raises(ValueError, match='missing_key'):
+        app.run()
 
 
 def test_stop_unblocks_run_and_shutdown_hook_runs():

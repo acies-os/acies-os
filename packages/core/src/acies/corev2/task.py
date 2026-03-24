@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, TypeAlias
 
 if TYPE_CHECKING:
     from .context import AciesContext
+    from .namespace import TopicArg
 
     ScheduleHandler: TypeAlias = Callable[[AciesContext], None]
     SubscriberHandler: TypeAlias = Callable[[AciesContext, Any], None]
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 class SubscriberSpec:
     name: str
     fn: SubscriberHandler
-    topics: tuple[str, ...]
+    topics: tuple[TopicArg, ...]
     msg_type: type | None = None  # extracted from fn annotation at decoration time
 
 
@@ -39,7 +40,7 @@ class ScheduleSpec:
 class ServiceSpec:
     name: str
     fn: ServiceHandler
-    topic: str
+    topic: TopicArg
     msg_type: type | None = None  # extracted from fn annotation at decoration time
 
 

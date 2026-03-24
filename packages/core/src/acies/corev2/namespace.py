@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TypeAlias
 
 # Selector characters — never valid in a key expression.
 _FORBIDDEN_SEG: frozenset[str] = frozenset('?#')
@@ -117,12 +118,12 @@ class CtlTopics:
     kv: str
     heartbeat: str
     route: str
-    _base: str
+    base: str
 
     def __call__(self, *parts: str) -> str:
         for part in parts:
             _validate_part(part)
-        return '/'.join([self._base, *parts])
+        return '/'.join([self.base, *parts])
 
 
 @dataclass
@@ -157,7 +158,7 @@ class Namespace:
             kv=f'{base}/kv',
             heartbeat=f'{base}/heartbeat',
             route=f'{base}/route',
-            _base=base,
+            base=base,
         )
 
     def topic(self, *parts: str, prefix: bool | str = True) -> str:
@@ -181,3 +182,59 @@ class Namespace:
             return '/'.join([prefix, *parts])
         # no prefix if prefix=False or prefix=''
         return '/'.join(parts)
+
+
+# ----------------------------- topic arg types --------------------------------
+
+
+@dataclass(frozen=True)
+class Topic:
+    """Lazy topic resolved at run() time, optionally prefixed with host/name.
+
+    ``prefix=True`` (default) prepends ``<host>/<name>`` from the app's
+    namespace.  Pass ``prefix=''`` or ``False`` for domain-centric topics,
+    or a custom string prefix.  The path may contain ``/`` for convenience.
+
+    Example::
+
+        Topic('audio/raw')                      # "edge-01/mic/audio/raw"
+        Topic('**')                             # "edge-01/mic/**"
+        Topic('room/5/temperature', prefix='')  # "room/5/temperature"
+        Topic('audio', prefix='org/site-a')     # "org/site-a/audio"
+    """
+
+    path: str
+    prefix: bool | str = True
+
+
+@dataclass(frozen=True)
+class CtlTopic:
+    """Lazy control-plane topic resolved to ``<host>/<name>/ctl/<path>`` at run() time.
+
+    The path may contain ``/`` for nested control topics.
+
+    Example::
+
+        CtlTopic('kv')          # "edge-01/mic/ctl/kv"
+        CtlTopic('heartbeat')   # "edge-01/mic/ctl/heartbeat"
+        CtlTopic('my/service')  # "edge-01/mic/ctl/my/service"
+    """
+
+    path: str
+
+
+@dataclass(frozen=True)
+class TopicVar:
+    """Lazy topic resolved from ``app.state.config[key]`` at run() time.
+
+    Use when the topic is supplied via CLI arguments or other runtime config.
+
+    Example::
+
+        TopicVar('input_topic')   # app.state.config['input_topic']
+    """
+
+    key: str
+
+
+TopicArg: TypeAlias = str | Topic | CtlTopic | TopicVar
