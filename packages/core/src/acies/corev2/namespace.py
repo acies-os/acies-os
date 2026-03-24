@@ -161,6 +161,11 @@ class Namespace:
             base=base,
         )
 
+    @property
+    def base(self) -> str:
+        """Return ``<host>/<name>`` — the app's base path in the topic tree."""
+        return f'{self.host}/{self.name}'
+
     def topic(self, *parts: str, prefix: bool | str = True) -> str:
         """Construct a topic, optionally prefixed.
 

@@ -208,6 +208,7 @@ class AciesApp:
             task: AciesContext(
                 publish_fn=self._router.publish,
                 query_fn=self._router.query,
+                now_fn=time.time_ns,
                 app=self._app_state,
                 task=TaskState(),
                 ns=self._ns,
@@ -242,6 +243,7 @@ class AciesApp:
         hook_ctx = AciesContext(
             publish_fn=self._router.publish,
             query_fn=self._router.query,
+            now_fn=time.time_ns,
             app=self._app_state,
             task=TaskState(),
             ns=self._ns,

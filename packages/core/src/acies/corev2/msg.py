@@ -20,9 +20,11 @@ Control message transport:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeAlias
 
 import msgspec
+
+NanoSecond: TypeAlias = int  # nanoseconds since Unix epoch (time.time_ns())
 
 # ------------------------------ control messages ------------------------------
 # Dispatched by reserved topic prefix (acies/ctrl/). Consumed by the router;
@@ -30,30 +32,32 @@ import msgspec
 
 
 class AciesHeartbeat(msgspec.Struct, frozen=True):
+    source: str
     state: str
+    timestamp: NanoSecond
 
 
 class AciesGet(msgspec.Struct, frozen=True):
     source: str
-    timestamp: int
+    timestamp: NanoSecond
     keys: list[str]
 
 
 class AciesSet(msgspec.Struct, frozen=True):
     source: str
-    timestamp: int
+    timestamp: NanoSecond
     items: dict[str, Any]
 
 
 class AciesDelete(msgspec.Struct, frozen=True):
     source: str
-    timestamp: int
+    timestamp: NanoSecond
     keys: list[str]
 
 
 class AciesRoute(msgspec.Struct, frozen=True):
     source: str
-    timestamp: int
+    timestamp: NanoSecond
     old_topic: str | None
     new_topic: str | None
 
@@ -65,6 +69,6 @@ class AciesRoute(msgspec.Struct, frozen=True):
 
 class AciesTensor(msgspec.Struct, frozen=True):
     source: str
-    timestamp: int
+    timestamp: NanoSecond
     payload: list[float | int | bytes]
     metadata: dict | None = None
