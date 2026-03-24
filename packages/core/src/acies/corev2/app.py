@@ -26,7 +26,7 @@ import msgspec
 from ._cli import create_acies_cli
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
-from .namespace import Namespace
+from .namespace import CtlTopic, Namespace, Topic, TopicArg, TopicVar
 from .router import Router
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ZenohTransport
@@ -111,7 +111,7 @@ class AciesApp:
 
     # ---------------------------- task decorators ----------------------------
 
-    def subscribe(self, *topics: str) -> Callable[..., Callable[..., None]]:
+    def subscribe(self, *topics: TopicArg) -> Callable[..., Callable[..., None]]:
         """Message-driven: handler is called for each message on any of the topics."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
@@ -131,7 +131,7 @@ class AciesApp:
 
         return decorator
 
-    def service(self, topic: str) -> Callable[..., Callable[..., None]]:
+    def service(self, topic: TopicArg) -> Callable[..., Callable[..., None]]:
         """RPC/queryable: handler is called on queries to topic; return value is the reply."""
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
@@ -167,6 +167,39 @@ class AciesApp:
 
     # ------------------------------- Run & Stop -------------------------------
 
+    def _resolve_topic(self, topic: TopicArg) -> str:
+        """Resolve a topic argument to a concrete string at run() time.
+
+        Handles four forms:
+        - ``str`` — returned as-is, or resolved via ``format_map`` if it
+          contains ``{placeholders}``.
+        - ``Topic`` — resolved via ``ns.topic(*parts, prefix=...)``.
+        - ``CtlTopic`` — resolved via ``ns.ctl(*parts)``.
+        - ``TopicVar`` — resolved from ``app.state.config[key]``.
+        """
+        match topic:
+            case str():
+                if '{' not in topic:
+                    return topic
+                try:
+                    return topic.format_map(self._app_state.config)
+                except KeyError as e:
+                    raise ValueError(f'topic template {topic!r} references unknown config key {e}') from e
+            case Topic():
+                if topic.prefix is True:
+                    return f'{self._ns.host}/{self._ns.name}/{topic.path}'
+                elif topic.prefix:
+                    return f'{topic.prefix}/{topic.path}'
+                else:
+                    return topic.path
+            case CtlTopic():
+                return f'{self._ns.ctl.base}/{topic.path}'
+            case TopicVar():
+                try:
+                    return self._app_state.config[topic.key]
+                except KeyError:
+                    raise ValueError(f'TopicVar({topic.key!r}) references unknown config key') from None
+
     def run(self) -> None:
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
         self._task_ctxs = {
@@ -188,9 +221,9 @@ class AciesApp:
             match task:
                 case SubscriberSpec():
                     for topic in task.topics:
-                        self._router.subscribe(topic, task)
+                        self._router.subscribe(self._resolve_topic(topic), task)
                 case ServiceSpec():
-                    self._router.advertise(task.topic, task)
+                    self._router.advertise(self._resolve_topic(task.topic), task)
                 case ScheduleSpec():
                     pass  # handled by timer thread
 
