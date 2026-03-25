@@ -246,9 +246,9 @@ class AciesShell(cmd.Cmd):
         """Explore peers/topics like a directory tree (REPL command: ``ls``).
 
         Usage examples:
-            - ``ls`` → prints roots ``topic/`` and ``peer/``.
-            - ``ls peer`` → lists peer ZIDs.
-            - ``ls topic/<parts>`` → when a recorded topic matches:
+            - ``ls`` -> prints roots ``topic/`` and ``peer/``.
+            - ``ls peer`` -> lists peer ZIDs.
+            - ``ls topic/<parts>`` -> when a recorded topic matches:
                 * prints hosts (unique ``reply_to`` values), or
                 * for a host, prints timestamps of stored messages.
 

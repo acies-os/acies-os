@@ -378,7 +378,7 @@ class TestRoute:
             received.append(ctx.app.config.get('_last', ''))
 
         with running(app, ready):
-            # Subscribe to sensor/b → unsubscribe from sensor/a
+            # Subscribe to sensor/b -> unsubscribe from sensor/a
             resp = _route_query(
                 router,
                 spec_name='handler',
@@ -524,7 +524,7 @@ class TestRouteOutput:
         assert received == []
 
     def test_consecutive_output_renames(self):
-        """t1→t2, then t2→t3: messages end up on t3."""
+        """t1->t2, then t2->t3: messages end up on t3."""
         received_on_t3: list[_Msg] = []
         done = threading.Event()
 

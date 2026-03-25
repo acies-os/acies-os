@@ -37,7 +37,7 @@ AciesResult: TypeAlias = Ok | Err
 
 
 class AciesGet(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
-    key: list[str]  # path to the value: ['k1', 'k2'] → config['k1']['k2']
+    key: list[str]  # path to the value: ['k1', 'k2'] -> config['k1']['k2']
 
 
 class AciesSet(msgspec.Struct, frozen=True, tag=True, tag_field='type'):

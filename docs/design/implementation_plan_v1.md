@@ -19,7 +19,7 @@ packages/core/src/acies/
     ├── context.py          # AciesContext
     ├── task.py             # SubscriberSpec, ScheduleSpec, ServiceSpec, TaskSpec, Job
     ├── transport.py        # Transport Protocol + LocalTransport (queue-based, for tests)
-    ├── router.py           # Router: inbound queue, router thread, topic → Job dispatch
+    ├── router.py           # Router: inbound queue, router thread, topic -> Job dispatch
     ├── executor.py         # Executor: internal queue, dispatcher thread, worker pool
     └── msg.py              # control messages + built-in data types (AciesTensor, etc.)
 ```
@@ -50,7 +50,7 @@ Router thread          — drains router inbound queue; matches topics to TaskSp
 Executor               — dispatcher thread drains internal queue and submits to
                          worker thread pool
 Worker threads         — run handlers; call ctx.publish() synchronously
-                         (outbound is direct: worker → router.publish() → transport)
+                         (outbound is direct: worker -> router.publish() -> transport)
 ```
 
 ---
@@ -363,11 +363,11 @@ def run(self):
 All three task kinds flow through the executor:
 
 ```
-Transport thread → router inbound queue → router thread → decode → executor.enqueue(Job(spec, msg))         [SUBSCRIBE]
-Transport thread → router inbound queue → router thread → decode → executor.enqueue(Job(spec, msg, reply))  [SERVICE]
-Timer thread     →                                                  executor.enqueue(Job(spec, msg=None))    [SCHEDULE]
+Transport thread -> router inbound queue -> router thread -> decode -> executor.enqueue(Job(spec, msg))         [SUBSCRIBE]
+Transport thread -> router inbound queue -> router thread -> decode -> executor.enqueue(Job(spec, msg, reply))  [SERVICE]
+Timer thread     ->                                                  executor.enqueue(Job(spec, msg=None))    [SCHEDULE]
 
-Source threads (started in on_startup) call ctx.publish(msg) → router encodes → transport.publish(raw).
+Source threads (started in on_startup) call ctx.publish(msg) -> router encodes -> transport.publish(raw).
 ```
 
 ---
