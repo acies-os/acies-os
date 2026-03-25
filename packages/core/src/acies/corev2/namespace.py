@@ -228,18 +228,4 @@ class CtlTopic:
     path: str
 
 
-@dataclass(frozen=True)
-class TopicVar:
-    """Lazy topic resolved from ``app.state.config[key]`` at run() time.
-
-    Use when the topic is supplied via CLI arguments or other runtime config.
-
-    Example::
-
-        TopicVar('input_topic')   # app.state.config['input_topic']
-    """
-
-    key: str
-
-
-TopicArg: TypeAlias = str | Topic | CtlTopic | TopicVar
+TopicArg: TypeAlias = str | Topic | CtlTopic

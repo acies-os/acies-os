@@ -19,6 +19,7 @@ from .msg import (
     Ok,
     TopicRename,
 )
+from .namespace import CtlTopic, Topic
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
@@ -46,5 +47,7 @@ __all__ = [
     'ServiceSpec',
     'SubscriberSpec',
     'TaskState',
+    'Topic',
     'TopicRename',
+    'CtlTopic',
 ]

@@ -9,7 +9,7 @@ import pytest
 
 from acies.corev2.app import AciesApp
 from acies.corev2.context import AciesContext
-from acies.corev2.namespace import CtlTopic, Topic, TopicVar
+from acies.corev2.namespace import CtlTopic, Topic
 from acies.corev2.router import Router
 from acies.corev2.transport import LocalTransport
 
@@ -280,8 +280,8 @@ def test_service_ctl_topic():
     assert msgspec.msgpack.decode(raw, type=Resp).y == 10
 
 
-def test_subscribe_topic_var():
-    """TopicVar resolves from app.state.config at run() time."""
+def test_subscribe_format_string():
+    """Format string topics resolve from app.state.config at run() time."""
     app, router, ready = _make_app()
 
     class Msg(msgspec.Struct):
@@ -290,7 +290,7 @@ def test_subscribe_topic_var():
     received: list[int] = []
     done = threading.Event()
 
-    @app.subscribe(TopicVar('input_topic'))
+    @app.subscribe('{input_topic}')
     def handler(ctx: AciesContext, msg: Msg):
         received.append(msg.value)
         done.set()
@@ -299,7 +299,7 @@ def test_subscribe_topic_var():
 
     with running(app, ready=ready):
         router.publish('sensors/temp', msgspec.msgpack.encode(Msg(value=3)))
-        assert done.wait(timeout=2.0), 'TopicVar subscriber never fired'
+        assert done.wait(timeout=2.0), 'format string subscriber never fired'
 
     assert received == [3]
 
