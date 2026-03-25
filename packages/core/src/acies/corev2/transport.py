@@ -84,6 +84,14 @@ class Transport(Protocol):
         """
         ...
 
+    def unsubscribe(self, topic: str) -> None:
+        """Deregister interest in a topic."""
+        ...
+
+    def unadvertise(self, topic: str) -> None:
+        """Deregister a queryable endpoint."""
+        ...
+
 
 class LocalTransport:
     """In-process queue-based transport for testing and single-process apps.
@@ -134,13 +142,19 @@ class LocalTransport:
     def subscribe(self, topic: str) -> None:
         self._subscriptions.add(topic)
 
+    def unsubscribe(self, topic: str) -> None:
+        self._subscriptions.discard(topic)
+
+    def advertise(self, topic: str) -> None:
+        self._advertisers.add(topic)
+
+    def unadvertise(self, topic: str) -> None:
+        self._advertisers.discard(topic)
+
     def publish(self, topic: str, raw: bytes) -> None:
         """Deliver raw bytes if topic matches any active subscription."""
         if any(matches(pattern, topic) for pattern in self._subscriptions):
             self._queue.put((topic, raw, None))
-
-    def advertise(self, topic: str) -> None:
-        self._advertisers.add(topic)
 
     def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
         """Send a query and block until a reply arrives or timeout elapses."""
@@ -193,8 +207,8 @@ class ZenohTransport:
         self._config: zenoh.Config = config if config is not None else zenoh.Config()
         self._session: zenoh.Session | None = None
         self._on_message: MessageHandler | None = None
-        self._subscribers: list[zenoh.Subscriber[None]] = []
-        self._queryables: list[zenoh.Queryable[None]] = []
+        self._subscribers: dict[str, zenoh.Subscriber[None]] = {}
+        self._queryables: dict[str, zenoh.Queryable[None]] = {}
 
     def start(self, on_message: MessageHandler) -> None:
         """Open the zenoh session and store the inbound message callback."""
@@ -203,10 +217,10 @@ class ZenohTransport:
 
     def stop(self) -> None:
         """Undeclare all subscribers/queryables and close the session."""
-        for sub in self._subscribers:
+        for sub in self._subscribers.values():
             sub.undeclare()  # pyright: ignore[reportUnknownMemberType]
         self._subscribers.clear()
-        for qb in self._queryables:
+        for qb in self._queryables.values():
             qb.undeclare()  # pyright: ignore[reportUnknownMemberType]
         self._queryables.clear()
         if self._session is not None:
@@ -225,7 +239,12 @@ class ZenohTransport:
             assert self._on_message is not None, 'on_message callback must be set before subscribing'
             self._on_message(str(sample.key_expr), bytes(sample.payload), None)
 
-        self._subscribers.append(self._session.declare_subscriber(topic, _on_sample))
+        self._subscribers[topic] = self._session.declare_subscriber(topic, _on_sample)
+
+    def unsubscribe(self, topic: str) -> None:
+        sub = self._subscribers.pop(topic, None)
+        if sub is not None:
+            sub.undeclare()  # pyright: ignore[reportUnknownMemberType]
 
     def publish(self, topic: str, raw: bytes) -> None:
         """Put raw bytes to topic."""
@@ -251,7 +270,12 @@ class ZenohTransport:
 
             self._on_message(str(query.key_expr), raw, reply_fn)
 
-        self._queryables.append(self._session.declare_queryable(topic, _on_query))
+        self._queryables[topic] = self._session.declare_queryable(topic, _on_query)
+
+    def unadvertise(self, topic: str) -> None:
+        qb = self._queryables.pop(topic, None)
+        if qb is not None:
+            qb.undeclare()  # pyright: ignore[reportUnknownMemberType]
 
     def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
         """Send a zenoh get and block until a reply arrives or timeout elapses."""

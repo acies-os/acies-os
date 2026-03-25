@@ -319,3 +319,142 @@ class TestKvMixed:
             )
         assert isinstance(resp.results[0], Err)
         assert resp.results[1] == Ok(value=10)
+
+
+# ---------------------------------- route ------------------------------------
+
+
+def _route_query(
+    router: Router,
+    spec_id: str | None = None,
+    spec_name: str | None = None,
+    inputs: list | None = None,
+    timeout: float = 2.0,
+):
+    from acies.corev2.msg import AciesRouteRequest, AciesRouteResponse, TopicRename
+
+    raw = router.query(
+        'test-host/test-app/ctl/route',
+        msgspec.msgpack.encode(
+            AciesRouteRequest(
+                source='test',
+                timestamp=0,
+                spec_id=spec_id,
+                spec_name=spec_name,
+                inputs=inputs or [],
+            )
+        ),
+        timeout=timeout,
+    )
+    assert raw is not None, 'route query timed out'
+    return msgspec.msgpack.decode(raw, type=AciesRouteResponse)
+
+
+class TestRoute:
+    def test_not_found_by_id(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _route_query(router, spec_id='deadbeef')
+        assert isinstance(resp.result, Err)
+        assert 'not found' in resp.result.reason
+
+    def test_not_found_by_name(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _route_query(router, spec_name='no_such_handler')
+        assert isinstance(resp.result, Err)
+        assert 'not found' in resp.result.reason
+
+    def test_reroute_subscriber_by_name(self):
+        from acies.corev2.msg import TopicRename
+
+        received: list[str] = []
+        app, router, ready = _make_app()
+
+        @app.subscribe('sensor/a')
+        def handler(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            received.append(ctx.app.config.get('_last', ''))
+
+        with running(app, ready):
+            # Subscribe to sensor/b → unsubscribe from sensor/a
+            resp = _route_query(
+                router,
+                spec_name='handler',
+                inputs=[TopicRename(old='sensor/a', new='sensor/b')],
+            )
+            assert isinstance(resp.result, Ok)
+
+            # sensor/a should no longer trigger the handler
+            router.publish('sensor/a', msgspec.msgpack.encode({'x': 1}))
+            import time; time.sleep(0.05)
+            assert received == []
+
+            # sensor/b should now trigger it
+            router.publish('sensor/b', msgspec.msgpack.encode({'x': 2}))
+            import time; time.sleep(0.05)
+            assert len(received) == 1
+
+    def test_reroute_subscriber_by_id(self):
+        from acies.corev2.msg import TopicRename
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('topic/old')
+        def handler2(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            # Look up the spec id via io_map (keys are spec ids)
+            io = router.io_map
+            spec_id = next(k for k, v in io.items() if v['name'] == 'handler2')
+            resp = _route_query(
+                router,
+                spec_id=spec_id,
+                inputs=[TopicRename(old='topic/old', new='topic/new')],
+            )
+            assert isinstance(resp.result, Ok)
+            assert 'topic/new' in router.io_map[spec_id]['inputs']  # type: ignore[operator]
+            assert 'topic/old' not in router.io_map[spec_id]['inputs']  # type: ignore[operator]
+
+    def test_add_input_only(self):
+        """old=None means add without removing."""
+        from acies.corev2.msg import TopicRename
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('topic/a')
+        def handler3(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='handler3',
+                inputs=[TopicRename(old=None, new='topic/b')],
+            )
+            assert isinstance(resp.result, Ok)
+            io = router.io_map
+            entry = next(v for v in io.values() if v['name'] == 'handler3')
+            assert 'topic/a' in entry['inputs']
+            assert 'topic/b' in entry['inputs']
+
+    def test_remove_input_only(self):
+        """new=None means remove without adding."""
+        from acies.corev2.msg import TopicRename
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('topic/a')
+        def handler4(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='handler4',
+                inputs=[TopicRename(old='topic/a', new=None)],
+            )
+            assert isinstance(resp.result, Ok)
+            io = router.io_map
+            entry = next(v for v in io.values() if v['name'] == 'handler4')
+            assert 'topic/a' not in entry['inputs']

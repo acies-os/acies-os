@@ -49,6 +49,7 @@ class Router:
         self._inbound: queue.Queue[tuple[str, bytes, ReplyCallback | None] | Sentinel] = queue.Queue()
         self._subscriptions: dict[str, set[SubscriberSpec]] = {}
         self._services: dict[str, ServiceSpec] = {}
+        self._routing_lock: threading.Lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
         # I/O routing table: inputs populated at subscribe/advertise time;
@@ -95,15 +96,54 @@ class Router:
 
     def subscribe(self, topic: str, spec: SubscriberSpec) -> None:
         """Register a SubscriberSpec to receive messages on topic."""
-        self._subscriptions.setdefault(topic, set()).add(spec)
-        self._spec_inputs.setdefault(spec, set()).add(topic)
+        with self._routing_lock:
+            self._subscriptions.setdefault(topic, set()).add(spec)
+            self._spec_inputs.setdefault(spec, set()).add(topic)
         self._transport_for(topic).subscribe(topic)
+
+    def unsubscribe(self, topic: str, spec: SubscriberSpec) -> None:
+        """Remove a SubscriberSpec from topic; undeclares transport subscription if no specs remain."""
+        with self._routing_lock:
+            specs = self._subscriptions.get(topic)
+            if specs:
+                specs.discard(spec)
+                if not specs:
+                    del self._subscriptions[topic]
+                    self._transport_for(topic).unsubscribe(topic)
+            inputs = self._spec_inputs.get(spec)
+            if inputs:
+                inputs.discard(topic)
 
     def advertise(self, topic: str, spec: ServiceSpec) -> None:
         """Register a ServiceSpec as a queryable service on topic."""
-        self._services[topic] = spec
-        self._spec_inputs.setdefault(spec, set()).add(topic)
+        with self._routing_lock:
+            self._services[topic] = spec
+            self._spec_inputs.setdefault(spec, set()).add(topic)
         self._transport_for(topic).advertise(topic)
+
+    def unadvertise(self, topic: str) -> None:
+        """Remove a ServiceSpec queryable from topic."""
+        with self._routing_lock:
+            spec = self._services.pop(topic, None)
+            if spec is not None:
+                inputs = self._spec_inputs.get(spec)
+                if inputs:
+                    inputs.discard(topic)
+        self._transport_for(topic).unadvertise(topic)
+
+    def find_spec(self, spec_id: str | None, spec_name: str | None) -> TaskSpec | None:
+        """Find a spec by id (preferred) or name (fallback). Only searches specs with inputs."""
+        with self._routing_lock:
+            specs = list(self._spec_inputs.keys())
+        if spec_id is not None:
+            for spec in specs:
+                if spec.id == spec_id:
+                    return spec
+        if spec_name is not None:
+            for spec in specs:
+                if spec.name == spec_name:
+                    return spec
+        return None
 
     def record_output(self, spec: TaskSpec, topic: str) -> None:
         """Record that spec published to topic. Called from per-spec publish closures.
@@ -183,21 +223,17 @@ class Router:
             assert isinstance(item, tuple)
             topic, raw, reply_fn = item
 
-            if topic.startswith('acies/ctrl/'):
-                # TODO: it should be '**/ctl/**', or do we need this?
-                # TODO: should all control be done via RPC? Or both RPC and pub/sub?
-                raise NotImplementedError('Control messages handling not implemented yet')
-
             # TODO: log/warn unmatched messages
-            if reply_fn is not None:
-                # Incoming query — route to the matching service spec
-                for pattern, spec in self._services.items():
-                    if matches(pattern, topic):
-                        executor.enqueue(Job(spec=spec, raw=raw, reply_fn=reply_fn))
-                        break
-            else:
-                # Incoming pub — fan out to all matching subscriber specs
-                for pattern, specs in self._subscriptions.items():
-                    if matches(pattern, topic):
-                        for spec in specs:
-                            executor.enqueue(Job(spec=spec, raw=raw))
+            with self._routing_lock:
+                if reply_fn is not None:
+                    # Incoming query — route to the matching service spec
+                    for pattern, spec in self._services.items():
+                        if matches(pattern, topic):
+                            executor.enqueue(Job(spec=spec, raw=raw, reply_fn=reply_fn))
+                            break
+                else:
+                    # Incoming pub — fan out to all matching subscriber specs
+                    for pattern, specs in self._subscriptions.items():
+                        if matches(pattern, topic):
+                            for spec in specs:
+                                executor.enqueue(Job(spec=spec, raw=raw))
