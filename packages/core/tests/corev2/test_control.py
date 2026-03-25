@@ -540,8 +540,8 @@ class TestRouteOutput:
             done.set()
 
         with running(app, ready):
-            _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t1', new='out/t2')])
-            _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t2', new='out/t3')])
+            _ = _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t1', new='out/t2')])
+            _ = _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t2', new='out/t3')])
 
             router.publish('trigger', msgspec.msgpack.encode(_Msg()))
             assert done.wait(timeout=2.0), 'message did not arrive on out/t3'
