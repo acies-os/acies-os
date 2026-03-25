@@ -200,7 +200,7 @@ Dispatch rule:
 - SUBSCRIBE / SERVICE: `fn(ctx, msg)`
 - SCHEDULE: `fn(ctx)` — no message
 
-Determined at runtime by whether `job.msg is None`. No per-call inspection or
+Determined at runtime by whether `job.raw is None`. No per-call inspection or
 injection machinery is needed.
 
 The `msg` type annotation is extracted at decoration time and stored as
