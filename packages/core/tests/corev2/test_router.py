@@ -5,6 +5,7 @@ import msgspec
 import pytest
 
 from acies.corev2.executor import Executor
+from acies.corev2.msg import TopicRename
 from acies.corev2.router import Router
 from acies.corev2.task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 from acies.corev2.transport import LocalTransport
@@ -315,6 +316,72 @@ class TestIoMap:
             t.join()
 
         assert router.io_map[spec.id]['outputs'] == sorted(topics)
+
+
+# ----------------------------- Output remap table ----------------------------
+
+
+class TestOutputRemap:
+    def _router(self) -> Router:
+        r = Router()
+        r.add_transport(LocalTransport())
+        return r
+
+    def _spec(self, name: str = 'sub') -> SubscriberSpec:
+        return SubscriberSpec(name=name, fn=lambda ctx, msg: None, topics=('in',), msg_type=None)
+
+    def test_no_remap_passes_through(self):
+        router = self._router()
+        spec = self._spec()
+        assert router.resolve_output(spec, 'out/a') == 'out/a'
+
+    def test_remap_redirects(self):
+        router = self._router()
+        spec = self._spec()
+        router.remap_output(spec, TopicRename(old='out/a', new='out/b'))
+        assert router.resolve_output(spec, 'out/a') == 'out/b'
+
+    def test_suppress(self):
+        router = self._router()
+        spec = self._spec()
+        router.remap_output(spec, TopicRename(old='out/a', new=None))
+        assert router.resolve_output(spec, 'out/a') is None
+
+    def test_consecutive_renames_collapse(self):
+        router = self._router()
+        spec = self._spec()
+        router.remap_output(spec, TopicRename(old='t1', new='t2'))
+        router.remap_output(spec, TopicRename(old='t2', new='t3'))
+        router.remap_output(spec, TopicRename(old='t3', new='t4'))
+        assert router.resolve_output(spec, 't1') == 't4'
+        assert len(router._output_remap[spec]) == 1  # pyright: ignore[reportPrivateUsage]
+
+    def test_rename_then_suppress(self):
+        router = self._router()
+        spec = self._spec()
+        router.remap_output(spec, TopicRename(old='t1', new='t2'))
+        router.remap_output(spec, TopicRename(old='t2', new=None))
+        assert router.resolve_output(spec, 't1') is None
+
+    def test_old_none_is_noop(self):
+        router = self._router()
+        spec = self._spec()
+        router.remap_output(spec, TopicRename(old=None, new='out/b'))
+        assert router.resolve_output(spec, 'out/b') == 'out/b'
+
+    def test_per_spec_isolation(self):
+        router = self._router()
+        spec_a = self._spec('a')
+        spec_b = self._spec('b')
+        router.remap_output(spec_a, TopicRename(old='out', new='a/out'))
+        assert router.resolve_output(spec_a, 'out') == 'a/out'
+        assert router.resolve_output(spec_b, 'out') == 'out'
+
+    def test_unmapped_topic_passes_through(self):
+        router = self._router()
+        spec = self._spec()
+        router.remap_output(spec, TopicRename(old='out/a', new='out/b'))
+        assert router.resolve_output(spec, 'out/other') == 'out/other'
 
 
 def test_unsubscribed_topic_not_delivered():

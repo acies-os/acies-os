@@ -173,6 +173,9 @@ def make_route_spec(router: Router) -> ServiceSpec:
                     assert isinstance(spec, ServiceSpec)
                     router.advertise(rename.new, spec)
 
+        for rename in msg.outputs:
+            router.remap_output(spec, rename)
+
         return AciesRouteResponse(timestamp=ctx.now(), result=Ok())
 
     return ServiceSpec(name='_route', fn=_route, topic=CtlTopic('route'), msg_type=AciesRouteRequest)

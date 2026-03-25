@@ -87,6 +87,7 @@ class AciesRouteRequest(msgspec.Struct, frozen=True):
     spec_id: str | None = None  # preferred: UUID from spec.id
     spec_name: str | None = None  # fallback: match by name
     inputs: list[TopicRename] = []
+    outputs: list[TopicRename] = []
 
     def __post_init__(self):
         if self.spec_id is None and self.spec_name is None:

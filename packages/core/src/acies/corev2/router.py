@@ -32,6 +32,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from ._concurrency import SENTINEL, Sentinel
+from .msg import TopicRename
 from .namespace import matches
 from .task import Job, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ReplyCallback, Transport
@@ -57,6 +58,11 @@ class Router:
         self._spec_inputs: dict[TaskSpec, set[str]] = {}
         self._spec_outputs: dict[TaskSpec, set[str]] = {}
         self._io_lock: threading.Lock = threading.Lock()
+
+        # Output remap table: maps spec -> {original_topic -> effective_topic | None}.
+        # None means suppress. Inner dicts are immutable (copy-on-write);
+        # _routing_lock serializes concurrent writes only.
+        self._output_remap: dict[TaskSpec, dict[str, str | None]] = {}
 
     def add_transport(
         self,
@@ -144,6 +150,50 @@ class Router:
                 if spec.name == spec_name:
                     return spec
         return None
+
+    def remap_output(self, spec: TaskSpec, rename: TopicRename) -> None:
+        """Update the output remap table for spec.
+
+        old=X, new=Y  — redirect publishes from X to Y.
+        old=X, new=None — suppress publishes to X.
+        old=None — noop (no original topic to intercept).
+
+        Consecutive renames are collapsed: rename(t1->t2) then rename(t2->t3)
+        results in a single effective entry t1->t3.
+
+        Copy-on-write: builds a new inner dict and replaces the reference
+        atomically. Inner dicts are never mutated after assignment, so
+        resolve_output readers need no lock.
+        """
+        if rename.old is None:
+            return
+        with self._routing_lock:
+            old_table = self._output_remap.get(spec, {})
+            new_table = dict(old_table)
+            updated = False
+            # collapse conseutive renames
+            # .e.g. if old_table has t1->t2 and rename is t2->t3, update to t1->t3
+            for src, dst in new_table.items():
+                if dst == rename.old:
+                    new_table[src] = rename.new
+                    updated = True
+            if not updated:
+                new_table[rename.old] = rename.new
+            self._output_remap[spec] = new_table
+
+    def resolve_output(self, spec: TaskSpec, topic: str) -> str | None:
+        """Return the effective output topic for spec after applying any remap.
+
+        Returns None if the publish should be suppressed.
+        Returns topic unchanged if no remap entry exists for it.
+
+        Lock-free: inner dicts are immutable snapshots (copy-on-write in
+        remap_output), so reading them requires no synchronization.
+        """
+        table = self._output_remap.get(spec)
+        if table is None:
+            return topic
+        return table.get(topic, topic)
 
     def record_output(self, spec: TaskSpec, topic: str) -> None:
         """Record that spec published to topic. Called from per-spec publish closures.

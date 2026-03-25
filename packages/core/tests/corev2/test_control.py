@@ -333,6 +333,7 @@ def _route_query(
     spec_id: str | None = None,
     spec_name: str | None = None,
     inputs: list[TopicRename] | None = None,
+    outputs: list[TopicRename] | None = None,
     timeout: float = 2.0,
 ):
     raw = router.query(
@@ -344,6 +345,7 @@ def _route_query(
                 spec_id=spec_id,
                 spec_name=spec_name,
                 inputs=inputs or [],
+                outputs=outputs or [],
             )
         ),
         timeout=timeout,
@@ -452,3 +454,96 @@ class TestRoute:
             io = router.io_map
             entry = next(v for v in io.values() if v['name'] == 'handler4')
             assert 'topic/a' not in entry['inputs']
+
+
+# -------------------------------- route outputs --------------------------------
+
+
+class _Msg(msgspec.Struct, frozen=True):
+    v: int = 0
+
+
+class TestRouteOutput:
+    def test_redirect_output(self):
+        """After rerouting, handler publishes to the new topic."""
+        received_on_b: list[_Msg] = []
+        done = threading.Event()
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def producer(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            ctx.publish('result/a', _Msg(v=1))
+
+        @app.subscribe('result/b')
+        def consumer(ctx: AciesContext, msg: _Msg) -> None:
+            received_on_b.append(msg)
+            done.set()
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='producer',
+                outputs=[TopicRename(old='result/a', new='result/b')],
+            )
+            assert isinstance(resp.result, Ok)
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'message did not arrive on result/b'
+
+        assert received_on_b[0].v == 1
+
+    def test_suppress_output(self):
+        """new=None suppresses the publish entirely."""
+        received: list[_Msg] = []
+        done = threading.Event()
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def producer2(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            ctx.publish('result/c', _Msg(v=99))
+            done.set()
+
+        @app.subscribe('result/c')
+        def sink(ctx: AciesContext, msg: _Msg) -> None:
+            received.append(msg)
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='producer2',
+                outputs=[TopicRename(old='result/c', new=None)],
+            )
+            assert isinstance(resp.result, Ok)
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'handler never ran'
+            time.sleep(0.05)  # give any stray publish time to arrive
+
+        assert received == []
+
+    def test_consecutive_output_renames(self):
+        """t1→t2, then t2→t3: messages end up on t3."""
+        received_on_t3: list[_Msg] = []
+        done = threading.Event()
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def producer3(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            ctx.publish('out/t1', _Msg(v=7))
+
+        @app.subscribe('out/t3')
+        def sink3(ctx: AciesContext, msg: _Msg) -> None:
+            received_on_t3.append(msg)
+            done.set()
+
+        with running(app, ready):
+            _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t1', new='out/t2')])
+            _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t2', new='out/t3')])
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'message did not arrive on out/t3'
+
+        assert received_on_t3[0].v == 7
