@@ -27,7 +27,7 @@ from ._cli import create_acies_cli
 from ._control import make_heartbeat_spec, make_kv_spec, make_route_spec
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
-from .namespace import CtlTopic, Namespace, Topic, TopicArg, TopicVar
+from .namespace import CtlTopic, Namespace, Topic, TopicArg
 from .router import Router
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ZenohTransport
@@ -183,7 +183,7 @@ class AciesApp:
           contains ``{placeholders}``.
         - ``Topic`` — resolved via ``ns.topic(*parts, prefix=...)``.
         - ``CtlTopic`` — resolved via ``ns.ctl(*parts)``.
-        - ``TopicVar`` — resolved from ``app.state.config[key]``.
+        - ``str`` with ``{key}`` — resolved via ``format_map`` from ``app.state.config``.
         """
         match topic:
             case str():
@@ -202,14 +202,10 @@ class AciesApp:
                     return topic.path
             case CtlTopic():
                 return f'{self._ns.ctl.base}/{topic.path}'
-            case TopicVar():
-                try:
-                    return self._app_state.config[topic.key]
-                except KeyError:
-                    raise ValueError(f'TopicVar({topic.key!r}) references unknown config key') from None
 
     def run(self) -> None:
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
+
         def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
             def _publish(topic: str, raw: bytes) -> None:
                 self._router.record_output(spec, topic)
