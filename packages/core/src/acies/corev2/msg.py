@@ -18,6 +18,20 @@ import msgspec
 
 NanoSecond: TypeAlias = int  # nanoseconds since Unix epoch (time.time_ns())
 
+# ---------------------------- Result type (Ok/Err) ----------------------------
+
+
+class Ok(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+    value: Any = None  # populated for Get; None for Set/Del
+
+
+class Err(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+    reason: str  # 'key_not_found' | 'key_protected' | 'invalid_path'
+
+
+AciesResult: TypeAlias = Ok | Err
+
+
 # --------------------------------- kv ops ------------------------------------
 # Used in AciesKvRequest.ops — one entry per key path operation.
 
@@ -37,19 +51,6 @@ class AciesDel(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
 
 KvEntry: TypeAlias = AciesGet | AciesSet | AciesDel
 
-# -------------------------------- kv results ----------------------------------
-# Used in AciesKvResponse.results — positionally aligned with request ops.
-
-
-class Ok(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
-    value: Any = None  # populated for Get; None for Set/Del
-
-
-class Err(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
-    reason: str  # 'key_not_found' | 'key_protected' | 'invalid_path'
-
-
-AciesResult: TypeAlias = Ok | Err
 
 # ------------------------------ control messages ------------------------------
 
