@@ -2,7 +2,21 @@ import logging
 
 from .app import AciesApp
 from .context import AciesContext, AppState, TaskState
-from .msg import AciesDelete, AciesGet, AciesHeartbeat, AciesRoute, AciesSet, AciesTensor
+from .msg import (
+    AciesHeartbeat,
+    AciesKvRequest,
+    AciesKvResponse,
+    AciesRoute,
+    AciesTensor,
+    Del,
+    Err,
+    Get,
+    KvEntry,
+    KvResult,
+    NanoSecond,
+    Ok,
+    Set,
+)
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
@@ -10,16 +24,23 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 __all__ = [
     'AciesApp',
     'AciesContext',
-    'AciesDelete',
-    'AciesGet',
     'AciesHeartbeat',
+    'AciesKvRequest',
+    'AciesKvResponse',
     'AciesRoute',
-    'AciesSet',
     'AciesTensor',
     'AppState',
+    'Del',
+    'Err',
+    'Get',
     'Job',
+    'KvEntry',
+    'KvResult',
+    'NanoSecond',
+    'Ok',
     'ScheduleSpec',
     'ServiceSpec',
+    'Set',
     'SubscriberSpec',
     'TaskState',
 ]

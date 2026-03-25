@@ -1,21 +1,13 @@
 """Typed message structs for AciesOS.
 
 Two categories:
-- Control messages: middleware-internal, dispatched by reserved topic prefix
-  (acies/ctrl/), never forwarded to user handlers.
+- Control messages: middleware-internal, used by default control handlers.
 - Data messages: forwarded to user handlers as typed msgspec.Struct objects.
 
 Wire encoding:
 - ZenohTransport: MessagePack (msgspec.msgpack.encode/decode)
 - WebSocketTransport: JSON (msgspec.json.encode/decode)
 - LocalTransport: no encoding; typed objects passed directly
-
-Control message transport:
-- AciesHeartbeat, AciesRoute: pub/sub (fire-and-forget)
-- AciesGet, AciesSet, AciesDelete: Zenoh queryable (request/reply via native
-  Zenoh reply mechanism). Router registers queryables for acies/ctrl/get,
-  acies/ctrl/set, acies/ctrl/delete on startup; handles them internally and
-  never creates Jobs.
 """
 
 from __future__ import annotations
@@ -26,9 +18,40 @@ import msgspec
 
 NanoSecond: TypeAlias = int  # nanoseconds since Unix epoch (time.time_ns())
 
+# --------------------------------- kv ops ------------------------------------
+# Used in AciesKvRequest.ops — one entry per key path operation.
+
+
+class Get(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+    key: list[str]  # path to the value: ['k1', 'k2'] → config['k1']['k2']
+
+
+class Set(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+    key: list[str]
+    value: Any
+
+
+class Del(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+    key: list[str]
+
+
+KvEntry: TypeAlias = Get | Set | Del
+
+# -------------------------------- kv results ----------------------------------
+# Used in AciesKvResponse.results — positionally aligned with request ops.
+
+
+class Ok(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+    value: Any = None  # populated for Get; None for Set/Del
+
+
+class Err(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+    reason: str  # 'key_not_found' | 'key_protected' | 'invalid_path'
+
+
+KvResult: TypeAlias = Ok | Err
+
 # ------------------------------ control messages ------------------------------
-# Dispatched by reserved topic prefix (acies/ctrl/). Consumed by the router;
-# never forwarded to user handlers.
 
 
 class AciesHeartbeat(msgspec.Struct, frozen=True):
@@ -37,22 +60,15 @@ class AciesHeartbeat(msgspec.Struct, frozen=True):
     timestamp: NanoSecond
 
 
-class AciesGet(msgspec.Struct, frozen=True):
+class AciesKvRequest(msgspec.Struct, frozen=True):
     source: str
     timestamp: NanoSecond
-    keys: list[str]
+    ops: list[KvEntry]
 
 
-class AciesSet(msgspec.Struct, frozen=True):
-    source: str
+class AciesKvResponse(msgspec.Struct, frozen=True):
     timestamp: NanoSecond
-    items: dict[str, Any]
-
-
-class AciesDelete(msgspec.Struct, frozen=True):
-    source: str
-    timestamp: NanoSecond
-    keys: list[str]
+    results: list[KvResult]
 
 
 class AciesRoute(msgspec.Struct, frozen=True):
