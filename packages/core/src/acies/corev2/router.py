@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 from ._concurrency import SENTINEL, Sentinel
 from .namespace import matches
-from .task import Job, ServiceSpec, SubscriberSpec
+from .task import Job, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ReplyCallback, Transport
 
 if TYPE_CHECKING:
@@ -50,6 +50,12 @@ class Router:
         self._subscriptions: dict[str, list[SubscriberSpec]] = {}
         self._services: dict[str, ServiceSpec] = {}
         self._thread: threading.Thread | None = None
+
+        # I/O routing table: inputs populated at subscribe/advertise time;
+        # outputs accumulated at runtime via record_output.
+        self._spec_inputs: dict[TaskSpec, set[str]] = {}
+        self._spec_outputs: dict[TaskSpec, set[str]] = {}
+        self._io_lock: threading.Lock = threading.Lock()
 
     def add_transport(
         self,
@@ -90,12 +96,45 @@ class Router:
     def subscribe(self, topic: str, spec: SubscriberSpec) -> None:
         """Register a SubscriberSpec to receive messages on topic."""
         self._subscriptions.setdefault(topic, []).append(spec)
+        self._spec_inputs.setdefault(spec, set()).add(topic)
         self._transport_for(topic).subscribe(topic)
 
     def advertise(self, topic: str, spec: ServiceSpec) -> None:
         """Register a ServiceSpec as a queryable service on topic."""
         self._services[topic] = spec
+        self._spec_inputs.setdefault(spec, set()).add(topic)
         self._transport_for(topic).advertise(topic)
+
+    def record_output(self, spec: TaskSpec, topic: str) -> None:
+        """Record that spec published to topic. Called from per-spec publish closures.
+
+        Output topics are observed at runtime and accumulate over the life of
+        the app — conditional publish paths will appear once they are exercised.
+        Thread-safe: may be called concurrently from worker threads.
+        """
+        outputs = self._spec_outputs.get(spec)
+        if outputs is not None and topic in outputs:
+            return  # fast path: already recorded, no lock needed
+        with self._io_lock:
+            self._spec_outputs.setdefault(spec, set()).add(topic)
+
+    @property
+    def io_map(self) -> dict[str, dict[str, list[str]]]:
+        """Snapshot of the I/O routing table keyed by task name.
+
+        Returns ``{'task_name': {'inputs': [...], 'outputs': [...]}, ...}``.
+        Inputs are the concrete topics registered at startup; outputs are all
+        topics the task has published to since the app started.
+        """
+        with self._io_lock:
+            specs = set(self._spec_inputs) | set(self._spec_outputs)
+            return {
+                spec.name: {
+                    'inputs': sorted(self._spec_inputs.get(spec, set())),
+                    'outputs': sorted(self._spec_outputs.get(spec, set())),
+                }
+                for spec in specs
+            }
 
     def publish(self, topic: str, raw: bytes) -> None:
         """Forward raw bytes to the transport for topic.
