@@ -47,7 +47,7 @@ class Router:
         self._prefix_routes: list[tuple[str, Transport]] = []
 
         self._inbound: queue.Queue[tuple[str, bytes, ReplyCallback | None] | Sentinel] = queue.Queue()
-        self._subscriptions: dict[str, list[SubscriberSpec]] = {}
+        self._subscriptions: dict[str, set[SubscriberSpec]] = {}
         self._services: dict[str, ServiceSpec] = {}
         self._thread: threading.Thread | None = None
 
@@ -95,7 +95,7 @@ class Router:
 
     def subscribe(self, topic: str, spec: SubscriberSpec) -> None:
         """Register a SubscriberSpec to receive messages on topic."""
-        self._subscriptions.setdefault(topic, []).append(spec)
+        self._subscriptions.setdefault(topic, set()).add(spec)
         self._spec_inputs.setdefault(spec, set()).add(topic)
         self._transport_for(topic).subscribe(topic)
 
@@ -119,17 +119,18 @@ class Router:
             self._spec_outputs.setdefault(spec, set()).add(topic)
 
     @property
-    def io_map(self) -> dict[str, dict[str, list[str]]]:
-        """Snapshot of the I/O routing table keyed by task name.
+    def io_map(self) -> dict[str, dict[str, str | list[str]]]:
+        """Snapshot of the I/O routing table keyed by spec UUID.
 
-        Returns ``{'task_name': {'inputs': [...], 'outputs': [...]}, ...}``.
+        Returns ``{spec.id: {'name': ..., 'inputs': [...], 'outputs': [...]}, ...}``.
         Inputs are the concrete topics registered at startup; outputs are all
         topics the task has published to since the app started.
         """
         with self._io_lock:
             specs = set(self._spec_inputs) | set(self._spec_outputs)
             return {
-                spec.name: {
+                spec.id: {
+                    'name': spec.name,
                     'inputs': sorted(self._spec_inputs.get(spec, set())),
                     'outputs': sorted(self._spec_outputs.get(spec, set())),
                 }

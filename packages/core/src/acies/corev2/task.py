@@ -9,6 +9,7 @@ No TaskKind enum is needed — the type itself is the discriminant.
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, TypeAlias
 
@@ -27,6 +28,7 @@ class SubscriberSpec:
     fn: SubscriberHandler
     topics: tuple[TopicArg, ...]
     msg_type: type | None = None  # extracted from fn annotation at decoration time
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class ScheduleSpec:
     name: str
     fn: ScheduleHandler
     interval: float
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,7 @@ class ServiceSpec:
     fn: ServiceHandler
     topic: TopicArg
     msg_type: type | None = None  # extracted from fn annotation at decoration time
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
