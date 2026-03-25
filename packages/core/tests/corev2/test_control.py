@@ -1,6 +1,7 @@
 """Tests for default control handlers: KV path helpers and the ctl/kv service."""
 
 import threading
+import time
 from contextlib import contextmanager
 
 import msgspec
@@ -14,9 +15,12 @@ from acies.corev2.msg import (
     AciesGet,
     AciesKvRequest,
     AciesKvResponse,
+    AciesRouteRequest,
+    AciesRouteResponse,
     AciesSet,
     Err,
     Ok,
+    TopicRename,
 )
 from acies.corev2.router import Router
 from acies.corev2.transport import LocalTransport
@@ -328,11 +332,9 @@ def _route_query(
     router: Router,
     spec_id: str | None = None,
     spec_name: str | None = None,
-    inputs: list | None = None,
+    inputs: list[TopicRename] | None = None,
     timeout: float = 2.0,
 ):
-    from acies.corev2.msg import AciesRouteRequest, AciesRouteResponse, TopicRename
-
     raw = router.query(
         'test-host/test-app/ctl/route',
         msgspec.msgpack.encode(
@@ -366,8 +368,6 @@ class TestRoute:
         assert 'not found' in resp.result.reason
 
     def test_reroute_subscriber_by_name(self):
-        from acies.corev2.msg import TopicRename
-
         received: list[str] = []
         app, router, ready = _make_app()
 
@@ -386,17 +386,15 @@ class TestRoute:
 
             # sensor/a should no longer trigger the handler
             router.publish('sensor/a', msgspec.msgpack.encode({'x': 1}))
-            import time; time.sleep(0.05)
+            time.sleep(0.05)
             assert received == []
 
             # sensor/b should now trigger it
             router.publish('sensor/b', msgspec.msgpack.encode({'x': 2}))
-            import time; time.sleep(0.05)
+            time.sleep(0.05)
             assert len(received) == 1
 
     def test_reroute_subscriber_by_id(self):
-        from acies.corev2.msg import TopicRename
-
         app, router, ready = _make_app()
 
         @app.subscribe('topic/old')
@@ -418,8 +416,6 @@ class TestRoute:
 
     def test_add_input_only(self):
         """old=None means add without removing."""
-        from acies.corev2.msg import TopicRename
-
         app, router, ready = _make_app()
 
         @app.subscribe('topic/a')
@@ -440,8 +436,6 @@ class TestRoute:
 
     def test_remove_input_only(self):
         """new=None means remove without adding."""
-        from acies.corev2.msg import TopicRename
-
         app, router, ready = _make_app()
 
         @app.subscribe('topic/a')
