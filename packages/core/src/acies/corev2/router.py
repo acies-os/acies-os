@@ -60,7 +60,10 @@ class Router:
         # Protected by _routing_lock:
         #   _subscriptions
         #   _services
-        #   _output_remap   (outer dict only; inner dicts are immutable snapshots)
+        #   _output_remap
+        #     - outer dict updated under _routing_lock
+        #     - inner dicts are immutable snapshots (copy-on-write in remap_output)
+        #     - readers may access lock-free
         self._routing_lock: threading.Lock = threading.Lock()
         self._subscriptions: dict[str, set[SubscriberSpec]] = {}
         self._services: dict[str, ServiceSpec] = {}
