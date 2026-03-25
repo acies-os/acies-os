@@ -43,27 +43,36 @@ if TYPE_CHECKING:
 
 class Router:
     def __init__(self) -> None:
+        self._thread: threading.Thread | None = None
+
+        # No lock required after startup:
+        #   _default_transport
+        #   _prefix_routes
         self._default_transport: Transport | None = None
         # Explicit prefix routes, e.g. ('ws://', ws_transport). First match wins.
         self._prefix_routes: list[tuple[str, Transport]] = []
 
+        # Thread-safe by its own contract:
+        #   _inbound
         self._inbound: queue.Queue[tuple[str, bytes, ReplyCallback | None] | Sentinel] = queue.Queue()
+
+        # --------------------------- _routing_lock ---------------------------
+        # Protected by _routing_lock:
+        #   _subscriptions
+        #   _services
+        #   _output_remap   (outer dict only; inner dicts are immutable snapshots)
+        self._routing_lock: threading.Lock = threading.Lock()
         self._subscriptions: dict[str, set[SubscriberSpec]] = {}
         self._services: dict[str, ServiceSpec] = {}
-        self._routing_lock: threading.Lock = threading.Lock()
-        self._thread: threading.Thread | None = None
+        self._output_remap: dict[TaskSpec, dict[str, str | None]] = {}  # None means suppress
 
-        # I/O routing table — both fields under _io_lock (copy-on-write).
-        # _spec_inputs: populated at subscribe/advertise time.
-        # _spec_outputs: accumulated at runtime via record_output.
-        self._spec_inputs: dict[TaskSpec, frozenset[str]] = {}
-        self._spec_outputs: dict[TaskSpec, frozenset[str]] = {}
+        # ------------------------------ _io_lock ------------------------------
+        # Protected by _io_lock:
+        #   _spec_inputs
+        #   _spec_outputs
         self._io_lock: threading.Lock = threading.Lock()
-
-        # Output remap table: maps spec -> {original_topic -> effective_topic | None}.
-        # None means suppress. Inner dicts are immutable (copy-on-write);
-        # _routing_lock serializes concurrent writes only.
-        self._output_remap: dict[TaskSpec, dict[str, str | None]] = {}
+        self._spec_inputs: dict[TaskSpec, frozenset[str]] = {}  # populated at subscribe/advertise time
+        self._spec_outputs: dict[TaskSpec, frozenset[str]] = {}  # accumulated at runtime via record_output
 
     def add_transport(
         self,
