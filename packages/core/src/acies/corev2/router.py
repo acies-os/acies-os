@@ -53,9 +53,10 @@ class Router:
         self._routing_lock: threading.Lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
-        # I/O routing table: inputs populated at subscribe/advertise time;
-        # outputs accumulated at runtime via record_output.
-        self._spec_inputs: dict[TaskSpec, set[str]] = {}
+        # I/O routing table — both fields under _io_lock (copy-on-write).
+        # _spec_inputs: populated at subscribe/advertise time.
+        # _spec_outputs: accumulated at runtime via record_output.
+        self._spec_inputs: dict[TaskSpec, frozenset[str]] = {}
         self._spec_outputs: dict[TaskSpec, frozenset[str]] = {}
         self._io_lock: threading.Lock = threading.Lock()
 
@@ -104,49 +105,57 @@ class Router:
         """Register a SubscriberSpec to receive messages on topic."""
         with self._routing_lock:
             self._subscriptions.setdefault(topic, set()).add(spec)
-            self._spec_inputs.setdefault(spec, set()).add(topic)
+        with self._io_lock:
+            self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) | {topic}
         self._transport_for(topic).subscribe(topic)
 
     def unsubscribe(self, topic: str, spec: SubscriberSpec) -> None:
         """Remove a SubscriberSpec from topic; undeclares transport subscription if no specs remain."""
+        last = False
         with self._routing_lock:
             specs = self._subscriptions.get(topic)
             if specs:
                 specs.discard(spec)
                 if not specs:
                     del self._subscriptions[topic]
-                    self._transport_for(topic).unsubscribe(topic)
-            inputs = self._spec_inputs.get(spec)
-            if inputs:
-                inputs.discard(topic)
+                    last = True
+        with self._io_lock:
+            self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) - {topic}
+        if last:
+            self._transport_for(topic).unsubscribe(topic)
 
     def advertise(self, topic: str, spec: ServiceSpec) -> None:
         """Register a ServiceSpec as a queryable service on topic."""
         with self._routing_lock:
             self._services[topic] = spec
-            self._spec_inputs.setdefault(spec, set()).add(topic)
+        with self._io_lock:
+            self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) | {topic}
         self._transport_for(topic).advertise(topic)
 
     def unadvertise(self, topic: str) -> None:
         """Remove a ServiceSpec queryable from topic."""
         with self._routing_lock:
             spec = self._services.pop(topic, None)
-            if spec is not None:
-                inputs = self._spec_inputs.get(spec)
-                if inputs:
-                    inputs.discard(topic)
+        if spec is not None:
+            with self._io_lock:
+                self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) - {topic}
         self._transport_for(topic).unadvertise(topic)
 
     def find_spec(self, spec_id: str | None, spec_name: str | None) -> TaskSpec | None:
-        """Find a spec by id (preferred) or name (fallback). Only searches specs with inputs."""
+        """Find an active spec by id (preferred) or name (fallback).
+
+        Searches _subscriptions and _services — the authoritative routing tables.
+        """
         with self._routing_lock:
-            specs = list(self._spec_inputs.keys())
+            candidates: list[TaskSpec] = list(self._services.values())
+            for specs in self._subscriptions.values():
+                candidates.extend(specs)
         if spec_id is not None:
-            for spec in specs:
+            for spec in candidates:
                 if spec.id == spec_id:
                     return spec
         if spec_name is not None:
-            for spec in specs:
+            for spec in candidates:
                 if spec.name == spec_name:
                     return spec
         return None
@@ -227,7 +236,7 @@ class Router:
             return {
                 spec.id: {
                     'name': spec.name,
-                    'inputs': sorted(self._spec_inputs.get(spec, set())),
+                    'inputs': sorted(self._spec_inputs.get(spec, frozenset())),
                     'outputs': sorted(self._spec_outputs.get(spec, frozenset())),
                 }
                 for spec in specs
