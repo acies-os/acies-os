@@ -12,15 +12,15 @@ from typing import Any
 
 from .context import AciesContext
 from .msg import (
+    AciesDel,
+    AciesGet,
     AciesHeartbeat,
     AciesKvRequest,
     AciesKvResponse,
-    Del,
+    AciesResult,
+    AciesSet,
     Err,
-    Get,
-    KvResult,
     Ok,
-    Set,
 )
 from .namespace import CtlTopic
 from .task import ScheduleSpec, ServiceSpec
@@ -84,7 +84,7 @@ def _del_path(config: dict[str, Any], path: list[str]) -> None:
 _SYS_MUTABLE: frozenset[str] = frozenset({'state'})
 
 
-def _handle_get(config: dict[str, Any], k: list[str]) -> KvResult:
+def _handle_get(config: dict[str, Any], k: list[str]) -> AciesResult:
     if not k:
         return Err(reason='empty key path')
     try:
@@ -93,7 +93,7 @@ def _handle_get(config: dict[str, Any], k: list[str]) -> KvResult:
         return Err(reason=f'key not found: {e.args[0]!r}')
 
 
-def _handle_set(config: dict[str, Any], k: list[str], v: Any) -> KvResult:
+def _handle_set(config: dict[str, Any], k: list[str], v: Any) -> AciesResult:
     if not k:
         return Err(reason='empty key path')
     if k[0] == 'sys' and not (len(k) == 2 and k[1] in _SYS_MUTABLE):
@@ -105,7 +105,7 @@ def _handle_set(config: dict[str, Any], k: list[str], v: Any) -> KvResult:
         return Err(reason=f'key not found: {e.args[0]!r}')
 
 
-def _handle_del(config: dict[str, Any], k: list[str]) -> KvResult:
+def _handle_del(config: dict[str, Any], k: list[str]) -> AciesResult:
     if not k:
         return Err(reason='empty key path')
     if k[0] == 'sys':
@@ -119,14 +119,14 @@ def _handle_del(config: dict[str, Any], k: list[str]) -> KvResult:
 
 def _kv(ctx: AciesContext, msg: AciesKvRequest) -> AciesKvResponse:
     with ctx.app.lock:
-        results: list[KvResult] = []
+        results: list[AciesResult] = []
         for entry in msg.ops:
             match entry:
-                case Get(key=k):
+                case AciesGet(key=k):
                     results.append(_handle_get(ctx.app.config, k))
-                case Set(key=k, value=v):
+                case AciesSet(key=k, value=v):
                     results.append(_handle_set(ctx.app.config, k, v))
-                case Del(key=k):
+                case AciesDel(key=k):
                     results.append(_handle_del(ctx.app.config, k))
     return AciesKvResponse(timestamp=ctx.now(), results=results)
 

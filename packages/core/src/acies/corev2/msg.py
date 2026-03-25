@@ -22,20 +22,20 @@ NanoSecond: TypeAlias = int  # nanoseconds since Unix epoch (time.time_ns())
 # Used in AciesKvRequest.ops — one entry per key path operation.
 
 
-class Get(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+class AciesGet(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
     key: list[str]  # path to the value: ['k1', 'k2'] → config['k1']['k2']
 
 
-class Set(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+class AciesSet(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
     key: list[str]
     value: Any
 
 
-class Del(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
+class AciesDel(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
     key: list[str]
 
 
-KvEntry: TypeAlias = Get | Set | Del
+KvEntry: TypeAlias = AciesGet | AciesSet | AciesDel
 
 # -------------------------------- kv results ----------------------------------
 # Used in AciesKvResponse.results — positionally aligned with request ops.
@@ -49,7 +49,7 @@ class Err(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
     reason: str  # 'key_not_found' | 'key_protected' | 'invalid_path'
 
 
-KvResult: TypeAlias = Ok | Err
+AciesResult: TypeAlias = Ok | Err
 
 # ------------------------------ control messages ------------------------------
 
@@ -68,7 +68,7 @@ class AciesKvRequest(msgspec.Struct, frozen=True):
 
 class AciesKvResponse(msgspec.Struct, frozen=True):
     timestamp: NanoSecond
-    results: list[KvResult]
+    results: list[AciesResult]
 
 
 class AciesRoute(msgspec.Struct, frozen=True):

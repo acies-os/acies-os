@@ -10,13 +10,13 @@ from acies.corev2._control import _del_path, _get_path, _set_path  # pyright: ig
 from acies.corev2.app import AciesApp
 from acies.corev2.context import AciesContext
 from acies.corev2.msg import (
+    AciesDel,
+    AciesGet,
     AciesKvRequest,
     AciesKvResponse,
-    Del,
+    AciesSet,
     Err,
-    Get,
     Ok,
-    Set,
 )
 from acies.corev2.router import Router
 from acies.corev2.transport import LocalTransport
@@ -153,41 +153,41 @@ class TestKvGet:
         app, router, ready = _make_app()
         app.state.config['threshold'] = 0.5
         with running(app, ready):
-            resp = _kv_query(router, [Get(key=['threshold'])])
+            resp = _kv_query(router, [AciesGet(key=['threshold'])])
         assert resp.results == [Ok(value=0.5)]
 
     def test_nested_key(self):
         app, router, ready = _make_app()
         app.state.config['model'] = {'threshold': 0.8, 'window': 100}
         with running(app, ready):
-            resp = _kv_query(router, [Get(key=['model', 'threshold'])])
+            resp = _kv_query(router, [AciesGet(key=['model', 'threshold'])])
         assert resp.results == [Ok(value=0.8)]
 
     def test_subtree(self):
         app, router, ready = _make_app()
         app.state.config['model'] = {'threshold': 0.8}
         with running(app, ready):
-            resp = _kv_query(router, [Get(key=['model'])])
+            resp = _kv_query(router, [AciesGet(key=['model'])])
         assert resp.results == [Ok(value={'threshold': 0.8})]
 
     def test_missing_key(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Get(key=['missing'])])
+            resp = _kv_query(router, [AciesGet(key=['missing'])])
         assert isinstance(resp.results[0], Err)
         assert 'missing' in resp.results[0].reason
 
     def test_empty_path(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Get(key=[])])
+            resp = _kv_query(router, [AciesGet(key=[])])
         assert isinstance(resp.results[0], Err)
         assert 'empty' in resp.results[0].reason
 
     def test_sys_key_readable(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Get(key=['sys', 'host'])])
+            resp = _kv_query(router, [AciesGet(key=['sys', 'host'])])
         assert resp.results == [Ok(value='test-host')]
 
 
@@ -196,7 +196,7 @@ class TestKvSet:
         app, router, ready = _make_app()
         app.state.config['threshold'] = 0.5
         with running(app, ready):
-            resp = _kv_query(router, [Set(key=['threshold'], value=0.9)])
+            resp = _kv_query(router, [AciesSet(key=['threshold'], value=0.9)])
             assert resp.results == [Ok()]
         assert app.state.config['threshold'] == 0.9
 
@@ -204,42 +204,42 @@ class TestKvSet:
         app, router, ready = _make_app()
         app.state.config['model'] = {'threshold': 0.5}
         with running(app, ready):
-            resp = _kv_query(router, [Set(key=['model', 'threshold'], value=0.9)])
+            resp = _kv_query(router, [AciesSet(key=['model', 'threshold'], value=0.9)])
             assert resp.results == [Ok()]
         assert app.state.config['model']['threshold'] == 0.9
 
     def test_missing_key(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Set(key=['missing'], value=1)])
+            resp = _kv_query(router, [AciesSet(key=['missing'], value=1)])
         assert isinstance(resp.results[0], Err)
         assert 'missing' in resp.results[0].reason
 
     def test_sys_state_allowed(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Set(key=['sys', 'state'], value='paused')])
+            resp = _kv_query(router, [AciesSet(key=['sys', 'state'], value='paused')])
             assert resp.results == [Ok()]
         assert app.state.config['sys']['state'] == 'paused'
 
     def test_sys_host_protected(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Set(key=['sys', 'host'], value='other')])
+            resp = _kv_query(router, [AciesSet(key=['sys', 'host'], value='other')])
         assert isinstance(resp.results[0], Err)
         assert resp.results[0].reason == 'key_protected'
 
     def test_sys_subtree_protected(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Set(key=['sys'], value={})])
+            resp = _kv_query(router, [AciesSet(key=['sys'], value={})])
         assert isinstance(resp.results[0], Err)
         assert resp.results[0].reason == 'key_protected'
 
     def test_empty_path(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Set(key=[], value=1)])
+            resp = _kv_query(router, [AciesSet(key=[], value=1)])
         assert isinstance(resp.results[0], Err)
         assert 'empty' in resp.results[0].reason
 
@@ -249,7 +249,7 @@ class TestKvDel:
         app, router, ready = _make_app()
         app.state.config['temp'] = 42
         with running(app, ready):
-            resp = _kv_query(router, [Del(key=['temp'])])
+            resp = _kv_query(router, [AciesDel(key=['temp'])])
             assert resp.results == [Ok()]
         assert 'temp' not in app.state.config
 
@@ -257,28 +257,28 @@ class TestKvDel:
         app, router, ready = _make_app()
         app.state.config['model'] = {'threshold': 0.5, 'window': 100}
         with running(app, ready):
-            resp = _kv_query(router, [Del(key=['model', 'threshold'])])
+            resp = _kv_query(router, [AciesDel(key=['model', 'threshold'])])
             assert resp.results == [Ok()]
         assert app.state.config['model'] == {'window': 100}
 
     def test_missing_key(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Del(key=['missing'])])
+            resp = _kv_query(router, [AciesDel(key=['missing'])])
         assert isinstance(resp.results[0], Err)
         assert 'missing' in resp.results[0].reason
 
     def test_sys_protected(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Del(key=['sys', 'state'])])
+            resp = _kv_query(router, [AciesDel(key=['sys', 'state'])])
         assert isinstance(resp.results[0], Err)
         assert resp.results[0].reason == 'key_protected'
 
     def test_empty_path(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [Del(key=[])])
+            resp = _kv_query(router, [AciesDel(key=[])])
         assert isinstance(resp.results[0], Err)
         assert 'empty' in resp.results[0].reason
 
@@ -293,10 +293,10 @@ class TestKvMixed:
             resp = _kv_query(
                 router,
                 [
-                    Get(key=['a']),
-                    Set(key=['b'], value=99),
-                    Get(key=['missing']),
-                    Get(key=['b']),
+                    AciesGet(key=['a']),
+                    AciesSet(key=['b'], value=99),
+                    AciesGet(key=['missing']),
+                    AciesGet(key=['b']),
                 ],
             )
         assert len(resp.results) == 4
@@ -313,8 +313,8 @@ class TestKvMixed:
             resp = _kv_query(
                 router,
                 [
-                    Get(key=['missing']),
-                    Get(key=['x']),
+                    AciesGet(key=['missing']),
+                    AciesGet(key=['x']),
                 ],
             )
         assert isinstance(resp.results[0], Err)
