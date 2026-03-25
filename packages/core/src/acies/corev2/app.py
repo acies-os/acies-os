@@ -24,7 +24,7 @@ from typing import Any, Callable, get_type_hints
 import msgspec
 
 from ._cli import create_acies_cli
-from ._control import make_heartbeat_spec
+from ._control import make_heartbeat_spec, make_kv_spec
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
 from .namespace import CtlTopic, Namespace, Topic, TopicArg, TopicVar
@@ -55,9 +55,14 @@ class AciesApp:
         self._timer_thread: threading.Thread | None = None
         self._task_ctxs: dict[TaskSpec, AciesContext] = {}
         self._app_state: AppState = AppState()
-        self._app_state.config['sys'] = {'host': resolved_host, 'name': resolved_name}
+        self._app_state.config['sys'] = {
+            'host': resolved_host,
+            'name': resolved_name,
+            'state': 'initializing',
+        }
         self._ns: Namespace = Namespace(resolved_host, resolved_name)
         self._tasks.append(make_heartbeat_spec())
+        self._tasks.append(make_kv_spec())
 
     @property
     def name(self) -> str:
@@ -248,6 +253,8 @@ class AciesApp:
             task=TaskState(),
             ns=self._ns,
         )
+
+        self._app_state.config['sys']['state'] = 'active'
 
         for hook in self._startup_hooks:
             hook(hook_ctx)
