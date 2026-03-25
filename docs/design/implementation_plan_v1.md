@@ -70,21 +70,24 @@ the discriminant.
 class SubscriberSpec:
     name: str
     fn: Callable
-    topics: tuple[str, ...]
-    msg_type: type | None = None  # extracted from fn annotation at decoration time
+    topics: tuple[TopicArg, ...]
+    msg_type: type | None = None
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 @dataclass(frozen=True)
 class ScheduleSpec:
     name: str
     fn: Callable
     interval: float
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 @dataclass(frozen=True)
 class ServiceSpec:
     name: str
     fn: Callable
-    topics: tuple[str, ...]
-    msg_type: type | None = None  # extracted from fn annotation at decoration time
+    topic: TopicArg          # single topic, not a tuple
+    msg_type: type | None = None
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
 ```
@@ -110,8 +113,9 @@ the underlying query mechanism.
 class Job:
     spec: TaskSpec
     raw: bytes | None                         # raw msgpack bytes; None for ScheduleSpec jobs
-    created_at: float                         # time.monotonic()
-    reply_fn: ReplyFn | None                  # only set for ServiceSpec jobs; dispatch calls reply_fn(encoded_bytes)
+    deadline: float = 0.0                     # seconds (monotonic); 0.0 = no deadline
+    created_at: float = field(default_factory=time.monotonic)
+    reply_fn: ReplyFn | None = None           # only set for ServiceSpec jobs
 ```
 
 ### `AppState` and `TaskState` (context.py)
@@ -123,7 +127,8 @@ read-modify-write.
 ```python
 class AppState:
     lock: threading.RLock
-    data: dict
+    config: dict   # externally controllable; 'sys' key reserved for middleware
+    data: dict     # free-form transient state; internal to the app
 
 class TaskState:
     lock: threading.RLock
@@ -160,14 +165,18 @@ callback.
 
 ```python
 class Transport(Protocol):
-    def start(self, on_message: Callable[[str, bytes], None]) -> None: ...
+    def start(self, on_message: Callable[[str, bytes, ReplyFn | None], None]) -> None: ...
     def stop(self) -> None: ...
-    def can_handle(self, topic: str) -> bool: ...
+    def abort(self) -> None: ...   # discard queued messages; stop() drains them
     def publish(self, topic: str, raw: bytes) -> None: ...
     def subscribe(self, topic: str) -> None: ...
     def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None: ...
-    def advertise(self, topic: str, reply_fn_factory: Callable) -> None: ...
+    def advertise(self, topic: str) -> None: ...
 ```
+
+`can_handle` was removed — transport selection is by prefix rule only (see
+`Router.add_transport(prefix=...)`). The transport creates the `reply_fn`
+closure directly and passes it as the third arg to `on_message`.
 
 The transport layer deals exclusively in raw bytes — it has no knowledge of
 message types. Encoding (`msgspec.msgpack.encode`) and decoding
@@ -214,18 +223,28 @@ one is used. Raises if no transport matches.
 
 ```python
 class Router:
-    def add(self, transport: Transport) -> None: ...
-    def start(self, executor: Executor) -> None: ...  # starts transports + router thread
+    def add_transport(self, transport: Transport, *, prefix: str | None = None) -> None: ...
+    def start(self, executor: Executor) -> None: ...
     def stop(self) -> None: ...
 
     # Inbound registration (called by AciesApp at startup)
-    def subscribe(self, topic: str, spec: TaskSpec) -> None: ...
-    def advertise(self, topic: str, spec: TaskSpec) -> None: ...
+    def subscribe(self, topic: str, spec: SubscriberSpec) -> None: ...
+    def advertise(self, topic: str, spec: ServiceSpec) -> None: ...
 
-    # Outbound (called directly from worker threads via AciesContext)
-    def publish(self, topic: str, msg: msgspec.Struct) -> None: ...
-    def query(self, topic: str, msg: msgspec.Struct, timeout: float) -> msgspec.Struct | None: ...
+    # Outbound (raw bytes; called from worker threads via AciesContext)
+    def publish(self, topic: str, raw: bytes) -> None: ...
+    def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None: ...
+
+    # I/O routing table
+    def record_output(self, spec: TaskSpec, topic: str) -> None: ...
+    @property
+    def io_map(self) -> dict[str, dict[str, str | list[str]]]: ...
 ```
+
+Codec (encode/decode) was moved out of the router entirely — it happens in
+worker threads via `app.dispatch`. The router and transport are byte-only.
+Transport selection is by prefix rule: `add_transport(t, prefix='ws://')` for
+overrides, no prefix for the default.
 
 Inbound flow in `_route_loop`:
 1. Receive `(topic, raw_bytes)` from the inbound queue.
