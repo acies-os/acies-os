@@ -72,11 +72,30 @@ class AciesKvResponse(msgspec.Struct, frozen=True):
     results: list[AciesResult]
 
 
-class AciesRoute(msgspec.Struct, frozen=True):
+class TopicRename(msgspec.Struct, frozen=True):
+    old: str | None = None  # None = add only (no unsubscribe)
+    new: str | None = None  # None = remove only (no subscribe)
+
+    def __post_init__(self):
+        if self.old is None and self.new is None:
+            raise ValueError('at least one of `old` or `new` must be set')
+
+
+class AciesRouteRequest(msgspec.Struct, frozen=True):
     source: str
     timestamp: NanoSecond
-    old_topic: str | None
-    new_topic: str | None
+    spec_id: str | None = None  # preferred: UUID from spec.id
+    spec_name: str | None = None  # fallback: match by name
+    inputs: list[TopicRename] = []
+
+    def __post_init__(self):
+        if self.spec_id is None and self.spec_name is None:
+            raise ValueError('at least one of `spec_id` or `spec_name` must be set')
+
+
+class AciesRouteResponse(msgspec.Struct, frozen=True):
+    timestamp: NanoSecond
+    result: AciesResult
 
 
 # ------------------------------- data messages -------------------------------

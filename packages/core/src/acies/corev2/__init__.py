@@ -9,13 +9,15 @@ from .msg import (
     AciesKvRequest,
     AciesKvResponse,
     AciesResult,
-    AciesRoute,
+    AciesRouteRequest,
+    AciesRouteResponse,
     AciesSet,
     AciesTensor,
     Err,
     KvEntry,
     NanoSecond,
     Ok,
+    TopicRename,
 )
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 
@@ -30,7 +32,8 @@ __all__ = [
     'AciesKvRequest',
     'AciesKvResponse',
     'AciesResult',
-    'AciesRoute',
+    'AciesRouteRequest',
+    'AciesRouteResponse',
     'AciesSet',
     'AciesTensor',
     'AppState',
@@ -43,4 +46,5 @@ __all__ = [
     'ServiceSpec',
     'SubscriberSpec',
     'TaskState',
+    'TopicRename',
 ]

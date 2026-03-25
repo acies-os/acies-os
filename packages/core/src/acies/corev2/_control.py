@@ -8,7 +8,7 @@ Provides:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .context import AciesContext
 from .msg import (
@@ -18,12 +18,17 @@ from .msg import (
     AciesKvRequest,
     AciesKvResponse,
     AciesResult,
+    AciesRouteRequest,
+    AciesRouteResponse,
     AciesSet,
     Err,
     Ok,
 )
 from .namespace import CtlTopic
-from .task import ScheduleSpec, ServiceSpec
+from .task import ScheduleSpec, ServiceSpec, SubscriberSpec
+
+if TYPE_CHECKING:
+    from .router import Router
 
 _DEFAULT_HEARTBEAT_INTERVAL: float = 5.0
 
@@ -134,3 +139,40 @@ def _kv(ctx: AciesContext, msg: AciesKvRequest) -> AciesKvResponse:
 def make_kv_spec() -> ServiceSpec:
     """Return a ServiceSpec for the ctl/kv queryable."""
     return ServiceSpec(name='_kv', fn=_kv, topic=CtlTopic('kv'), msg_type=AciesKvRequest)
+
+
+# ---------------------------------- route ------------------------------------
+
+
+def make_route_spec(router: Router) -> ServiceSpec:
+    """Return a ServiceSpec for the ctl/route queryable.
+
+    The handler remaps input topics for a spec identified by id or name.
+    For each TopicRename: unsubscribes old topic (if set), subscribes new
+    topic (if set). Services are unadvertised/re-advertised the same way.
+    """
+
+    def _route(ctx: AciesContext, msg: AciesRouteRequest) -> AciesRouteResponse:
+        spec = router.find_spec(msg.spec_id, msg.spec_name)
+        if spec is None:
+            return AciesRouteResponse(
+                timestamp=ctx.now(),
+                result=Err(reason=f'spec not found: id={msg.spec_id!r} name={msg.spec_name!r}'),
+            )
+
+        for rename in msg.inputs:
+            if rename.old is not None:
+                if isinstance(spec, SubscriberSpec):
+                    router.unsubscribe(rename.old, spec)
+                else:
+                    router.unadvertise(rename.old)
+            if rename.new is not None:
+                if isinstance(spec, SubscriberSpec):
+                    router.subscribe(rename.new, spec)
+                else:
+                    assert isinstance(spec, ServiceSpec)
+                    router.advertise(rename.new, spec)
+
+        return AciesRouteResponse(timestamp=ctx.now(), result=Ok())
+
+    return ServiceSpec(name='_route', fn=_route, topic=CtlTopic('route'), msg_type=AciesRouteRequest)
