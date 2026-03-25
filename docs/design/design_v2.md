@@ -91,19 +91,27 @@ device/service instance and follow `<host>/<name>/ctl/<service>`.
 
 ### Topic types
 
-Four forms are accepted wherever a topic is expected (`app.subscribe`,
-`app.service`, `ctx.publish`, `ctx.query`):
+Three forms are accepted at decoration time (`app.subscribe`, `app.service`):
 
 | Form | Example | Resolves to |
 |------|---------|-------------|
 | `str` | `'building/a/temperature'` | used as-is |
-| `str` with `{key}` | `'{sys[host]}/{sys[name]}/audio'` | resolved from `app.state.config` at `run()` |
+| `str` with `{key}` | `'{input_topic}'` or `'section/{section}/room/{room}'` | resolved from `app.state.config` via `format_map` at `run()` |
 | `Topic(path, prefix=True)` | `Topic('audio/raw')` | `edge-01/mic/audio/raw` |
 | `CtlTopic(path)` | `CtlTopic('kv')` | `edge-01/mic/ctl/kv` |
-| `TopicVar(key)` | `TopicVar('input_topic')` | `app.state.config['input_topic']` at `run()` |
 
-`Topic` and `CtlTopic` are resolved lazily at `run()` time, so CLI-overridden
-`host`/`name` are always reflected correctly.
+`Topic`, `CtlTopic`, and format-string topics are all resolved lazily at
+`run()` time, so CLI-overridden `host`/`name` and config values are always
+reflected correctly.
+
+`ctx.publish()` and `ctx.query()` accept plain `str` only. For
+CLI-configurable output topics, read from `ctx.app.config` directly:
+
+```python
+ctx.publish(ctx.app.config['output_topic'], msg)
+# or composite:
+ctx.publish(f"section/{ctx.app.config['section']}/room/{ctx.app.config['room']}/data", msg)
+```
 
 `Topic` prefix options:
 - `prefix=True` (default) — prepends `<host>/<name>`
@@ -150,13 +158,14 @@ processes or hosts requires no code changes.
 before CLI arguments are available. Use lazy types that resolve at `run()`:
 
 ```python
-from acies.corev2 import Topic, CtlTopic, TopicVar
+from acies.corev2 import Topic, CtlTopic
 
 @app.subscribe(Topic('audio/raw'))          # → edge-01/mic/audio/raw
 @app.subscribe(Topic('**'))                 # → edge-01/mic/**
 @app.subscribe(Topic('room/5', prefix=''))  # → room/5  (domain-centric)
 @app.service(CtlTopic('kv'))               # → edge-01/mic/ctl/kv
-@app.subscribe(TopicVar('input_topic'))     # → app.state.config['input_topic']
+@app.subscribe('{input_topic}')            # → app.state.config['input_topic']
+@app.subscribe('section/{section}/room/{room}/temp')  # composite from config
 ```
 
 **Handler time** — inside handlers, `ctx.ns` is a resolved `Namespace`.
@@ -166,6 +175,7 @@ from acies.corev2 import Topic, CtlTopic, TopicVar
 def handler(ctx: AciesContext, msg: SensorReading):
     ctx.publish(ctx.ns.topic('audio/raw'), AciesTensor(...))  # edge-01/mic/audio/raw
     ctx.publish('building/a/room/5/temp', msg)                # domain-centric
+    ctx.publish(ctx.app.config['output_topic'], msg)          # CLI-configurable output
     ctx.query(ctx.ns.ctl.kv, payload, timeout=0.5)            # edge-01/mic/ctl/kv
     ctx.query('edge-02/classifier/ctl/infer', payload, timeout=1.0)  # cross-device
 ```
