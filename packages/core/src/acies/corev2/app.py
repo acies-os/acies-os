@@ -209,9 +209,16 @@ class AciesApp:
 
     def run(self) -> None:
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
+        def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
+            def _publish(topic: str, raw: bytes) -> None:
+                self._router.record_output(spec, topic)
+                self._router.publish(topic, raw)
+
+            return _publish
+
         self._task_ctxs = {
             task: AciesContext(
-                publish_fn=self._router.publish,
+                publish_fn=_make_publish(task),
                 query_fn=self._router.query,
                 now_fn=time.time_ns,
                 app=self._app_state,

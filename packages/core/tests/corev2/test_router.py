@@ -6,12 +6,10 @@ import pytest
 
 from acies.corev2.executor import Executor
 from acies.corev2.router import Router
-from acies.corev2.task import Job, ServiceSpec, SubscriberSpec
+from acies.corev2.task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
 from acies.corev2.transport import LocalTransport
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ---------------------------------- helpers ----------------------------------
 
 
 class _Ping(msgspec.Struct, frozen=True):
@@ -41,9 +39,7 @@ def _stop(router: Router, executor: Executor) -> None:
     executor.stop()
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+# ----------------------------------- tests -----------------------------------
 
 
 def test_no_transport_raises():
@@ -116,6 +112,7 @@ def test_subscribe_and_publish_delivers_job():
     ex = Executor()
 
     def dispatch(job: Job):
+        assert job.raw is not None
         msg = msgspec.msgpack.decode(job.raw, type=_Ping)
         received.append(msg)
         done.set()
@@ -185,6 +182,7 @@ def test_service_job_reply_fn_end_to_end():
     ex = Executor()
 
     def dispatch(job: Job):
+        assert job.raw is not None
         msg = msgspec.msgpack.decode(job.raw, type=_Ping)
         result = _Pong(value=msg.value * 2)
         handler_done.set()
@@ -234,6 +232,91 @@ def test_wildcard_subscription_receives_matching_messages():
     _stop(router, ex)
 
 
+# ----------------------------- I/O routing table -----------------------------
+
+
+class TestIoMap:
+    def _router(self) -> Router:
+        r = Router()
+        r.add_transport(LocalTransport())
+        return r
+
+    def test_subscriber_inputs_recorded(self):
+        router = self._router()
+        spec = SubscriberSpec(name='sub', fn=lambda ctx, msg: None, topics=('a/b',), msg_type=None)
+        router.subscribe('a/b', spec)
+        assert router.io_map == {'sub': {'inputs': ['a/b'], 'outputs': []}}
+
+    def test_service_inputs_recorded(self):
+        router = self._router()
+        spec = ServiceSpec(name='svc', fn=lambda ctx, msg: None, topic='rpc/ping', msg_type=None)
+        router.advertise('rpc/ping', spec)
+        assert router.io_map == {'svc': {'inputs': ['rpc/ping'], 'outputs': []}}
+
+    def test_multiple_inputs_same_spec(self):
+        router = self._router()
+        spec = SubscriberSpec(name='multi', fn=lambda ctx, msg: None, topics=('x', 'y'), msg_type=None)
+        router.subscribe('x', spec)
+        router.subscribe('y', spec)
+        assert router.io_map['multi']['inputs'] == ['x', 'y']
+
+    def test_output_recorded(self):
+        router = self._router()
+        spec = SubscriberSpec(name='sub', fn=lambda ctx, msg: None, topics=('in',), msg_type=None)
+        router.subscribe('in', spec)
+        router.record_output(spec, 'out/result')
+        assert router.io_map['sub']['outputs'] == ['out/result']
+
+    def test_multiple_outputs(self):
+        router = self._router()
+        spec = SubscriberSpec(name='sub', fn=lambda ctx, msg: None, topics=('in',), msg_type=None)
+        router.subscribe('in', spec)
+        router.record_output(spec, 'out/a')
+        router.record_output(spec, 'out/b')
+        assert router.io_map['sub']['outputs'] == ['out/a', 'out/b']
+
+    def test_output_idempotent(self):
+        router = self._router()
+        spec = SubscriberSpec(name='sub', fn=lambda ctx, msg: None, topics=('in',), msg_type=None)
+        router.subscribe('in', spec)
+        router.record_output(spec, 'out/a')
+        router.record_output(spec, 'out/a')
+        assert router.io_map['sub']['outputs'] == ['out/a']
+
+    def test_multiple_specs(self):
+        router = self._router()
+        spec_a = SubscriberSpec(name='a', fn=lambda ctx, msg: None, topics=('x',), msg_type=None)
+        spec_b = SubscriberSpec(name='b', fn=lambda ctx, msg: None, topics=('y',), msg_type=None)
+        router.subscribe('x', spec_a)
+        router.subscribe('y', spec_b)
+        m = router.io_map
+        assert m['a'] == {'inputs': ['x'], 'outputs': []}
+        assert m['b'] == {'inputs': ['y'], 'outputs': []}
+
+    def test_schedule_spec_output_only(self):
+        """ScheduleSpec has no inputs; appears in io_map only once it publishes."""
+        router = self._router()
+        spec = ScheduleSpec(name='timer', fn=lambda ctx: None, interval=1.0)
+        assert router.io_map == {}
+        router.record_output(spec, 'heartbeat')
+        assert router.io_map == {'timer': {'inputs': [], 'outputs': ['heartbeat']}}
+
+    def test_concurrent_record_output(self):
+        """Concurrent record_output calls from many threads do not corrupt the map."""
+        router = self._router()
+        spec = SubscriberSpec(name='sub', fn=lambda ctx, msg: None, topics=('in',), msg_type=None)
+        router.subscribe('in', spec)
+
+        topics = [f'out/{i}' for i in range(50)]
+        threads = [threading.Thread(target=router.record_output, args=(spec, t)) for t in topics]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert router.io_map['sub']['outputs'] == sorted(topics)
+
+
 def test_unsubscribed_topic_not_delivered():
     """Messages on topics with no matching subscriber are silently dropped."""
     router = Router()
@@ -246,6 +329,7 @@ def test_unsubscribed_topic_not_delivered():
     ex = Executor()
 
     def dispatch(job: Job):
+        assert job.raw is not None
         received.append(msgspec.msgpack.decode(job.raw, type=_Ping))
 
     ex.start(dispatch)
