@@ -150,6 +150,10 @@ class AciesContext:
     def query(self, topic: str, msg: msgspec.Struct, timeout: float = 1.0) -> msgspec.Struct | None: ...
 ```
 
+`publish` and `query` accept plain `str` only. For CLI-configurable output
+topics, read from `ctx.app.config` directly — e.g.
+`ctx.publish(ctx.app.config['output_topic'], msg)`.
+
 > **Future extension**: `Depends(fn)` markers in the handler signature are a
 > planned mechanism for injecting per-call resources (DB sessions, model
 > handles). No resolver or per-call inspection is needed for Phase 2 — dispatch
