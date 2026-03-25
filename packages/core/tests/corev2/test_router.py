@@ -245,27 +245,27 @@ class TestIoMap:
         router = self._router()
         spec = SubscriberSpec(name='sub', fn=lambda ctx, msg: None, topics=('a/b',), msg_type=None)
         router.subscribe('a/b', spec)
-        assert router.io_map == {'sub': {'inputs': ['a/b'], 'outputs': []}}
+        assert router.io_map[spec.id] == {'name': 'sub', 'inputs': ['a/b'], 'outputs': []}
 
     def test_service_inputs_recorded(self):
         router = self._router()
         spec = ServiceSpec(name='svc', fn=lambda ctx, msg: None, topic='rpc/ping', msg_type=None)
         router.advertise('rpc/ping', spec)
-        assert router.io_map == {'svc': {'inputs': ['rpc/ping'], 'outputs': []}}
+        assert router.io_map[spec.id] == {'name': 'svc', 'inputs': ['rpc/ping'], 'outputs': []}
 
     def test_multiple_inputs_same_spec(self):
         router = self._router()
         spec = SubscriberSpec(name='multi', fn=lambda ctx, msg: None, topics=('x', 'y'), msg_type=None)
         router.subscribe('x', spec)
         router.subscribe('y', spec)
-        assert router.io_map['multi']['inputs'] == ['x', 'y']
+        assert router.io_map[spec.id]['inputs'] == ['x', 'y']
 
     def test_output_recorded(self):
         router = self._router()
         spec = SubscriberSpec(name='sub', fn=lambda ctx, msg: None, topics=('in',), msg_type=None)
         router.subscribe('in', spec)
         router.record_output(spec, 'out/result')
-        assert router.io_map['sub']['outputs'] == ['out/result']
+        assert router.io_map[spec.id]['outputs'] == ['out/result']
 
     def test_multiple_outputs(self):
         router = self._router()
@@ -273,7 +273,7 @@ class TestIoMap:
         router.subscribe('in', spec)
         router.record_output(spec, 'out/a')
         router.record_output(spec, 'out/b')
-        assert router.io_map['sub']['outputs'] == ['out/a', 'out/b']
+        assert router.io_map[spec.id]['outputs'] == ['out/a', 'out/b']
 
     def test_output_idempotent(self):
         router = self._router()
@@ -281,7 +281,7 @@ class TestIoMap:
         router.subscribe('in', spec)
         router.record_output(spec, 'out/a')
         router.record_output(spec, 'out/a')
-        assert router.io_map['sub']['outputs'] == ['out/a']
+        assert router.io_map[spec.id]['outputs'] == ['out/a']
 
     def test_multiple_specs(self):
         router = self._router()
@@ -290,8 +290,8 @@ class TestIoMap:
         router.subscribe('x', spec_a)
         router.subscribe('y', spec_b)
         m = router.io_map
-        assert m['a'] == {'inputs': ['x'], 'outputs': []}
-        assert m['b'] == {'inputs': ['y'], 'outputs': []}
+        assert m[spec_a.id] == {'name': 'a', 'inputs': ['x'], 'outputs': []}
+        assert m[spec_b.id] == {'name': 'b', 'inputs': ['y'], 'outputs': []}
 
     def test_schedule_spec_output_only(self):
         """ScheduleSpec has no inputs; appears in io_map only once it publishes."""
@@ -299,7 +299,7 @@ class TestIoMap:
         spec = ScheduleSpec(name='timer', fn=lambda ctx: None, interval=1.0)
         assert router.io_map == {}
         router.record_output(spec, 'heartbeat')
-        assert router.io_map == {'timer': {'inputs': [], 'outputs': ['heartbeat']}}
+        assert router.io_map[spec.id] == {'name': 'timer', 'inputs': [], 'outputs': ['heartbeat']}
 
     def test_concurrent_record_output(self):
         """Concurrent record_output calls from many threads do not corrupt the map."""
@@ -314,7 +314,7 @@ class TestIoMap:
         for t in threads:
             t.join()
 
-        assert router.io_map['sub']['outputs'] == sorted(topics)
+        assert router.io_map[spec.id]['outputs'] == sorted(topics)
 
 
 def test_unsubscribed_topic_not_delivered():
