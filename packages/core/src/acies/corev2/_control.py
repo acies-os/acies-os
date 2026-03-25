@@ -48,7 +48,7 @@ def make_heartbeat_spec(interval: float = _DEFAULT_HEARTBEAT_INTERVAL) -> Schedu
     return ScheduleSpec(name='_heartbeat', fn=_heartbeat, interval=interval)
 
 
-# --------------------------------- KV helpfer ---------------------------------
+# ---------------------------- KV helper functions ----------------------------
 
 
 def _get_path(config: dict[str, Any], path: list[str]) -> Any:
@@ -84,44 +84,50 @@ def _del_path(config: dict[str, Any], path: list[str]) -> None:
 _SYS_MUTABLE: frozenset[str] = frozenset({'state'})
 
 
-# --------------------------------- KV handler ---------------------------------
+def _handle_get(config: dict[str, Any], k: list[str]) -> KvResult:
+    if not k:
+        return Err(reason='empty key path')
+    try:
+        return Ok(value=_get_path(config, k))
+    except KeyError as e:
+        return Err(reason=f'key not found: {e.args[0]!r}')
+
+
+def _handle_set(config: dict[str, Any], k: list[str], v: Any) -> KvResult:
+    if not k:
+        return Err(reason='empty key path')
+    if k[0] == 'sys' and not (len(k) == 2 and k[1] in _SYS_MUTABLE):
+        return Err(reason='key_protected')
+    try:
+        _set_path(config, k, v)
+        return Ok()
+    except KeyError as e:
+        return Err(reason=f'key not found: {e.args[0]!r}')
+
+
+def _handle_del(config: dict[str, Any], k: list[str]) -> KvResult:
+    if not k:
+        return Err(reason='empty key path')
+    if k[0] == 'sys':
+        return Err(reason='key_protected')
+    try:
+        _del_path(config, k)
+        return Ok()
+    except KeyError as e:
+        return Err(reason=f'key not found: {e.args[0]!r}')
 
 
 def _kv(ctx: AciesContext, msg: AciesKvRequest) -> AciesKvResponse:
-    results: list[KvResult] = []
     with ctx.app.lock:
+        results: list[KvResult] = []
         for entry in msg.ops:
             match entry:
                 case Get(key=k):
-                    if not k:
-                        results.append(Err(reason='empty key path'))
-                    else:
-                        try:
-                            results.append(Ok(value=_get_path(ctx.app.config, k)))
-                        except KeyError as e:
-                            results.append(Err(reason=f'key not found: {e.args[0]!r}'))
+                    results.append(_handle_get(ctx.app.config, k))
                 case Set(key=k, value=v):
-                    if not k:
-                        results.append(Err(reason='empty key path'))
-                    elif k[0] == 'sys' and not (len(k) == 2 and k[1] in _SYS_MUTABLE):
-                        results.append(Err(reason='key_protected'))
-                    else:
-                        try:
-                            _set_path(ctx.app.config, k, v)
-                            results.append(Ok())
-                        except KeyError as e:
-                            results.append(Err(reason=f'key not found: {e.args[0]!r}'))
+                    results.append(_handle_set(ctx.app.config, k, v))
                 case Del(key=k):
-                    if not k:
-                        results.append(Err(reason='empty key path'))
-                    elif k[0] == 'sys':
-                        results.append(Err(reason='key_protected'))
-                    else:
-                        try:
-                            _del_path(ctx.app.config, k)
-                            results.append(Ok())
-                        except KeyError as e:
-                            results.append(Err(reason=f'key not found: {e.args[0]!r}'))
+                    results.append(_handle_del(ctx.app.config, k))
     return AciesKvResponse(timestamp=ctx.now(), results=results)
 
 
