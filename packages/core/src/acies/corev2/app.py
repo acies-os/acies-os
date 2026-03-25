@@ -254,7 +254,8 @@ class AciesApp:
             ns=self._ns,
         )
 
-        self._app_state.config['sys']['state'] = 'active'
+        with self._app_state.lock:
+            self._app_state.config['sys']['state'] = 'active'
 
         for hook in self._startup_hooks:
             hook(hook_ctx)
