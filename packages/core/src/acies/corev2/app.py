@@ -208,8 +208,11 @@ class AciesApp:
 
         def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
             def _publish(topic: str, raw: bytes) -> None:
-                self._router.record_output(spec, topic)
-                self._router.publish(topic, raw)
+                resolved = self._router.resolve_output(spec, topic)
+                if resolved is None:
+                    return  # suppressed
+                self._router.record_output(spec, resolved)
+                self._router.publish(resolved, raw)
 
             return _publish
 
