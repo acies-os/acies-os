@@ -3,19 +3,19 @@
 The Router connects transport topics to handler specs and vice versa.
 It deliberately has no knowledge of message encoding:
 
-  Inbound:  receive raw bytes from transport → match topic to specs
-            → create Job(spec, raw) → enqueue in executor
-            → dispatch (worker thread) decodes raw and calls the handler
+  Inbound:  receive raw bytes from transport -> match topic to specs
+            -> create Job(spec, raw) -> enqueue in executor
+            -> dispatch (worker thread) decodes raw and calls the handler
 
-  Outbound: AciesContext.publish encodes struct → bytes → router forwards
+  Outbound: AciesContext.publish encodes struct -> bytes -> router forwards
             bytes to the right transport
 
 Transport selection
 -------------------
 The router uses a default transport plus optional prefix overrides:
 
-  ws://...   →  WebSocketTransport (registered via prefix='ws://')
-  anything   →  default transport
+  ws://...   ->  WebSocketTransport (registered via prefix='ws://')
+  anything   ->  default transport
 
 In production the default is ZenohTransport (one session per process,
 connected via unix domain socket to the local zenohd). Locality between

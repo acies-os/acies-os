@@ -127,7 +127,7 @@ Zenoh key expression wildcards apply to the full topic path:
 @app.subscribe('**/temperature')
 
 # All outputs from this app
-@app.subscribe(Topic('**'))                  # → edge-01/mic/**
+@app.subscribe(Topic('**'))                  # -> edge-01/mic/**
 
 # All ctl heartbeats across all devices
 @app.subscribe('**/ctl/heartbeat')
@@ -160,11 +160,11 @@ before CLI arguments are available. Use lazy types that resolve at `run()`:
 ```python
 from acies.corev2 import Topic, CtlTopic
 
-@app.subscribe(Topic('audio/raw'))          # → edge-01/mic/audio/raw
-@app.subscribe(Topic('**'))                 # → edge-01/mic/**
-@app.subscribe(Topic('room/5', prefix=''))  # → room/5  (domain-centric)
-@app.service(CtlTopic('kv'))               # → edge-01/mic/ctl/kv
-@app.subscribe('{input_topic}')            # → app.state.config['input_topic']
+@app.subscribe(Topic('audio/raw'))          # -> edge-01/mic/audio/raw
+@app.subscribe(Topic('**'))                 # -> edge-01/mic/**
+@app.subscribe(Topic('room/5', prefix=''))  # -> room/5  (domain-centric)
+@app.service(CtlTopic('kv'))               # -> edge-01/mic/ctl/kv
+@app.subscribe('{input_topic}')            # -> app.state.config['input_topic']
 @app.subscribe('section/{section}/room/{room}/temp')  # composite from config
 ```
 
@@ -343,7 +343,7 @@ Device A                          Device B
 **Locality is handled by the infrastructure:**
 
 - A message from `mic` to `classifier` on the same device travels
-  mic → UDS → local zenohd → UDS → classifier. No network traversal.
+  mic -> UDS -> local zenohd -> UDS -> classifier. No network traversal.
 - A message to a subscriber on Device B goes through the server zenohd.
 - The application code and the router are identical in both cases — one
   `ZenohTransport` session per process, always connecting via UDS to the
