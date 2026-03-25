@@ -33,7 +33,7 @@ def deep_merge(target: dict[str, Any], source: dict[str, Any]) -> None:
     """
     for key, value in source.items():
         if isinstance(value, dict) and isinstance(target.get(key), dict):
-            deep_merge(target[key], value)
+            deep_merge(target[key], value)  # pyright: ignore[reportUnknownArgumentType]
         else:
             target[key] = value
 
