@@ -56,7 +56,7 @@ class Router:
         # I/O routing table: inputs populated at subscribe/advertise time;
         # outputs accumulated at runtime via record_output.
         self._spec_inputs: dict[TaskSpec, set[str]] = {}
-        self._spec_outputs: dict[TaskSpec, set[str]] = {}
+        self._spec_outputs: dict[TaskSpec, frozenset[str]] = {}
         self._io_lock: threading.Lock = threading.Lock()
 
         # Output remap table: maps spec -> {original_topic -> effective_topic | None}.
@@ -202,11 +202,17 @@ class Router:
         the app — conditional publish paths will appear once they are exercised.
         Thread-safe: may be called concurrently from worker threads.
         """
+        # fast path: already recorded
         outputs = self._spec_outputs.get(spec)
         if outputs is not None and topic in outputs:
-            return  # fast path: already recorded, no lock needed
+            return
+
+        # slow path: acquire lock and update
         with self._io_lock:
-            self._spec_outputs.setdefault(spec, set()).add(topic)
+            # re-check after acquiring lock to avoid lost updates from concurrent calls
+            outputs = self._spec_outputs.get(spec, frozenset())
+            if topic not in outputs:
+                self._spec_outputs[spec] = outputs | {topic}
 
     @property
     def io_map(self) -> dict[str, dict[str, str | list[str]]]:
@@ -222,7 +228,7 @@ class Router:
                 spec.id: {
                     'name': spec.name,
                     'inputs': sorted(self._spec_inputs.get(spec, set())),
-                    'outputs': sorted(self._spec_outputs.get(spec, set())),
+                    'outputs': sorted(self._spec_outputs.get(spec, frozenset())),
                 }
                 for spec in specs
             }
