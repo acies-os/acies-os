@@ -40,6 +40,23 @@ from .transport import ReplyCallback, Transport
 if TYPE_CHECKING:
     from .executor import Executor
 
+# If the router grows more complicated, we may group fields with their own
+# locks into separate dataclasses, e.g.:
+#
+# @dataclass
+# class _IoState:
+#     lock: threading.Lock = field(default_factory=threading.Lock)
+#     spec_inputs: dict[TaskSpec, frozenset[str]] = field(default_factory=dict)
+#     spec_outputs: dict[TaskSpec, frozenset[str]] = field(default_factory=dict)
+#
+#
+# @dataclass
+# class _RoutingState:
+#     lock: threading.Lock = field(default_factory=threading.Lock)
+#     subscriptions: dict[str, set[SubscriberSpec]] = field(default_factory=dict)
+#     services: dict[str, ServiceSpec] = field(default_factory=dict)
+#     output_remap: dict[TaskSpec, dict[str, str | None]] = field(default_factory=dict)
+
 
 class Router:
     def __init__(self) -> None:
