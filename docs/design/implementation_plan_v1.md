@@ -233,13 +233,20 @@ class Router:
 
     # Inbound registration (called by AciesApp at startup)
     def subscribe(self, topic: str, spec: SubscriberSpec) -> None: ...
+    def unsubscribe(self, topic: str, spec: SubscriberSpec) -> None: ...
     def advertise(self, topic: str, spec: ServiceSpec) -> None: ...
+    def unadvertise(self, topic: str) -> None: ...
+    def find_spec(self, spec_id: str | None, spec_name: str | None) -> TaskSpec | None: ...
 
     # Outbound (raw bytes; called from worker threads via AciesContext)
     def publish(self, topic: str, raw: bytes) -> None: ...
     def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None: ...
 
-    # I/O routing table
+    # Output remap (ctl/route)
+    def remap_output(self, spec: TaskSpec, rename: TopicRename) -> None: ...
+    def resolve_output(self, spec: TaskSpec, topic: str) -> str | None: ...
+
+    # I/O observability
     def record_output(self, spec: TaskSpec, topic: str) -> None: ...
     @property
     def io_map(self) -> dict[str, dict[str, str | list[str]]]: ...
@@ -252,11 +259,23 @@ overrides, no prefix for the default.
 
 Inbound flow in `_route_loop`:
 1. Receive `(topic, raw_bytes)` from the inbound queue.
-2. If topic starts with `acies/ctrl/`: handle control message internally (never
-   creates a Job).
-3. Otherwise: look up matching `SubscriberSpec`s / `ServiceSpec`; decode
-   `msgspec.msgpack.decode(raw, type=spec.msg_type)` (or untyped fallback);
-   create `Job(spec, decoded_msg)` and call `executor.enqueue(job)`.
+2. Look up matching `SubscriberSpec`s / `ServiceSpec` under `_routing_lock`.
+3. Create `Job(spec, raw)` and call `executor.enqueue(job)`.
+
+Outbound flow via `_make_publish` (per-spec closure in `AciesApp.run`):
+1. `resolve_output(spec, topic)` — apply output remap; return `None` to suppress.
+2. `record_output(spec, resolved)` — accumulate for `io_map`.
+3. `router.publish(resolved, raw)` — forward to transport.
+
+**Locking policy** (two independent lock domains, never nested):
+
+- `_routing_lock` — `_subscriptions`, `_services`, `_output_remap` (outer dict).
+  Held by the router thread during `_route_loop` and by worker threads during
+  `subscribe`/`unsubscribe`/`advertise`/`unadvertise`/`remap_output`.
+- `_io_lock` — `_spec_inputs`, `_spec_outputs` (both `frozenset`, copy-on-write).
+  Held only during writes; readers get an immutable snapshot and need no lock.
+- `_output_remap` inner dicts — copy-on-write; `resolve_output` is fully lock-free.
+- Transport calls always happen outside both locks.
 
 ### `Executor` (executor.py)
 
