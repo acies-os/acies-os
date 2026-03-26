@@ -77,9 +77,17 @@ def setup(ctx: AciesContext) -> None:
     stream.start()
     logger.info('mic stream started on device %r at %d Hz', device, sample_rate)
 
+    try:
+        con = open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT)
+    except Exception:
+        logger.exception('failed to open database %r; shutting down', output)
+        stream.stop()
+        stream.close()
+        raise SystemExit(1)
+
     ctx.app.data['state'] = MicState(
         stream=stream,
-        con=open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT),
+        con=con,
         sample_rate=sample_rate,
         topic=ctx.app.config.get('topic') or ctx.ns.base,
     )
