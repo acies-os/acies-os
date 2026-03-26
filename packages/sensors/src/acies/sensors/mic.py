@@ -17,7 +17,6 @@ import logging
 import queue
 import socket
 import sqlite3
-import threading
 from pathlib import Path
 
 import click
@@ -53,7 +52,10 @@ def _open_db(path: str) -> sqlite3.Connection:
     return con
 
 
-def _flush(con: sqlite3.Connection, rows: list[tuple]) -> None:
+_DbRow = tuple[str, str, int, str, str, str]  # topic, msg_type, timestamp, ctl_topic, payload, metadata
+
+
+def _flush(con: sqlite3.Connection, rows: list[_DbRow]) -> None:
     con.executemany(
         'INSERT INTO message (topic, msg_type, timestamp, ctl_topic, payload, metadata) VALUES (?,?,?,?,?,?)',
         rows,
@@ -80,8 +82,7 @@ _stream: sd.InputStream | None = None
 _con: sqlite3.Connection | None = None
 _sample_rate: int = 0
 _accumulator: list[int] = []
-_db_buf: list[tuple] = []
-_lock = threading.Lock()
+_db_buf: list[_DbRow] = []
 
 # --- handlers ---
 
@@ -120,50 +121,54 @@ def _publish(ctx: AciesContext) -> None:
     if _sample_rate == 0:
         return
     sr = _sample_rate
-    with _lock:
-        while True:
-            try:
-                _accumulator.extend(_sample_queue.get_nowait().tolist())
-            except queue.Empty:
-                break
+    while True:
+        try:
+            _accumulator.extend(_sample_queue.get_nowait().tolist())
+        except queue.Empty:
+            break
 
-        while len(_accumulator) >= sr:
-            samples = _accumulator[:sr]
-            del _accumulator[:sr]
+    while len(_accumulator) >= sr:
+        samples = _accumulator[:sr]
+        del _accumulator[:sr]
 
-            metadata = {'channel': 0, 'sampling_rate': sr}
-            topic = ctx.ns.base
-            ts_ns = ctx.now()
+        metadata = {'channel': 0, 'sampling_rate': sr}
+        topic = ctx.ns.base
+        ts_ns = ctx.now()
 
-            ctx.publish(
+        ctx.publish(
+            topic,
+            AciesTensor(
+                source=ctx.ns.base,
+                timestamp=ts_ns,
+                payload=samples,
+                metadata=metadata,
+            ),
+        )
+
+        _db_buf.append(
+            (
                 topic,
-                AciesTensor(
-                    source=ctx.ns.base,
-                    timestamp=ts_ns,
-                    payload=samples,
-                    metadata=metadata,
-                ),
+                'i16',
+                ts_ns,
+                ctx.ns.ctl.base,
+                json.dumps(samples),
+                json.dumps(metadata),
             )
-
-            _db_buf.append(
-                (
-                    topic,
-                    'i16',
-                    ts_ns,
-                    ctx.ns.ctl.base,
-                    json.dumps(samples),
-                    json.dumps(metadata),
-                )
-            )
-            if len(_db_buf) >= _DB_BATCH and _con is not None:
-                _flush(_con, _db_buf)
-                _db_buf.clear()
+        )
+        if len(_db_buf) >= _DB_BATCH and _con is not None:
+            _flush(_con, _db_buf)
+            _db_buf.clear()
 
 
 # --- entry point ---
 
+app = AciesApp()
+app.on_startup(_setup)
+app.on_shutdown(_teardown)
+app.schedule(interval=0.5)(_publish)
 
-@click.command(name='acies-mic')
+
+@app.cli()
 @click.option(
     '--device',
     default='default',
@@ -176,16 +181,8 @@ def _publish(ctx: AciesContext) -> None:
     show_default=True,
     help='SQLite database output path.',
 )
-@click.option(
-    '--acies-host', default=socket.gethostname().removesuffix('.local'), show_default=True, help='Node hostname.'
-)
-@click.option('--acies-name', default='mic', show_default=True, help='Node name.')
-def main(device: str, output: str, acies_host: str, acies_name: str) -> None:
-    app = AciesApp(name=acies_name, host=acies_host)
+def main(device: str, output: str) -> None:
     app.state.config.update({'device': device, 'output': output})
-    app.on_startup(_setup)
-    app.on_shutdown(_teardown)
-    app.schedule(interval=0.5)(_publish)
     app.run()
 
 
