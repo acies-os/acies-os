@@ -24,7 +24,7 @@ from typing import Any, Callable, get_type_hints
 import msgspec
 
 from ._cli import create_acies_cli
-from ._control import make_heartbeat_spec, make_kv_spec, make_route_spec
+from ._control import make_heartbeat_spec, make_io_spec, make_kv_spec, make_route_spec
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
 from .namespace import CtlTopic, Namespace, Topic, TopicArg
@@ -61,9 +61,16 @@ class AciesApp:
             'state': 'initializing',
         }
         self._ns: Namespace = Namespace(resolved_host, resolved_name)
+
+        # ---------------------------- system tasks ----------------------------
+        # periodic heartbeat
         self._tasks.append(make_heartbeat_spec())
+        # key-value operations (set/get/del) on app_state.config
         self._tasks.append(make_kv_spec())
+        # dynamic routing: task inputs/outputs topic updates
         self._tasks.append(make_route_spec(self._router))
+        # task graph introspection: mapping of tasks to their input and output topics
+        self._tasks.append(make_io_spec(self._router))
 
     @property
     def name(self) -> str:

@@ -15,6 +15,8 @@ from .msg import (
     AciesDel,
     AciesGet,
     AciesHeartbeat,
+    AciesIoRequest,
+    AciesIoResponse,
     AciesKvRequest,
     AciesKvResponse,
     AciesResult,
@@ -179,3 +181,19 @@ def make_route_spec(router: Router) -> ServiceSpec:
         return AciesRouteResponse(timestamp=ctx.now(), result=Ok())
 
     return ServiceSpec(name='_route', fn=_route, topic=CtlTopic('route'), msg_type=AciesRouteRequest)
+
+
+# ------------------------------------ io -------------------------------------
+
+
+def make_io_spec(router: Router) -> ServiceSpec:
+    """Return a ServiceSpec for the ctl/io queryable.
+
+    Returns a snapshot of the router's I/O routing table: which topics each
+    spec subscribes to (inputs) and which topics it has published to (outputs).
+    """
+
+    def _io(ctx: AciesContext, msg: AciesIoRequest) -> AciesIoResponse:
+        return AciesIoResponse(timestamp=ctx.now(), io=router.io_map)
+
+    return ServiceSpec(name='_io', fn=_io, topic=CtlTopic('io'), msg_type=AciesIoRequest)

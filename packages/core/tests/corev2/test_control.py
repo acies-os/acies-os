@@ -13,6 +13,8 @@ from acies.corev2.context import AciesContext
 from acies.corev2.msg import (
     AciesDel,
     AciesGet,
+    AciesIoRequest,
+    AciesIoResponse,
     AciesKvRequest,
     AciesKvResponse,
     AciesRouteRequest,
@@ -547,3 +549,71 @@ class TestRouteOutput:
             assert done.wait(timeout=2.0), 'message did not arrive on out/t3'
 
         assert received_on_t3[0].v == 7
+
+
+# ------------------------------------ io -------------------------------------
+
+
+def _io_query(router: Router, timeout: float = 2.0) -> AciesIoResponse:
+    raw = router.query(
+        'test-host/test-app/ctl/io',
+        msgspec.msgpack.encode(AciesIoRequest(source='test', timestamp=0)),
+        timeout=timeout,
+    )
+    assert raw is not None, 'io query timed out'
+    return msgspec.msgpack.decode(raw, type=AciesIoResponse)
+
+
+class TestIo:
+    def test_inputs_appear_in_io_map(self):
+        """ctl/io lists the subscription topic as an input for the handler."""
+        app, router, ready = _make_app()
+
+        @app.subscribe('sensor/data')
+        def handler(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _io_query(router)
+
+        assert isinstance(resp, AciesIoResponse)
+        entry = next(v for v in resp.io.values() if v['name'] == 'handler')
+        assert 'sensor/data' in entry['inputs']
+
+    def test_outputs_accumulated_at_runtime(self):
+        """ctl/io shows an output topic only after the handler has published to it."""
+        done = threading.Event()
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def publisher(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            ctx.publish('result/y', _Msg(v=1))
+            done.set()
+
+        with running(app, ready):
+            # Before any publish: outputs should be empty for this handler
+            resp_before = _io_query(router)
+            entry_before = next(v for v in resp_before.io.values() if v['name'] == 'publisher')
+            assert entry_before['outputs'] == []
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'handler never ran'
+
+            resp_after = _io_query(router)
+
+        entry_after = next(v for v in resp_after.io.values() if v['name'] == 'publisher')
+        assert 'result/y' in entry_after['outputs']
+
+    def test_service_input_appears(self):
+        """ctl/io shows the topic for a service handler in inputs."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/ping')
+        def pinger(ctx: AciesContext, msg: msgspec.Struct) -> _Msg:
+            return _Msg(v=42)
+
+        with running(app, ready):
+            resp = _io_query(router)
+
+        entry = next(v for v in resp.io.values() if v['name'] == 'pinger')
+        assert 'svc/ping' in entry['inputs']
