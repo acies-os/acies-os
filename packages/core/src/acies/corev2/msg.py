@@ -109,6 +109,16 @@ class AciesIoResponse(msgspec.Struct, frozen=True):
     io: dict[str, dict[str, str | list[str]]]
 
 
+class AciesSchemaRequest(msgspec.Struct, frozen=True):
+    source: str
+    timestamp: NanoSecond
+
+
+class AciesSchemaResponse(msgspec.Struct, frozen=True):
+    timestamp: NanoSecond
+    schemas: dict[str, Any]  # keyed by spec.id; values are schema entry dicts
+
+
 # ------------------------------- data messages -------------------------------
 # Forwarded to user handlers. Users may also define their own msgspec.Struct
 # types for application-specific payloads.

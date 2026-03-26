@@ -44,7 +44,8 @@ class ServiceSpec:
     name: str
     fn: ServiceHandler
     topic: TopicArg
-    msg_type: type | None = None  # extracted from fn annotation at decoration time
+    msg_type: type | None = None  # request type, extracted from fn annotation at decoration time
+    return_type: type | None = None  # response type, extracted from fn annotation at decoration time
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
