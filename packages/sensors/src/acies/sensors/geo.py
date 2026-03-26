@@ -21,7 +21,6 @@ import logging
 import socket
 import sqlite3
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import click
 import msgspec.json
@@ -29,16 +28,15 @@ import numpy as np
 from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries
 from rawshake.geophone import Channel, GeoReader, get_samples
 
+from .db import DbRow, flush, open_db
+
 logger = logging.getLogger(__name__)
 
 GEO_CHANNELS: tuple[Channel, Channel] = ('SH3', 'EH3')  # RS1D: SH3, RS4D: EH3; order is preference
 SAMPLING_RATE = 200  # Hz, fixed for all RaspberryShake devices
 SAMPLE_DTYPE = 'int32'
-DB_BATCH = 5  # rows to accumulate before flushing to SQLite
-
-
-# topic, dtype (numpy dtype e.g. 'int32'), timestamp, source, payload, metadata
-DbRow = tuple[str, str, int, str, bytes, bytes]
+DB_BATCH = 60  # rows to accumulate before flushing (~60s of data)
+DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces I/O spikes on Pi
 
 
 @dataclass
@@ -46,50 +44,6 @@ class ReaderState:
     reader: GeoReader
     con: sqlite3.Connection
     db_buf: list[DbRow] = field(default_factory=list)
-
-
-def open_db(path: str) -> sqlite3.Connection:
-    """Open (or create) the SQLite message database at *path*.
-
-    payload and metadata are stored as BLOB (raw UTF-8 JSON bytes). Use
-    CAST(... AS TEXT) to read them as strings from the CLI::
-
-        sqlite3 /data/host-geo.db \\
-          "SELECT topic, source, dtype, datetime(timestamp/1e9, 'unixepoch'),
-                  CAST(payload AS TEXT), CAST(metadata AS TEXT)
-           FROM message
-           WHERE timestamp BETWEEN <start_ns> AND <end_ns>
-           ORDER BY timestamp"
-    """
-    p = Path(path).expanduser()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    # check_same_thread=False: connection is opened on the startup hook (main
-    # thread) but written from the worker thread running publish(). Safe because
-    # publish() is the only writer and the scheduler never calls it concurrently.
-    con = sqlite3.connect(str(p), check_same_thread=False)
-    _ = con.executescript("""
-            CREATE TABLE IF NOT EXISTS message (
-                id        INTEGER PRIMARY KEY,
-                topic     TEXT NOT NULL,
-                dtype     TEXT NOT NULL,
-                timestamp INT  NOT NULL,
-                source    TEXT NOT NULL,
-                payload   BLOB NOT NULL,
-                metadata  BLOB NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp);
-            PRAGMA journal_mode=WAL;
-            PRAGMA synchronous=NORMAL;
-        """)
-    return con
-
-
-def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
-    _ = con.executemany(
-        'INSERT INTO message (topic, dtype, timestamp, source, payload, metadata) VALUES (?,?,?,?,?,?)',
-        rows,
-    )
-    con.commit()
 
 
 app = AciesApp()
@@ -104,7 +58,10 @@ def setup(ctx: AciesContext) -> None:
     reader.start()
     logger.info('geo reader started on %s @ %d baud', port, baud)
 
-    ctx.app.data['state'] = ReaderState(reader=reader, con=open_db(output))
+    ctx.app.data['state'] = ReaderState(
+        reader=reader,
+        con=open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT),
+    )
 
 
 @app.on_shutdown
@@ -113,7 +70,7 @@ def teardown(ctx: AciesContext) -> None:
     state.reader.stop()
     logger.info('geo reader stopped')
     if state.db_buf:
-        flush(state.con, state.db_buf)
+        _ = flush(state.con, state.db_buf)
         state.db_buf.clear()
     state.con.close()
     logger.info('database connection closed')
@@ -158,7 +115,7 @@ def publish(ctx: AciesContext) -> None:
             )
         )
         if len(state.db_buf) >= DB_BATCH:
-            flush(state.con, state.db_buf)
+            _ = flush(state.con, state.db_buf)
             state.db_buf.clear()
 
 

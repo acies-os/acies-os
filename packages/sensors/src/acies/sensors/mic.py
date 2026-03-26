@@ -1,7 +1,7 @@
 """Microphone sensor node for AciesOS.
 
 Captures audio from a sounddevice input, accumulates 1-second windows
-(channel 0 only), publishes AciesTensor messages on ``<host>/<name>``,
+(channel 0 only), publishes AciesTimeSeries messages on ``<host>/<name>``,
 and writes to SQLite.
 
 Usage::
@@ -16,68 +16,20 @@ import logging
 import queue
 import socket
 import sqlite3
-from pathlib import Path
 
 import click
 import msgspec.json
 import numpy as np
-import sounddevice as sd
+import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
 from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries
+
+from .db import DbRow, flush, open_db
 
 logger = logging.getLogger(__name__)
 
-_DB_BATCH = 5  # rows to accumulate before flushing to SQLite
+_DB_BATCH = 10  # rows to accumulate before flushing (~10s of data, ~320KB in RAM)
+_DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces I/O spikes on Pi
 _SAMPLE_DTYPE = 'int16'
-
-# --- SQLite helpers ---
-
-
-def open_db(path: str) -> sqlite3.Connection:
-    """Open (or create) the SQLite message database at *path*.
-
-    payload and metadata are stored as BLOB (raw UTF-8 JSON bytes). Use
-    CAST(... AS TEXT) to read them as strings from the CLI::
-
-        sqlite3 /data/host-mic.db \\
-          "SELECT topic, source, dtype, datetime(timestamp/1e9, 'unixepoch'),
-                  CAST(payload AS TEXT), CAST(metadata AS TEXT)
-           FROM message
-           WHERE timestamp BETWEEN <start_ns> AND <end_ns>
-           ORDER BY timestamp"
-    """
-    p = Path(path).expanduser()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    # check_same_thread=False: connection is opened on the startup hook (main
-    # thread) but written from the worker thread running _publish(). Safe because
-    # _publish() is the only writer and the scheduler never calls it concurrently.
-    con = sqlite3.connect(str(p), check_same_thread=False)
-    con.executescript("""
-        CREATE TABLE IF NOT EXISTS message (
-            id        INTEGER PRIMARY KEY,
-            topic     TEXT NOT NULL,
-            dtype     TEXT NOT NULL,
-            timestamp INT  NOT NULL,
-            source    TEXT NOT NULL,
-            payload   BLOB NOT NULL,
-            metadata  BLOB NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp);
-        PRAGMA journal_mode=WAL;
-        PRAGMA synchronous=NORMAL;
-    """)
-    return con
-
-
-# topic, dtype (numpy dtype e.g. 'int16'), timestamp, source, payload, metadata
-DbRow = tuple[str, str, int, str, bytes, bytes]
-
-
-def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
-    _ = con.executemany(
-        'INSERT INTO message (topic, dtype, timestamp, source, payload, metadata) VALUES (?,?,?,?,?,?)',
-        rows,
-    )
-    con.commit()
 
 
 # --- audio callback (runs on sounddevice thread) ---
@@ -122,7 +74,7 @@ def _setup(ctx: AciesContext) -> None:
         callback=_audio_callback,
     )
     _stream.start()
-    _con = open_db(output)
+    _con = open_db(output, check_same_thread=False, wal_autocheckpoint=_DB_WAL_CHECKPOINT)
     logger.info('mic stream started on device %r at %d Hz', device, _sample_rate)
 
 
