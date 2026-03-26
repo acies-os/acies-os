@@ -12,6 +12,7 @@ Usage::
     ns.ctl.kv                                  # "edge-01/mic/ctl/kv"
     ns.ctl.heartbeat                           # "edge-01/mic/ctl/heartbeat"
     ns.ctl.route                               # "edge-01/mic/ctl/route"
+    ns.ctl.io                                  # "edge-01/mic/ctl/io"
     ns.ctl('custom')                           # "edge-01/mic/ctl/custom"
 
 See::
@@ -118,6 +119,7 @@ class CtlTopics:
     kv: str
     heartbeat: str
     route: str
+    io: str
     base: str
 
     def __call__(self, *parts: str) -> str:
@@ -143,6 +145,7 @@ class Namespace:
         ns.ctl.kv                     # "edge-01/mic/ctl/kv"
         ns.ctl.heartbeat              # "edge-01/mic/ctl/heartbeat"
         ns.ctl.route                  # "edge-01/mic/ctl/route"
+        ns.ctl.io                     # "edge-01/mic/ctl/io"
         ns.ctl('custom')              # "edge-01/mic/ctl/custom"
     """
 
@@ -158,6 +161,7 @@ class Namespace:
             kv=f'{base}/kv',
             heartbeat=f'{base}/heartbeat',
             route=f'{base}/route',
+            io=f'{base}/io',
             base=base,
         )
 

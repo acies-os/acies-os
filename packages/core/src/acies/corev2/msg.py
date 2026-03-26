@@ -99,6 +99,16 @@ class AciesRouteResponse(msgspec.Struct, frozen=True):
     result: AciesResult
 
 
+class AciesIoRequest(msgspec.Struct, frozen=True):
+    source: str
+    timestamp: NanoSecond
+
+
+class AciesIoResponse(msgspec.Struct, frozen=True):
+    timestamp: NanoSecond
+    io: dict[str, dict[str, str | list[str]]]
+
+
 # ------------------------------- data messages -------------------------------
 # Forwarded to user handlers. Users may also define their own msgspec.Struct
 # types for application-specific payloads.
