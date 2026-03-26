@@ -12,7 +12,6 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import queue
 import socket
@@ -20,22 +19,39 @@ import sqlite3
 from pathlib import Path
 
 import click
+import msgspec.json
 import numpy as np
 import sounddevice as sd
-from acies.corev2 import AciesApp, AciesContext, AciesTensor
+from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries
 
 logger = logging.getLogger(__name__)
 
 _DB_BATCH = 5  # rows to accumulate before flushing to SQLite
+_SAMPLE_DTYPE = 'int16'
 
 # --- SQLite helpers ---
 
 
-def _open_db(path: str) -> sqlite3.Connection:
+def open_db(path: str) -> sqlite3.Connection:
+    """Open (or create) the SQLite message database at *path*.
+
+    payload and metadata are stored as BLOB (raw UTF-8 JSON bytes). Use
+    CAST(... AS TEXT) to read them as strings from the CLI::
+
+        sqlite3 /data/host-mic.db \\
+          "SELECT topic, msg_type, datetime(timestamp/1e9, 'unixepoch'),
+                  CAST(payload AS TEXT), CAST(metadata AS TEXT)
+           FROM message
+           WHERE timestamp BETWEEN <start_ns> AND <end_ns>
+           ORDER BY timestamp"
+    """
     p = Path(path).expanduser()
     p.parent.mkdir(parents=True, exist_ok=True)
+    # check_same_thread=False: connection is opened on the startup hook (main
+    # thread) but written from the worker thread running _publish(). Safe because
+    # _publish() is the only writer and the scheduler never calls it concurrently.
     con = sqlite3.connect(str(p), check_same_thread=False)
-    con.execute(
+    _ = con.execute(
         """
         CREATE TABLE IF NOT EXISTS message (
             id        INTEGER PRIMARY KEY,
@@ -43,20 +59,22 @@ def _open_db(path: str) -> sqlite3.Connection:
             msg_type  TEXT NOT NULL,
             timestamp INT  NOT NULL,
             ctl_topic TEXT NOT NULL,
-            payload   TEXT,
-            metadata  TEXT
+            payload   BLOB,
+            metadata  BLOB
         )
         """
     )
+    _ = con.execute('CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp)')
     con.commit()
     return con
 
 
-_DbRow = tuple[str, str, int, str, str, str]  # topic, msg_type, timestamp, ctl_topic, payload, metadata
+# topic, msg_type, timestamp, ctl_topic, payload, metadata
+DbRow = tuple[str, str, int, str, bytes, bytes]
 
 
-def _flush(con: sqlite3.Connection, rows: list[_DbRow]) -> None:
-    con.executemany(
+def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
+    _ = con.executemany(
         'INSERT INTO message (topic, msg_type, timestamp, ctl_topic, payload, metadata) VALUES (?,?,?,?,?,?)',
         rows,
     )
@@ -82,7 +100,7 @@ _stream: sd.InputStream | None = None
 _con: sqlite3.Connection | None = None
 _sample_rate: int = 0
 _accumulator: list[int] = []
-_db_buf: list[_DbRow] = []
+_db_buf: list[DbRow] = []
 
 # --- handlers ---
 
@@ -99,13 +117,13 @@ def _setup(ctx: AciesContext) -> None:
     _stream = sd.InputStream(
         device=device_key,
         channels=1,
-        dtype='int16',
+        dtype=_SAMPLE_DTYPE,
         samplerate=_sample_rate,
         blocksize=_sample_rate,  # 1 second per callback
         callback=_audio_callback,
     )
     _stream.start()
-    _con = _open_db(output)
+    _con = open_db(output)
     logger.info('mic stream started on device %r at %d Hz', device, _sample_rate)
 
 
@@ -131,32 +149,34 @@ def _publish(ctx: AciesContext) -> None:
         samples = _accumulator[:sr]
         del _accumulator[:sr]
 
-        metadata = {'channel': 0, 'sampling_rate': sr}
         topic = ctx.ns.base
         ts_ns = ctx.now()
 
         ctx.publish(
             topic,
-            AciesTensor(
+            AciesTimeSeries(
                 source=ctx.ns.base,
                 timestamp=ts_ns,
-                payload=samples,
-                metadata=metadata,
+                payload=[np.array(samples, dtype=_SAMPLE_DTYPE).tobytes()],
+                channels=[0],
+                sampling_rate=sr,
+                dtype=_SAMPLE_DTYPE,
             ),
         )
 
+        metadata = {'channel': 0, 'sampling_rate': sr}
         _db_buf.append(
             (
                 topic,
-                'i16',
+                _SAMPLE_DTYPE,
                 ts_ns,
                 ctx.ns.ctl.base,
-                json.dumps(samples),
-                json.dumps(metadata),
+                msgspec.json.encode(samples),
+                msgspec.json.encode(metadata),
             )
         )
         if len(_db_buf) >= _DB_BATCH and _con is not None:
-            _flush(_con, _db_buf)
+            flush(_con, _db_buf)
             _db_buf.clear()
 
 

@@ -124,8 +124,27 @@ class AciesSchemaResponse(msgspec.Struct, frozen=True):
 # types for application-specific payloads.
 
 
-class AciesTensor(msgspec.Struct, frozen=True):
+class AciesTimeSeries(msgspec.Struct, frozen=True):
+    """Time-series sensor message with typed, numpy-compatible payload.
+
+    ``payload[i]`` contains all samples for ``channels[i]`` as raw bytes.
+    Use ``np.frombuffer(msg.payload[i], dtype=msg.dtype)`` to decode.
+
+    Example (single-channel geo, 200 Hz, 1-second window)::
+
+        AciesTimeSeries(
+            source='edge-01/geo',
+            timestamp=...,
+            payload=[np.array(samples, dtype=np.int32).tobytes()],
+            channels=['SH3'],
+            sampling_rate=200,
+            dtype='int32',
+        )
+    """
+
     source: str
     timestamp: NanoSecond
-    payload: list[float | int | bytes]
-    metadata: dict | None = None
+    payload: list[bytes]  # payload[i] = raw samples for channels[i]
+    channels: list[str | int]
+    sampling_rate: int
+    dtype: str  # numpy dtype string: 'int16', 'int32', etc.
