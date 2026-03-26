@@ -19,6 +19,7 @@ import socket
 import threading
 import time
 import uuid
+import warnings
 from typing import Any, Callable, get_type_hints
 
 import msgspec
@@ -31,6 +32,21 @@ from .namespace import CtlTopic, Namespace, Topic, TopicArg
 from .router import Router
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ZenohTransport
+
+
+class AciesSchemaWarning(UserWarning):
+    """Raised when a service handler is missing type annotations.
+
+    ctl/schema relies on msg and return type annotations to generate JSON
+    Schema entries for service discovery. Without them, the request or
+    response schema is omitted from ctl/schema.
+
+    To suppress::
+
+        import warnings
+        from acies.corev2 import AciesSchemaWarning
+        warnings.filterwarnings('ignore', category=AciesSchemaWarning)
+    """
 
 
 class AciesApp:
@@ -149,12 +165,38 @@ class AciesApp:
         return decorator
 
     def service(self, topic: TopicArg) -> Callable[..., Callable[..., None]]:
-        """RPC/queryable: handler is called on queries to topic; return value is the reply."""
+        """RPC/queryable: handler is called on queries to topic; return value is the reply.
+
+        Type annotations on ``msg`` and the return value are used by ``ctl/schema``
+        to publish JSON Schema entries for service discovery. Annotate both for
+        full schema coverage::
+
+            @app.service('svc/compute')
+            def compute(ctx: AciesContext, msg: MyRequest) -> MyResponse:
+                ...
+
+        Missing or base-class (``msgspec.Struct``) annotations produce an
+        ``AciesSchemaWarning`` and omit the corresponding schema key.
+        """
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
             return_type = hints.get('return')
+            if msg_type is None or msg_type is msgspec.Struct:
+                warnings.warn(
+                    f"service '{fn.__name__}': msg parameter has no specific type annotation; "
+                    f"request schema will be omitted from ctl/schema",
+                    AciesSchemaWarning,
+                    stacklevel=2,
+                )
+            if return_type is None:
+                warnings.warn(
+                    f"service '{fn.__name__}': missing return type annotation; "
+                    f"response schema will be omitted from ctl/schema",
+                    AciesSchemaWarning,
+                    stacklevel=2,
+                )
             self._tasks.append(
                 ServiceSpec(name=fn.__name__, fn=fn, topic=topic, msg_type=msg_type, return_type=return_type)
             )

@@ -2,11 +2,13 @@
 
 import threading
 import time
+import warnings
 from contextlib import contextmanager
 
 import msgspec
 import pytest
 
+from acies.corev2 import AciesSchemaWarning
 from acies.corev2._control import _del_path, _get_path, _set_path  # pyright: ignore[reportPrivateUsage]
 from acies.corev2.app import AciesApp
 from acies.corev2.context import AciesContext
@@ -608,11 +610,15 @@ class TestIo:
 
     def test_service_input_appears(self):
         """ctl/io shows the topic for a service handler in inputs."""
+
         app, router, ready = _make_app()
 
-        @app.service('svc/ping')
-        def pinger(ctx: AciesContext, msg: msgspec.Struct) -> _Msg:
-            return _Msg(v=42)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', AciesSchemaWarning)
+
+            @app.service('svc/ping')
+            def pinger(ctx: AciesContext, msg: msgspec.Struct) -> _Msg:
+                return _Msg(v=42)
 
         with running(app, ready):
             resp = _io_query(router)
@@ -692,11 +698,15 @@ class TestSchema:
 
     def test_untyped_service_omits_schemas(self):
         """A service with no type annotations omits request and response keys."""
+
         app, router, ready = _make_app()
 
-        @app.service('svc/raw')
-        def raw_svc(ctx: AciesContext, msg: msgspec.Struct) -> None:
-            pass
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', AciesSchemaWarning)
+
+            @app.service('svc/raw')
+            def raw_svc(ctx: AciesContext, msg: msgspec.Struct) -> None:
+                pass
 
         with running(app, ready):
             resp = _schema_query(router)

@@ -197,7 +197,7 @@ def make_io_spec(router: Router) -> ServiceSpec:
     spec subscribes to (inputs) and which topics it has published to (outputs).
     """
 
-    def _io(ctx: AciesContext, _msg: AciesIoRequest) -> AciesIoResponse:
+    def _io(ctx: AciesContext, msg: AciesIoRequest) -> AciesIoResponse:
         return AciesIoResponse(timestamp=ctx.now(), io=router.io_map)
 
     return ServiceSpec(name='_io', fn=_io, topic=CtlTopic('io'), msg_type=AciesIoRequest, return_type=AciesIoResponse)
@@ -214,7 +214,7 @@ def make_schema_spec() -> ServiceSpec:
     schema for a registered ServiceSpec.
     """
 
-    def _schema(ctx: AciesContext, _msg: AciesSchemaRequest) -> AciesSchemaResponse:
+    def _schema(ctx: AciesContext, msg: AciesSchemaRequest) -> AciesSchemaResponse:
         with ctx.app.lock:
             schemas = dict(ctx.app.config.get('sys', {}).get('schemas', {}))
         return AciesSchemaResponse(timestamp=ctx.now(), schemas=schemas)
