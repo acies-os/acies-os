@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import socket
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import click
@@ -38,6 +39,13 @@ DB_BATCH = 5  # rows to accumulate before flushing to SQLite
 
 # topic, msg_type (numpy dtype e.g. 'int32'), timestamp, ctl_topic, payload, metadata
 DbRow = tuple[str, str, int, str, bytes, bytes]
+
+
+@dataclass
+class ReaderState:
+    reader: GeoReader
+    con: sqlite3.Connection
+    db_buf: list[DbRow] = field(default_factory=list)
 
 
 def open_db(path: str) -> sqlite3.Connection:
@@ -97,24 +105,22 @@ def setup(ctx: AciesContext) -> None:
     reader.start()
     logger.info('geo reader started on %s @ %d baud', port, baud)
 
-    ctx.app.data['db_buf'] = []
-    ctx.app.data['reader'] = reader
-    ctx.app.data['con'] = open_db(output)
+    ctx.app.data['state'] = ReaderState(reader=reader, con=open_db(output))
 
 
 @app.on_shutdown
 def teardown(ctx: AciesContext) -> None:
-    ctx.app.data['reader'].stop()
+    state: ReaderState = ctx.app.data['state']
+    state.reader.stop()
     logger.info('geo reader stopped')
-    ctx.app.data['con'].close()
+    state.con.close()
     logger.info('database connection closed')
 
 
 @app.schedule(interval=0.5)
 def publish(ctx: AciesContext) -> None:
-    reader = ctx.app.data['reader']
-    con = ctx.app.data['con']
-    while (msg := reader.get(timeout=0)) is not None:
+    state: ReaderState = ctx.app.data['state']
+    while (msg := state.reader.get(timeout=0)) is not None:
         ts_ns, channel_samples = get_samples(msg)
         # Pick the first preferred channel present in the message.
         # GEO_CHANNELS order encodes preference: SH3 (RS1D) before EH3 (RS4D).
@@ -139,8 +145,7 @@ def publish(ctx: AciesContext) -> None:
         )
 
         metadata = {'channel': channel, 'sampling_rate': SAMPLING_RATE}
-        db_buf = ctx.app.data['db_buf']
-        db_buf.append(
+        state.db_buf.append(
             (
                 topic,
                 SAMPLE_DTYPE,
@@ -150,9 +155,9 @@ def publish(ctx: AciesContext) -> None:
                 msgspec.json.encode(metadata),
             )
         )
-        if len(db_buf) >= DB_BATCH:
-            flush(con, db_buf)
-            db_buf.clear()
+        if len(state.db_buf) >= DB_BATCH:
+            flush(state.con, state.db_buf)
+            state.db_buf.clear()
 
 
 @app.cli()
