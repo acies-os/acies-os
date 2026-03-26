@@ -43,6 +43,7 @@ DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces 
 class ReaderState:
     reader: GeoReader
     con: sqlite3.Connection
+    topic: str
     db_buf: list[DbRow] = field(default_factory=list)
 
 
@@ -61,6 +62,7 @@ def setup(ctx: AciesContext) -> None:
     ctx.app.data['state'] = ReaderState(
         reader=reader,
         con=open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT),
+        topic=ctx.app.config.get('topic') or ctx.ns.base,
     )
 
 
@@ -89,7 +91,7 @@ def publish(ctx: AciesContext) -> None:
             continue
 
         samples = channel_samples[channel]
-        topic = ctx.ns.base
+        topic = state.topic
 
         ctx.publish(
             topic,
@@ -128,8 +130,9 @@ def publish(ctx: AciesContext) -> None:
     show_default=True,
     help='SQLite database output path.',
 )
-def main(port: str, baud: int, output: str) -> None:
-    app.state.config.update({'port': port, 'baud': baud, 'output': output})
+@click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
+def main(port: str, baud: int, output: str, topic: str | None) -> None:
+    app.state.config.update({'port': port, 'baud': baud, 'output': output, 'topic': topic})
     app.run()
 
 

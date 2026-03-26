@@ -49,6 +49,7 @@ class MicState:
     stream: sd.InputStream
     con: sqlite3.Connection
     sample_rate: int
+    topic: str
     sample_buf: list[int] = field(default_factory=list)
     db_buf: list[DbRow] = field(default_factory=list)
 
@@ -80,6 +81,7 @@ def setup(ctx: AciesContext) -> None:
         stream=stream,
         con=open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT),
         sample_rate=sample_rate,
+        topic=ctx.app.config.get('topic') or ctx.ns.base,
     )
 
 
@@ -109,7 +111,7 @@ def publish(ctx: AciesContext) -> None:
         samples = state.sample_buf[:sr]
         del state.sample_buf[:sr]
 
-        topic = ctx.ns.base
+        topic = state.topic
         ts_ns = ctx.now()
 
         ctx.publish(
@@ -153,8 +155,9 @@ def publish(ctx: AciesContext) -> None:
     show_default=True,
     help='SQLite database output path.',
 )
-def main(device: str, output: str) -> None:
-    app.state.config.update({'device': device, 'output': output})
+@click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
+def main(device: str, output: str, topic: str | None) -> None:
+    app.state.config.update({'device': device, 'output': output, 'topic': topic})
     app.run()
 
 
