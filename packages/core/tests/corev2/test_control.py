@@ -354,7 +354,7 @@ class TestDecoratorEnforcement:
     def test_service_untyped_msg_raises(self):
         """Registering a service with bare msgspec.Struct as msg type raises TypeError."""
         app, _, _ = _make_app()
-        with pytest.raises(TypeError, match="specific type annotation"):
+        with pytest.raises(TypeError, match='specific type annotation'):
 
             @app.service('svc/bad')
             def base_msg(ctx: AciesContext, msg: msgspec.Struct) -> _Msg:
@@ -363,7 +363,7 @@ class TestDecoratorEnforcement:
     def test_service_missing_return_type_raises(self):
         """Registering a service without a return annotation raises TypeError."""
         app, _, _ = _make_app()
-        with pytest.raises(TypeError, match="return type annotation"):
+        with pytest.raises(TypeError, match='return type annotation'):
 
             @app.service('svc/bad')
             def no_return(ctx: AciesContext, msg: _Msg):  # type: ignore[return]
@@ -714,9 +714,11 @@ class TestSchema:
         entry = next(v for v in resp.schemas.values() if v['name'] == 'typed_svc')
         assert 'request' in entry
         assert 'response' in entry
-        # json_schema returns a dict with $ref and $defs
-        assert '$ref' in entry['request']
-        assert '$ref' in entry['response']
+        # request/response are {schema, encoding} objects
+        assert '$ref' in entry['request']['schema']
+        assert '$ref' in entry['response']['schema']
+        assert entry['request']['encoding'] == {'format': 'msgpack', 'array_like': False}
+        assert entry['response']['encoding'] == {'format': 'msgpack', 'array_like': False}
 
     def test_subscribers_excluded(self):
         """Subscribers do not appear in ctl/schema — only services."""
