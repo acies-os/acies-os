@@ -34,11 +34,11 @@ from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ZenohTransport
 
 
-def _msg_encoding(t: type) -> dict[str, Any] | None:
+def _get_msg_encoding_metadata(t: type) -> dict[str, str | bool] | None:
     """Return encoding metadata for a type if it is a msgspec.Struct subclass."""
-    if isinstance(t, type) and issubclass(t, msgspec.Struct):
-        cfg = t.__struct_config__  # pyright: ignore[reportAttributeAccessIssue]
-        return {'format': 'msgpack', 'array_like': cfg.array_like}
+    assert isinstance(t, type), f'expected a type, got {t!r}'
+    if issubclass(t, msgspec.Struct):
+        return {'format': 'msgpack', 'array_like': t.__struct_config__.array_like}
     return None
 
 
@@ -286,13 +286,13 @@ class AciesApp:
                 entry: dict[str, Any] = {'name': task.name, 'topic': self._resolve_topic(task.topic)}
                 if task.msg_type is not None and task.msg_type is not msgspec.Struct:
                     req: dict[str, Any] = {'schema': msgspec.json.schema(task.msg_type)}
-                    enc = _msg_encoding(task.msg_type)
+                    enc = _get_msg_encoding_metadata(task.msg_type)
                     if enc is not None:
                         req['encoding'] = enc
                     entry['request'] = req
                 if task.return_type is not None and task.return_type is not type(None):
                     resp: dict[str, Any] = {'schema': msgspec.json.schema(task.return_type)}
-                    enc = _msg_encoding(task.return_type)
+                    enc = _get_msg_encoding_metadata(task.return_type)
                     if enc is not None:
                         resp['encoding'] = enc
                     entry['response'] = resp
