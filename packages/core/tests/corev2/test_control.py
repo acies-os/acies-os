@@ -19,6 +19,8 @@ from acies.corev2.msg import (
     AciesKvResponse,
     AciesRouteRequest,
     AciesRouteResponse,
+    AciesSchemaRequest,
+    AciesSchemaResponse,
     AciesSet,
     Err,
     Ok,
@@ -617,3 +619,105 @@ class TestIo:
 
         entry = next(v for v in resp.io.values() if v['name'] == 'pinger')
         assert 'svc/ping' in entry['inputs']
+
+
+# ---------------------------------- schema -----------------------------------
+
+
+class _Req(msgspec.Struct, frozen=True):
+    x: int = 0
+
+
+class _Resp(msgspec.Struct, frozen=True):
+    y: str = ''
+
+
+def _schema_query(router: Router, timeout: float = 2.0) -> AciesSchemaResponse:
+    raw = router.query(
+        'test-host/test-app/ctl/schema',
+        msgspec.msgpack.encode(AciesSchemaRequest(source='test', timestamp=0)),
+        timeout=timeout,
+    )
+    assert raw is not None, 'schema query timed out'
+    return msgspec.msgpack.decode(raw, type=AciesSchemaResponse)
+
+
+class TestSchema:
+    def test_service_appears_with_topic(self):
+        """ctl/schema includes a registered service with its resolved topic."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/compute')
+        def compute(ctx: AciesContext, msg: _Req) -> _Resp:
+            return _Resp(y=str(msg.x))
+
+        with running(app, ready):
+            resp = _schema_query(router)
+
+        assert isinstance(resp, AciesSchemaResponse)
+        entry = next(v for v in resp.schemas.values() if v['name'] == 'compute')
+        assert entry['topic'] == 'svc/compute'
+
+    def test_request_and_response_schemas_present(self):
+        """Both request and response schemas are included when types are annotated."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/typed')
+        def typed_svc(ctx: AciesContext, msg: _Req) -> _Resp:
+            return _Resp(y=str(msg.x))
+
+        with running(app, ready):
+            resp = _schema_query(router)
+
+        entry = next(v for v in resp.schemas.values() if v['name'] == 'typed_svc')
+        assert 'request' in entry
+        assert 'response' in entry
+        # json_schema returns a dict with $ref and $defs
+        assert '$ref' in entry['request']
+        assert '$ref' in entry['response']
+
+    def test_subscribers_excluded(self):
+        """Subscribers do not appear in ctl/schema — only services."""
+        app, router, ready = _make_app()
+
+        @app.subscribe('data/in')
+        def listener(ctx: AciesContext, msg: _Req) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _schema_query(router)
+
+        names = {v['name'] for v in resp.schemas.values()}
+        assert 'listener' not in names
+
+    def test_untyped_service_omits_schemas(self):
+        """A service with no type annotations omits request and response keys."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/raw')
+        def raw_svc(ctx: AciesContext, msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _schema_query(router)
+
+        entry = next(v for v in resp.schemas.values() if v['name'] == 'raw_svc')
+        assert 'request' not in entry
+        assert 'response' not in entry
+
+    def test_schema_accessible_via_kv(self):
+        """sys.schemas is readable via ctl/kv as a fallback."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/kv_check')
+        def kv_svc(ctx: AciesContext, msg: _Req) -> _Resp:
+            return _Resp()
+
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=['sys', 'schemas'])])
+
+        assert isinstance(resp.results[0], Ok)
+        schemas = resp.results[0].value
+        assert isinstance(schemas, dict)
+        entry = next(v for v in schemas.values() if v['name'] == 'kv_svc')
+        assert entry['topic'] == 'svc/kv_check'

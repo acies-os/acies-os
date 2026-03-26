@@ -22,6 +22,8 @@ from .msg import (
     AciesResult,
     AciesRouteRequest,
     AciesRouteResponse,
+    AciesSchemaRequest,
+    AciesSchemaResponse,
     AciesSet,
     Err,
     Ok,
@@ -140,7 +142,7 @@ def _kv(ctx: AciesContext, msg: AciesKvRequest) -> AciesKvResponse:
 
 def make_kv_spec() -> ServiceSpec:
     """Return a ServiceSpec for the ctl/kv queryable."""
-    return ServiceSpec(name='_kv', fn=_kv, topic=CtlTopic('kv'), msg_type=AciesKvRequest)
+    return ServiceSpec(name='_kv', fn=_kv, topic=CtlTopic('kv'), msg_type=AciesKvRequest, return_type=AciesKvResponse)
 
 
 # ---------------------------------- route ------------------------------------
@@ -180,7 +182,9 @@ def make_route_spec(router: Router) -> ServiceSpec:
 
         return AciesRouteResponse(timestamp=ctx.now(), result=Ok())
 
-    return ServiceSpec(name='_route', fn=_route, topic=CtlTopic('route'), msg_type=AciesRouteRequest)
+    return ServiceSpec(
+        name='_route', fn=_route, topic=CtlTopic('route'), msg_type=AciesRouteRequest, return_type=AciesRouteResponse
+    )
 
 
 # ------------------------------------ io -------------------------------------
@@ -193,7 +197,32 @@ def make_io_spec(router: Router) -> ServiceSpec:
     spec subscribes to (inputs) and which topics it has published to (outputs).
     """
 
-    def _io(ctx: AciesContext, msg: AciesIoRequest) -> AciesIoResponse:
+    def _io(ctx: AciesContext, _msg: AciesIoRequest) -> AciesIoResponse:
         return AciesIoResponse(timestamp=ctx.now(), io=router.io_map)
 
-    return ServiceSpec(name='_io', fn=_io, topic=CtlTopic('io'), msg_type=AciesIoRequest)
+    return ServiceSpec(name='_io', fn=_io, topic=CtlTopic('io'), msg_type=AciesIoRequest, return_type=AciesIoResponse)
+
+
+# ---------------------------------- schema -----------------------------------
+
+
+def make_schema_spec() -> ServiceSpec:
+    """Return a ServiceSpec for the ctl/schema queryable.
+
+    Returns the service schema table stored in sys.schemas at startup.
+    Each entry contains the resolved topic, request schema, and response
+    schema for a registered ServiceSpec.
+    """
+
+    def _schema(ctx: AciesContext, _msg: AciesSchemaRequest) -> AciesSchemaResponse:
+        with ctx.app.lock:
+            schemas = dict(ctx.app.config.get('sys', {}).get('schemas', {}))
+        return AciesSchemaResponse(timestamp=ctx.now(), schemas=schemas)
+
+    return ServiceSpec(
+        name='_schema',
+        fn=_schema,
+        topic=CtlTopic('schema'),
+        msg_type=AciesSchemaRequest,
+        return_type=AciesSchemaResponse,
+    )

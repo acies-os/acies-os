@@ -24,7 +24,7 @@ from typing import Any, Callable, get_type_hints
 import msgspec
 
 from ._cli import create_acies_cli
-from ._control import make_heartbeat_spec, make_io_spec, make_kv_spec, make_route_spec
+from ._control import make_heartbeat_spec, make_io_spec, make_kv_spec, make_route_spec, make_schema_spec
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
 from .namespace import CtlTopic, Namespace, Topic, TopicArg
@@ -71,6 +71,8 @@ class AciesApp:
         self._tasks.append(make_route_spec(self._router))
         # task graph introspection: mapping of tasks to their input and output topics
         self._tasks.append(make_io_spec(self._router))
+        # service schema introspection: request/response types for registered services
+        self._tasks.append(make_schema_spec())
 
     @property
     def name(self) -> str:
@@ -152,7 +154,10 @@ class AciesApp:
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
-            self._tasks.append(ServiceSpec(name=fn.__name__, fn=fn, topic=topic, msg_type=msg_type))
+            return_type = hints.get('return')
+            self._tasks.append(
+                ServiceSpec(name=fn.__name__, fn=fn, topic=topic, msg_type=msg_type, return_type=return_type)
+            )
             return fn
 
         return decorator
@@ -210,7 +215,7 @@ class AciesApp:
             case CtlTopic():
                 return f'{self._ns.ctl.base}/{topic.path}'
 
-    def run(self) -> None:
+    def run(self) -> None:  # noqa: C901
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
 
         def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
@@ -236,6 +241,19 @@ class AciesApp:
         }
         self._executor.start(self.dispatch)
         self._router.start(self._executor)
+
+        # Populate sys.schemas before registering tasks so ctl/schema is
+        # ready as soon as the app is wired.
+        schemas: dict[str, Any] = {}
+        for task in self._tasks:
+            if isinstance(task, ServiceSpec):
+                entry: dict[str, Any] = {'name': task.name, 'topic': self._resolve_topic(task.topic)}
+                if task.msg_type is not None and task.msg_type is not msgspec.Struct:
+                    entry['request'] = msgspec.json.schema(task.msg_type)
+                if task.return_type is not None and task.return_type is not type(None):
+                    entry['response'] = msgspec.json.schema(task.return_type)
+                schemas[task.id] = entry
+        self._app_state.config['sys']['schemas'] = schemas
 
         # Register tasks before startup hooks so the app is fully wired
         # when user code in on_startup runs.

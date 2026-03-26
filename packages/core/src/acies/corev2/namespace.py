@@ -13,6 +13,7 @@ Usage::
     ns.ctl.heartbeat                           # "edge-01/mic/ctl/heartbeat"
     ns.ctl.route                               # "edge-01/mic/ctl/route"
     ns.ctl.io                                  # "edge-01/mic/ctl/io"
+    ns.ctl.schema                              # "edge-01/mic/ctl/schema"
     ns.ctl('custom')                           # "edge-01/mic/ctl/custom"
 
 See::
@@ -113,6 +114,8 @@ class CtlTopics:
         ctl.kv                 # "<host>/<name>/ctl/kv"
         ctl.heartbeat          # "<host>/<name>/ctl/heartbeat"
         ctl.route              # "<host>/<name>/ctl/route"
+        ctl.io                 # "<host>/<name>/ctl/io"
+        ctl.schema             # "<host>/<name>/ctl/schema"
         ctl('my', 'service')   # "<host>/<name>/ctl/my/service"
     """
 
@@ -120,6 +123,7 @@ class CtlTopics:
     heartbeat: str
     route: str
     io: str
+    schema: str
     base: str
 
     def __call__(self, *parts: str) -> str:
@@ -146,6 +150,7 @@ class Namespace:
         ns.ctl.heartbeat              # "edge-01/mic/ctl/heartbeat"
         ns.ctl.route                  # "edge-01/mic/ctl/route"
         ns.ctl.io                     # "edge-01/mic/ctl/io"
+        ns.ctl.schema                 # "edge-01/mic/ctl/schema"
         ns.ctl('custom')              # "edge-01/mic/ctl/custom"
     """
 
@@ -162,6 +167,7 @@ class Namespace:
             heartbeat=f'{base}/heartbeat',
             route=f'{base}/route',
             io=f'{base}/io',
+            schema=f'{base}/schema',
             base=base,
         )
 
@@ -226,6 +232,9 @@ class CtlTopic:
 
         CtlTopic('kv')          # "edge-01/mic/ctl/kv"
         CtlTopic('heartbeat')   # "edge-01/mic/ctl/heartbeat"
+        CtlTopic('route')       # "edge-01/mic/ctl/route"
+        CtlTopic('io')          # "edge-01/mic/ctl/io"
+        CtlTopic('schema')      # "edge-01/mic/ctl/schema"
         CtlTopic('my/service')  # "edge-01/mic/ctl/my/service"
     """
 
