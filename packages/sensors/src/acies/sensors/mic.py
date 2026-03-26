@@ -23,7 +23,6 @@ from pathlib import Path
 import click
 import numpy as np
 import sounddevice as sd
-
 from acies.corev2 import AciesApp, AciesContext, AciesTensor
 
 logger = logging.getLogger(__name__)
@@ -56,8 +55,7 @@ def _open_db(path: str) -> sqlite3.Connection:
 
 def _flush(con: sqlite3.Connection, rows: list[tuple]) -> None:
     con.executemany(
-        'INSERT INTO message (topic, msg_type, timestamp, ctl_topic, payload, metadata)'
-        ' VALUES (?,?,?,?,?,?)',
+        'INSERT INTO message (topic, msg_type, timestamp, ctl_topic, payload, metadata) VALUES (?,?,?,?,?,?)',
         rows,
     )
     con.commit()
@@ -137,18 +135,26 @@ def _publish(ctx: AciesContext) -> None:
             topic = ctx.ns.base
             ts_ns = ctx.now()
 
-            ctx.publish(topic, AciesTensor(
-                source=ctx.ns.base,
-                timestamp=ts_ns,
-                payload=samples,
-                metadata=metadata,
-            ))
+            ctx.publish(
+                topic,
+                AciesTensor(
+                    source=ctx.ns.base,
+                    timestamp=ts_ns,
+                    payload=samples,
+                    metadata=metadata,
+                ),
+            )
 
-            _db_buf.append((
-                topic, 'i16', ts_ns, ctx.ns.ctl.base,
-                json.dumps(samples),
-                json.dumps(metadata),
-            ))
+            _db_buf.append(
+                (
+                    topic,
+                    'i16',
+                    ts_ns,
+                    ctx.ns.ctl.base,
+                    json.dumps(samples),
+                    json.dumps(metadata),
+                )
+            )
             if len(_db_buf) >= _DB_BATCH and _con is not None:
                 _flush(_con, _db_buf)
                 _db_buf.clear()
@@ -170,7 +176,9 @@ def _publish(ctx: AciesContext) -> None:
     show_default=True,
     help='SQLite database output path.',
 )
-@click.option('--acies-host', default=socket.gethostname().removesuffix('.local'), show_default=True, help='Node hostname.')
+@click.option(
+    '--acies-host', default=socket.gethostname().removesuffix('.local'), show_default=True, help='Node hostname.'
+)
 @click.option('--acies-name', default='mic', show_default=True, help='Node name.')
 def main(device: str, output: str, acies_host: str, acies_name: str) -> None:
     app = AciesApp(name=acies_name, host=acies_host)
