@@ -218,6 +218,10 @@ The `msg` type annotation is extracted at decoration time and stored as
 on each inbound message. If no annotation is provided, falls back to
 `msgspec.msgpack.decode(raw)` (plain dict/list).
 
+For `ServiceSpec`, the return type annotation is also extracted and stored as
+`spec.return_type`. It is used at startup to generate a JSON Schema for the
+response (see `sys.schemas` below). It has no effect on dispatch.
+
 > **Future extension**: `Depends(fn)` markers in the handler signature (akin
 > to FastAPI) are a planned extension for injecting app-level resources
 > (database sessions, model handles, etc.). Out of scope for Phase 2.
@@ -261,8 +265,14 @@ class TaskState:
 externally via AciesSet (planned). The `sys` key is reserved:
 
 ```python
-app.state.config['sys']  # {'host': ..., 'name': ..., 'state': ..., ...}
+app.state.config['sys']  # {'host': ..., 'name': ..., 'state': ..., 'schemas': {...}}
 ```
+
+`sys.schemas` is populated at `run()` time from all registered `ServiceSpec`s.
+Each entry holds the resolved topic string, a `request` JSON Schema (from
+`msgspec.json.schema(spec.msg_type)`), and a `response` JSON Schema (from
+`spec.return_type`). Entries with untyped handlers omit the corresponding key.
+`sys.schemas` is readable via `ctl/kv` but protected from mutation.
 
 `data` is free-form transient state not externally controlled. Usage:
 
@@ -279,6 +289,35 @@ def report(ctx: AciesContext):
     if last is not None:
         ctx.publish(ctx.ns.topic('aggregator/reports/temp'), SensorReading(...))
 ```
+
+## Control Plane
+
+Every `AciesApp` automatically registers four built-in services under
+`<host>/<name>/ctl/`:
+
+| Topic          | Request type          | Purpose                                              |
+|----------------|-----------------------|------------------------------------------------------|
+| `ctl/heartbeat`| —                     | Periodic pub of `AciesHeartbeat`; not a service      |
+| `ctl/kv`       | `AciesKvRequest`      | Get / set / del on `app.state.config`                |
+| `ctl/route`    | `AciesRouteRequest`   | Reroute or suppress input/output topics at runtime   |
+| `ctl/io`       | `AciesIoRequest`      | Snapshot of task-to-topic I/O routing table          |
+| `ctl/schema`   | `AciesSchemaRequest`  | JSON Schema for each registered service's types      |
+
+**`ctl/kv`** — `sys` key is partially protected: `sys.state` is the only mutable
+sub-key; all other `sys.*` entries and `sys` itself are read-only.
+
+**`ctl/route`** — accepts a list of `TopicRename` for inputs (subscribe/unsubscribe
+at runtime) and outputs (redirect or suppress publishes). Consecutive renames
+collapse: `t1->t2` then `t2->t3` results in a single effective entry `t1->t3`.
+
+**`ctl/io`** — returns `{spec_id: {name, inputs: [...], outputs: [...]}}`.
+Inputs are the topics registered at startup; outputs accumulate as the handler
+publishes at runtime (conditional paths appear only after they are exercised).
+
+**`ctl/schema`** — returns `{spec_id: {name, topic, request?, response?}}` for
+every registered `ServiceSpec`. Schema values are JSON Schema dicts produced by
+`msgspec.json.schema()`. The same data is stored in `sys.schemas` and is
+readable via `ctl/kv get ['sys', 'schemas']`.
 
 ## Lifecycle Hooks
 

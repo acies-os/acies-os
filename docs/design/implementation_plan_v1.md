@@ -86,7 +86,8 @@ class ServiceSpec:
     name: str
     fn: Callable
     topic: TopicArg          # single topic, not a tuple
-    msg_type: type | None = None
+    msg_type: type | None = None    # request type; extracted from msg annotation
+    return_type: type | None = None  # response type; extracted from return annotation
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
@@ -96,6 +97,10 @@ TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
 handler at decoration time. The router uses it as the decode target:
 `msgspec.msgpack.decode(raw, type=spec.msg_type)`. Falls back to
 `msgspec.msgpack.decode(raw)` if `None`.
+
+`return_type` (ServiceSpec only) is extracted from the return annotation at
+decoration time. Used at `run()` time to generate a JSON Schema entry in
+`sys.schemas`. Has no effect on dispatch.
 
 Source nodes (threads that read from sensors, cameras, etc.) are not a task
 kind. They are plain threads started in `on_startup` hooks that call
@@ -246,10 +251,11 @@ class Router:
     def remap_output(self, spec: TaskSpec, rename: TopicRename) -> None: ...
     def resolve_output(self, spec: TaskSpec, topic: str) -> str | None: ...
 
-    # I/O observability
+    # I/O observability (backing store for ctl/io)
     def record_output(self, spec: TaskSpec, topic: str) -> None: ...
     @property
     def io_map(self) -> dict[str, dict[str, str | list[str]]]: ...
+    # {spec_id: {name, inputs: [concrete topics at startup], outputs: [observed at runtime]}}
 ```
 
 Codec (encode/decode) was moved out of the router entirely — it happens in
@@ -315,6 +321,17 @@ class AciesApp:
 
     def run(self) -> None: ...
     def stop(self) -> None: ...   # sets stop event; can be called from anywhere
+
+# Built-in services registered automatically at startup:
+#   ctl/heartbeat  -- periodic AciesHeartbeat pub
+#   ctl/kv         -- get/set/del on app.state.config (sys.* partially protected)
+#   ctl/route      -- runtime input/output topic rerouting
+#   ctl/io         -- snapshot of task-to-topic I/O map (router.io_map)
+#   ctl/schema     -- JSON Schema for each ServiceSpec (from sys.schemas)
+#
+# sys.schemas is populated in run() before task registration:
+#   {spec_id: {name, topic, request?: {...}, response?: {...}}}
+# Readable via ctl/kv get ['sys', 'schemas']; protected from mutation.
 ```
 
 ---
