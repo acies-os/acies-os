@@ -1,5 +1,5 @@
 [project]
-name = "sensors"
+name = "acies-sensors"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -7,6 +7,7 @@ requires-python = ">=3.10.13"
 dependencies = [
     "acies-core",
     "rawshake",
+    "sounddevice>=0.5.5",
 ]
 
 [tool.uv.sources]
