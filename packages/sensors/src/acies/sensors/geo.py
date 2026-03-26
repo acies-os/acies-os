@@ -1,7 +1,7 @@
 """Geophone sensor node for AciesOS.
 
 Reads 1-second windows from a Raspberry Shake (RS1D or RS4D) over serial,
-publishes AciesTensor messages on ``<host>/<name>``, and writes to SQLite.
+publishes AciesTimeSeries messages on ``<host>/<name>``, and writes to SQLite.
 
 Device channel mapping:
   RS1D -> SH3 (single geophone)
@@ -17,29 +17,47 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import socket
 import sqlite3
 from pathlib import Path
 
 import click
-from acies.corev2 import AciesApp, AciesContext, AciesTensor
-from rawshake.geophone import GeoReader, get_samples
+import msgspec.json
+import numpy as np
+from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries
+from rawshake.geophone import Channel, GeoReader, get_samples
 
 logger = logging.getLogger(__name__)
 
-GEO_CHANNELS = ('SH3', 'EH3')  # RS1D: SH3, RS4D: EH3; order is preference
+GEO_CHANNELS: tuple[Channel, Channel] = ('SH3', 'EH3')  # RS1D: SH3, RS4D: EH3; order is preference
 SAMPLING_RATE = 200  # Hz, fixed for all RaspberryShake devices
+SAMPLE_DTYPE = 'int32'
 DB_BATCH = 5  # rows to accumulate before flushing to SQLite
 
 
-# --- SQLite helpers ---
+# topic, msg_type (numpy dtype e.g. 'int32'), timestamp, ctl_topic, payload, metadata
+DbRow = tuple[str, str, int, str, bytes, bytes]
 
 
 def open_db(path: str) -> sqlite3.Connection:
+    """Open (or create) the SQLite message database at *path*.
+
+    payload and metadata are stored as BLOB (raw UTF-8 JSON bytes). Use
+    CAST(... AS TEXT) to read them as strings from the CLI::
+
+        sqlite3 /data/host-geo.db \\
+          "SELECT topic, msg_type, datetime(timestamp/1e9, 'unixepoch'),
+                  CAST(payload AS TEXT), CAST(metadata AS TEXT)
+           FROM message
+           WHERE timestamp BETWEEN <start_ns> AND <end_ns>
+           ORDER BY timestamp"
+    """
     p = Path(path).expanduser()
     p.parent.mkdir(parents=True, exist_ok=True)
+    # check_same_thread=False: connection is opened on the startup hook (main
+    # thread) but written from the worker thread running publish(). Safe because
+    # publish() is the only writer and the scheduler never calls it concurrently.
     con = sqlite3.connect(str(p), check_same_thread=False)
     _ = con.execute(
         """
@@ -49,17 +67,14 @@ def open_db(path: str) -> sqlite3.Connection:
             msg_type  TEXT NOT NULL,
             timestamp INT  NOT NULL,
             ctl_topic TEXT NOT NULL,
-            payload   TEXT,
-            metadata  TEXT
+            payload   BLOB,
+            metadata  BLOB
         )
         """
     )
+    _ = con.execute('CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp)')
     con.commit()
     return con
-
-
-# topic, msg_type, timestamp, ctl_topic, payload, metadata
-DbRow = tuple[str, str, int, str, str, str]
 
 
 def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
@@ -90,7 +105,9 @@ def setup(ctx: AciesContext) -> None:
 @app.on_shutdown
 def teardown(ctx: AciesContext) -> None:
     ctx.app.data['reader'].stop()
+    logger.info('geo reader stopped')
     ctx.app.data['con'].close()
+    logger.info('database connection closed')
 
 
 @app.schedule(interval=0.5)
@@ -98,35 +115,39 @@ def publish(ctx: AciesContext) -> None:
     reader = ctx.app.data['reader']
     con = ctx.app.data['con']
     while (msg := reader.get(timeout=0)) is not None:
-        ts_ns, by_channel = get_samples(msg)
-        channel = next((c for c in GEO_CHANNELS if c in by_channel), None)
+        ts_ns, channel_samples = get_samples(msg)
+        # Pick the first preferred channel present in the message.
+        # GEO_CHANNELS order encodes preference: SH3 (RS1D) before EH3 (RS4D).
+        channel: Channel | None = next((c for c in GEO_CHANNELS if c in channel_samples), None)
         if channel is None:
-            logger.warning('no geo channel in message; available: %s', list(by_channel))
+            logger.warning('no geo channel in message; available: %s', list(channel_samples))
             continue
 
-        samples = by_channel[channel]
-        metadata = {'channel': channel, 'sampling_rate': SAMPLING_RATE}
+        samples = channel_samples[channel]
         topic = ctx.ns.base
 
         ctx.publish(
             topic,
-            AciesTensor(
+            AciesTimeSeries(
                 source=ctx.ns.base,
                 timestamp=ts_ns,
-                payload=samples,
-                metadata=metadata,
+                payload=[np.array(samples, dtype=SAMPLE_DTYPE).tobytes()],
+                channels=[channel],
+                sampling_rate=SAMPLING_RATE,
+                dtype=SAMPLE_DTYPE,
             ),
         )
 
+        metadata = {'channel': channel, 'sampling_rate': SAMPLING_RATE}
         db_buf = ctx.app.data['db_buf']
         db_buf.append(
             (
                 topic,
-                'i32',
+                SAMPLE_DTYPE,
                 ts_ns,
                 ctx.ns.ctl.base,
-                json.dumps(samples),
-                json.dumps(metadata),
+                msgspec.json.encode(samples),
+                msgspec.json.encode(metadata),
             )
         )
         if len(db_buf) >= DB_BATCH:
