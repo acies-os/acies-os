@@ -59,9 +59,16 @@ def setup(ctx: AciesContext) -> None:
     reader.start()
     logger.info('geo reader started on %s @ %d baud', port, baud)
 
+    try:
+        con = open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT)
+    except Exception:
+        logger.exception('failed to open database %r; shutting down', output)
+        reader.stop()
+        raise SystemExit(1)
+
     ctx.app.data['state'] = ReaderState(
         reader=reader,
-        con=open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT),
+        con=con,
         topic=ctx.app.config.get('topic') or ctx.ns.base,
     )
 
