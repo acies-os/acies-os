@@ -21,7 +21,6 @@ import json
 import logging
 import socket
 import sqlite3
-import threading
 from pathlib import Path
 
 import click
@@ -59,9 +58,8 @@ def open_db(path: str) -> sqlite3.Connection:
     return con
 
 
-# Note: payload and metadata are stored as JSON strings
-# topic: str, msg_type: str, timestamp: int, ctl_topic: str, payload: str | None, metadata: str | None
-DbRow = tuple[str, str, int, str, str | None, str | None]
+# topic, msg_type, timestamp, ctl_topic, payload, metadata
+DbRow = tuple[str, str, int, str, str, str]
 
 
 def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
@@ -70,11 +68,6 @@ def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
         rows,
     )
     con.commit()
-
-
-# --- module-level sensor state ---
-
-_lock = threading.Lock()
 
 
 app = AciesApp()
@@ -104,44 +97,41 @@ def teardown(ctx: AciesContext) -> None:
 def publish(ctx: AciesContext) -> None:
     reader = ctx.app.data['reader']
     con = ctx.app.data['con']
-    with _lock:
-        while (msg := reader.get(timeout=0)) is not None:
-            ts_ns, by_channel = get_samples(msg)
-            channel = next((c for c in GEO_CHANNELS if c in by_channel), None)
-            if channel is None:
-                logger.warning('no geo channel in message; available: %s', list(by_channel))
-                continue
+    while (msg := reader.get(timeout=0)) is not None:
+        ts_ns, by_channel = get_samples(msg)
+        channel = next((c for c in GEO_CHANNELS if c in by_channel), None)
+        if channel is None:
+            logger.warning('no geo channel in message; available: %s', list(by_channel))
+            continue
 
-            samples = by_channel[channel]
-            metadata = {'channel': channel, 'sampling_rate': SAMPLING_RATE}
-            topic = ctx.ns.base
+        samples = by_channel[channel]
+        metadata = {'channel': channel, 'sampling_rate': SAMPLING_RATE}
+        topic = ctx.ns.base
 
-            ctx.publish(
+        ctx.publish(
+            topic,
+            AciesTensor(
+                source=ctx.ns.base,
+                timestamp=ts_ns,
+                payload=samples,
+                metadata=metadata,
+            ),
+        )
+
+        db_buf = ctx.app.data['db_buf']
+        db_buf.append(
+            (
                 topic,
-                AciesTensor(
-                    source=ctx.ns.base,
-                    timestamp=ts_ns,
-                    payload=samples,
-                    metadata=metadata,
-                ),
+                'i32',
+                ts_ns,
+                ctx.ns.ctl.base,
+                json.dumps(samples),
+                json.dumps(metadata),
             )
-
-            db_buf = ctx.app.data['db_buf']
-
-            db_buf.append(
-                (
-                    topic,
-                    'i32',
-                    ts_ns,
-                    ctx.ns.ctl.base,
-                    json.dumps(samples),
-                    json.dumps(metadata),
-                )
-            )
-            if len(db_buf) >= DB_BATCH and con is not None:
-                flush(con, db_buf)
-                db_buf.clear()
-            ctx.app.data['db_buf'] = db_buf
+        )
+        if len(db_buf) >= DB_BATCH:
+            flush(con, db_buf)
+            db_buf.clear()
 
 
 @app.cli()
