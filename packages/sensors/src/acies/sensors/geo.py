@@ -59,6 +59,8 @@ def open_db(path: str) -> sqlite3.Connection:
     return con
 
 
+# Note: payload and metadata are stored as JSON strings
+# topic: str, msg_type: str, timestamp: int, ctl_topic: str, payload: str | None, metadata: str | None
 DbRow = tuple[str, str, int, str, str | None, str | None]
 
 
