@@ -72,10 +72,8 @@ def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
 
 # --- module-level sensor state ---
 
-_db_buf: list[DbRow] = []
 _lock = threading.Lock()
 
-# --- handlers ---
 
 app = AciesApp()
 
@@ -85,11 +83,13 @@ def setup(ctx: AciesContext) -> None:
     port: str = ctx.app.config['port']
     baud: int = ctx.app.config['baud']
     output: str = ctx.app.config['output']
-    ctx.app.data['con'] = open_db(output)
     reader = GeoReader(port=port, baudrate=baud)
-    ctx.app.data['reader'] = reader
     reader.start()
     logger.info('geo reader started on %s @ %d baud', port, baud)
+
+    ctx.app.data['db_buf'] = []
+    ctx.app.data['reader'] = reader
+    ctx.app.data['con'] = open_db(output)
 
 
 @app.on_shutdown
@@ -124,7 +124,9 @@ def publish(ctx: AciesContext) -> None:
                 ),
             )
 
-            _db_buf.append(
+            db_buf = ctx.app.data['db_buf']
+
+            db_buf.append(
                 (
                     topic,
                     'i32',
@@ -134,9 +136,10 @@ def publish(ctx: AciesContext) -> None:
                     json.dumps(metadata),
                 )
             )
-            if len(_db_buf) >= DB_BATCH and con is not None:
-                flush(con, _db_buf)
-                _db_buf.clear()
+            if len(db_buf) >= DB_BATCH and con is not None:
+                flush(con, db_buf)
+                db_buf.clear()
+            ctx.app.data['db_buf'] = db_buf
 
 
 @app.cli()
