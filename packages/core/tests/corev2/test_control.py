@@ -2,13 +2,11 @@
 
 import threading
 import time
-import warnings
 from contextlib import contextmanager
 
 import msgspec
 import pytest
 
-from acies.corev2 import AciesSchemaWarning
 from acies.corev2._control import _del_path, _get_path, _set_path  # pyright: ignore[reportPrivateUsage]
 from acies.corev2.app import AciesApp
 from acies.corev2.context import AciesContext
@@ -331,6 +329,47 @@ class TestKvMixed:
         assert resp.results[1] == Ok(value=10)
 
 
+# ------------------------------ decorator enforcement ------------------------
+
+
+class TestDecoratorEnforcement:
+    def test_subscribe_missing_msg_raises(self):
+        """Registering a subscriber without a 'msg' parameter raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match="must have a 'msg' parameter"):
+
+            @app.subscribe('topic/x')
+            def no_msg(ctx: AciesContext) -> None:
+                pass
+
+    def test_service_missing_msg_raises(self):
+        """Registering a service without a 'msg' parameter raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match="must have a 'msg' parameter"):
+
+            @app.service('svc/bad')
+            def no_msg(ctx: AciesContext) -> _Msg:
+                return _Msg()
+
+    def test_service_untyped_msg_raises(self):
+        """Registering a service with bare msgspec.Struct as msg type raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match="specific type annotation"):
+
+            @app.service('svc/bad')
+            def base_msg(ctx: AciesContext, msg: msgspec.Struct) -> _Msg:
+                return _Msg()
+
+    def test_service_missing_return_type_raises(self):
+        """Registering a service without a return annotation raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match="return type annotation"):
+
+            @app.service('svc/bad')
+            def no_return(ctx: AciesContext, msg: _Msg):  # type: ignore[return]
+                pass
+
+
 # ---------------------------------- route ------------------------------------
 
 
@@ -613,12 +652,9 @@ class TestIo:
 
         app, router, ready = _make_app()
 
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', AciesSchemaWarning)
-
-            @app.service('svc/ping')
-            def pinger(ctx: AciesContext, msg: msgspec.Struct) -> _Msg:
-                return _Msg(v=42)
+        @app.service('svc/ping')
+        def pinger(ctx: AciesContext, msg: _Msg) -> _Msg:
+            return _Msg(v=42)
 
         with running(app, ready):
             resp = _io_query(router)
@@ -695,25 +731,6 @@ class TestSchema:
 
         names = {v['name'] for v in resp.schemas.values()}
         assert 'listener' not in names
-
-    def test_untyped_service_omits_schemas(self):
-        """A service with no type annotations omits request and response keys."""
-
-        app, router, ready = _make_app()
-
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', AciesSchemaWarning)
-
-            @app.service('svc/raw')
-            def raw_svc(ctx: AciesContext, msg: msgspec.Struct) -> None:
-                pass
-
-        with running(app, ready):
-            resp = _schema_query(router)
-
-        entry = next(v for v in resp.schemas.values() if v['name'] == 'raw_svc')
-        assert 'request' not in entry
-        assert 'response' not in entry
 
     def test_schema_accessible_via_kv(self):
         """sys.schemas is readable via ctl/kv as a fallback."""

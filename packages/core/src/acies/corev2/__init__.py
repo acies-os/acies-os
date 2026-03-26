@@ -1,6 +1,6 @@
 import logging
 
-from .app import AciesApp, AciesSchemaWarning
+from .app import AciesApp
 from .context import AciesContext, AppState, TaskState
 from .msg import (
     AciesDel,
@@ -26,7 +26,6 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'AciesApp',
-    'AciesSchemaWarning',
     'AciesContext',
     'AciesDel',
     'AciesGet',
