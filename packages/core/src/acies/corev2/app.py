@@ -34,6 +34,14 @@ from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ZenohTransport
 
 
+def _msg_encoding(t: type) -> dict[str, Any] | None:
+    """Return encoding metadata for a type if it is a msgspec.Struct subclass."""
+    if isinstance(t, type) and issubclass(t, msgspec.Struct):
+        cfg = t.__struct_config__  # pyright: ignore[reportAttributeAccessIssue]
+        return {'format': 'msgpack', 'array_like': cfg.array_like}
+    return None
+
+
 class AciesApp:
     def __init__(
         self,
@@ -141,9 +149,7 @@ class AciesApp:
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
             if 'msg' not in inspect.signature(fn).parameters:
-                raise TypeError(
-                    f"subscriber '{fn.__name__}': handler must have a 'msg' parameter"
-                )
+                raise TypeError(f"subscriber '{fn.__name__}': handler must have a 'msg' parameter")
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
             self._tasks.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
@@ -174,21 +180,17 @@ class AciesApp:
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
             if 'msg' not in inspect.signature(fn).parameters:
-                raise TypeError(
-                    f"service '{fn.__name__}': handler must have a 'msg' parameter"
-                )
+                raise TypeError(f"service '{fn.__name__}': handler must have a 'msg' parameter")
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
             return_type = hints.get('return')
             if msg_type is None or msg_type is msgspec.Struct:
                 raise TypeError(
                     f"service '{fn.__name__}': 'msg' parameter must have a specific type annotation "
-                    f"(not bare msgspec.Struct)"
+                    f'(not bare msgspec.Struct)'
                 )
             if return_type is None:
-                raise TypeError(
-                    f"service '{fn.__name__}': handler must have a return type annotation"
-                )
+                raise TypeError(f"service '{fn.__name__}': handler must have a return type annotation")
             self._tasks.append(
                 ServiceSpec(name=fn.__name__, fn=fn, topic=topic, msg_type=msg_type, return_type=return_type)
             )
@@ -283,9 +285,17 @@ class AciesApp:
             if isinstance(task, ServiceSpec):
                 entry: dict[str, Any] = {'name': task.name, 'topic': self._resolve_topic(task.topic)}
                 if task.msg_type is not None and task.msg_type is not msgspec.Struct:
-                    entry['request'] = msgspec.json.schema(task.msg_type)
+                    req: dict[str, Any] = {'schema': msgspec.json.schema(task.msg_type)}
+                    enc = _msg_encoding(task.msg_type)
+                    if enc is not None:
+                        req['encoding'] = enc
+                    entry['request'] = req
                 if task.return_type is not None and task.return_type is not type(None):
-                    entry['response'] = msgspec.json.schema(task.return_type)
+                    resp: dict[str, Any] = {'schema': msgspec.json.schema(task.return_type)}
+                    enc = _msg_encoding(task.return_type)
+                    if enc is not None:
+                        resp['encoding'] = enc
+                    entry['response'] = resp
                 schemas[task.id] = entry
         self._app_state.config['sys']['schemas'] = schemas
 
