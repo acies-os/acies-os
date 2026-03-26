@@ -39,7 +39,7 @@ def open_db(path: str) -> sqlite3.Connection:
     CAST(... AS TEXT) to read them as strings from the CLI::
 
         sqlite3 /data/host-mic.db \\
-          "SELECT topic, msg_type, datetime(timestamp/1e9, 'unixepoch'),
+          "SELECT topic, source, dtype, datetime(timestamp/1e9, 'unixepoch'),
                   CAST(payload AS TEXT), CAST(metadata AS TEXT)
            FROM message
            WHERE timestamp BETWEEN <start_ns> AND <end_ns>
@@ -51,31 +51,30 @@ def open_db(path: str) -> sqlite3.Connection:
     # thread) but written from the worker thread running _publish(). Safe because
     # _publish() is the only writer and the scheduler never calls it concurrently.
     con = sqlite3.connect(str(p), check_same_thread=False)
-    _ = con.execute(
-        """
+    con.executescript("""
         CREATE TABLE IF NOT EXISTS message (
             id        INTEGER PRIMARY KEY,
             topic     TEXT NOT NULL,
-            msg_type  TEXT NOT NULL,
+            dtype     TEXT NOT NULL,
             timestamp INT  NOT NULL,
-            ctl_topic TEXT NOT NULL,
-            payload   BLOB,
-            metadata  BLOB
-        )
-        """
-    )
-    _ = con.execute('CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp)')
-    con.commit()
+            source    TEXT NOT NULL,
+            payload   BLOB NOT NULL,
+            metadata  BLOB NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp);
+        PRAGMA journal_mode=WAL;
+        PRAGMA synchronous=NORMAL;
+    """)
     return con
 
 
-# topic, msg_type, timestamp, ctl_topic, payload, metadata
+# topic, dtype (numpy dtype e.g. 'int16'), timestamp, source, payload, metadata
 DbRow = tuple[str, str, int, str, bytes, bytes]
 
 
 def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
     _ = con.executemany(
-        'INSERT INTO message (topic, msg_type, timestamp, ctl_topic, payload, metadata) VALUES (?,?,?,?,?,?)',
+        'INSERT INTO message (topic, dtype, timestamp, source, payload, metadata) VALUES (?,?,?,?,?,?)',
         rows,
     )
     con.commit()
@@ -131,6 +130,9 @@ def _teardown(ctx: AciesContext) -> None:
     if _stream is not None:
         _stream.stop()
         _stream.close()
+    if _db_buf and _con is not None:
+        _flush(_con, _db_buf)
+        _db_buf.clear()
     if _con is not None:
         _con.close()
 
@@ -170,7 +172,7 @@ def _publish(ctx: AciesContext) -> None:
                 topic,
                 _SAMPLE_DTYPE,
                 ts_ns,
-                ctx.ns.ctl.base,
+                ctx.ns.base,
                 msgspec.json.encode(samples),
                 msgspec.json.encode(metadata),
             )

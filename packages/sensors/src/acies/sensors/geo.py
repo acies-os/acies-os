@@ -37,7 +37,7 @@ SAMPLE_DTYPE = 'int32'
 DB_BATCH = 5  # rows to accumulate before flushing to SQLite
 
 
-# topic, msg_type (numpy dtype e.g. 'int32'), timestamp, ctl_topic, payload, metadata
+# topic, dtype (numpy dtype e.g. 'int32'), timestamp, source, payload, metadata
 DbRow = tuple[str, str, int, str, bytes, bytes]
 
 
@@ -55,7 +55,7 @@ def open_db(path: str) -> sqlite3.Connection:
     CAST(... AS TEXT) to read them as strings from the CLI::
 
         sqlite3 /data/host-geo.db \\
-          "SELECT topic, msg_type, datetime(timestamp/1e9, 'unixepoch'),
+          "SELECT topic, source, dtype, datetime(timestamp/1e9, 'unixepoch'),
                   CAST(payload AS TEXT), CAST(metadata AS TEXT)
            FROM message
            WHERE timestamp BETWEEN <start_ns> AND <end_ns>
@@ -67,27 +67,26 @@ def open_db(path: str) -> sqlite3.Connection:
     # thread) but written from the worker thread running publish(). Safe because
     # publish() is the only writer and the scheduler never calls it concurrently.
     con = sqlite3.connect(str(p), check_same_thread=False)
-    _ = con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS message (
-            id        INTEGER PRIMARY KEY,
-            topic     TEXT NOT NULL,
-            msg_type  TEXT NOT NULL,
-            timestamp INT  NOT NULL,
-            ctl_topic TEXT NOT NULL,
-            payload   BLOB,
-            metadata  BLOB
-        )
-        """
-    )
-    _ = con.execute('CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp)')
-    con.commit()
+    _ = con.executescript("""
+            CREATE TABLE IF NOT EXISTS message (
+                id        INTEGER PRIMARY KEY,
+                topic     TEXT NOT NULL,
+                dtype     TEXT NOT NULL,
+                timestamp INT  NOT NULL,
+                source    TEXT NOT NULL,
+                payload   BLOB NOT NULL,
+                metadata  BLOB NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_message_timestamp ON message (timestamp);
+            PRAGMA journal_mode=WAL;
+            PRAGMA synchronous=NORMAL;
+        """)
     return con
 
 
 def flush(con: sqlite3.Connection, rows: list[DbRow]) -> None:
     _ = con.executemany(
-        'INSERT INTO message (topic, msg_type, timestamp, ctl_topic, payload, metadata) VALUES (?,?,?,?,?,?)',
+        'INSERT INTO message (topic, dtype, timestamp, source, payload, metadata) VALUES (?,?,?,?,?,?)',
         rows,
     )
     con.commit()
@@ -113,6 +112,9 @@ def teardown(ctx: AciesContext) -> None:
     state: ReaderState = ctx.app.data['state']
     state.reader.stop()
     logger.info('geo reader stopped')
+    if state.db_buf:
+        flush(state.con, state.db_buf)
+        state.db_buf.clear()
     state.con.close()
     logger.info('database connection closed')
 
@@ -150,7 +152,7 @@ def publish(ctx: AciesContext) -> None:
                 topic,
                 SAMPLE_DTYPE,
                 ts_ns,
-                ctx.ns.ctl.base,
+                ctx.ns.base,
                 msgspec.json.encode(samples),
                 msgspec.json.encode(metadata),
             )
