@@ -69,7 +69,7 @@ class AciesApp:
             'name': resolved_name,
             'state': 'initializing',
         }
-        self._ns: Namespace = Namespace(resolved_host, resolved_name)
+        self._ns: Namespace  # initialized in run() from config['sys']
 
         # ---------------------------- system tasks ----------------------------
         # periodic heartbeat
@@ -253,6 +253,8 @@ class AciesApp:
 
     def run(self) -> None:  # noqa: C901
         """Start all subsystems, run lifecycle hooks, block until stop() is called."""
+
+        self._ns = Namespace(self._app_state.config['sys']['host'], self._app_state.config['sys']['name'])
 
         def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
             def _publish(topic: str, raw: bytes) -> None:
