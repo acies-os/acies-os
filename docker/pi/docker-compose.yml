@@ -1,0 +1,33 @@
+services:
+  acies-geo:
+    image: acies-pi:latest
+    profiles: [geo, geo-classifier, multimodal]
+    command: uv run acies-geo
+    volumes:
+      - ./:/acies-os
+      - /data:/data
+    devices:
+      - /dev/serial0:/dev/serial0
+    group_add:
+      - dialout
+    restart: unless-stopped
+
+  acies-mic:
+    image: acies-pi:latest
+    profiles: [mic, mic-classifier, multimodal]
+    command: uv run acies-mic
+    volumes:
+      - ./:/acies-os
+      - /data:/data
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    restart: unless-stopped
+
+  zenohd:
+    image: acies-pi:latest
+    profiles: [geo, mic, geo-classifier, mic-classifier, multimodal]
+    command: zenohd
+    network_mode: host
+    restart: unless-stopped
