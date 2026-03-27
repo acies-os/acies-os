@@ -99,5 +99,6 @@ deploy:
     fi
     for pi in {{ pi_hosts }}; do
         echo "==> pushing latest images to $pi"
-        ssh "$pi" "docker pull {{ registry_external }}/acies-pi:latest"
+        ssh "$pi" "docker pull {{ registry_external }}/acies-pi:latest \
+            && docker tag {{ registry_external }}/acies-pi:latest acies-pi:latest"
     done
