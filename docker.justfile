@@ -9,11 +9,13 @@ default:
 
 registry_port := env("REGISTRY_PORT", "5100")
 registry := env("REGISTRY", "localhost:" + registry_port)
+registry_external := env("REGISTRY_EXTERNAL", "10.8.0.102:" + registry_port)
 tag := env("TAG", "latest")
 
 # Space-separated Pi SSH targets. Set in .env, e.g. PI_HOSTS="pi@192.168.1.20 pi@192.168.1.21"
 
 pi_hosts := env("PI_HOSTS", "")
+pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 
 # ----------------------------------- build -----------------------------------
 
@@ -74,7 +76,7 @@ check-port port=registry_port:
 
 # Usage: just registry-trust pi@192.168.1.20
 registry-trust pi:
-    ssh {{ pi }} "echo '{\"insecure-registries\":[\"{{ registry }}\"]}' \
+    ssh {{ pi }} "echo '{\"insecure-registries\":[\"{{ registry_external }}\"]}' \
         | sudo tee /etc/docker/daemon.json \
         && sudo systemctl restart docker"
 
@@ -90,9 +92,6 @@ deploy:
         exit 1
     fi
     for pi in {{ pi_hosts }}; do
-        echo "==> deploying to $pi"
-        ssh "$pi" "docker compose \
-            -f ~/acies-os/docker/pi/docker-compose.yml \
-            --project-directory ~/acies-os \
-            up -d --pull always"
+        echo "==> pushing latest images to $pi"
+        ssh "$pi" "docker pull {{ registry_external }}/acies-pi:latest"
     done
