@@ -45,6 +45,12 @@ build-pi:
 
 # ------------------------------- local registry -------------------------------
 
+# Start docker daemon with Colima if not already running. (macOS only)
+docker-up:
+    -colima stop --force
+    colima start --runtime docker
+    colima status
+
 # Start a local Docker registry on port 5100. (on macOS 5000 is used by AirTunes)
 registry-up:
     docker start acies-registry 2>/dev/null || docker run -d \
