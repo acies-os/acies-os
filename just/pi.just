@@ -10,4 +10,5 @@ pi-shell:
         -v {{ pi_app_dir }}:/acies-os \
         -v /data:/data \
         --group-add dialout \
+        --device /dev/serial0:/dev/serial0 \
         acies-pi:latest bash
