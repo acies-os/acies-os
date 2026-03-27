@@ -1,6 +1,7 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:0.10.11-python3.12-trixie-slim
 
-ARG ZENOHD_VERSION=1.8.0
+ARG ZENOH_VERSION=1.8.0
+ARG ZENOH_DOWNLOAD_URL="https://github.com/eclipse-zenoh/zenoh/releases/download/${ZENOH_VERSION}/zenoh-${ZENOH_VERSION}-aarch64-unknown-linux-gnu-debian.zip"
 
 # System deps:
 #   libportaudio2 -- sounddevice (acies-mic)
@@ -26,12 +27,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install zenohd
-RUN curl -fsSL \
-    "https://github.com/eclipse-zenoh/zenoh/releases/download/${ZENOHD_VERSION}/zenohd-${ZENOHD_VERSION}-aarch64-unknown-linux-gnu.zip" \
-    -o /tmp/zenohd.zip \
-    && unzip /tmp/zenohd.zip -d /tmp/zenohd \
-    && mv /tmp/zenohd/zenohd /usr/local/bin/zenohd \
-    && rm -rf /tmp/zenohd.zip /tmp/zenohd
+RUN curl -fsSL "${ZENOH_DOWNLOAD_URL}" -o /tmp/zenoh-debian.zip \
+    && unzip /tmp/zenoh-debian.zip -d /tmp/zenoh-debian \
+    && dpkg -i /tmp/zenoh-debian/zenohd_${ZENOH_VERSION}_arm64.deb \
+    && rm -rf /tmp/zenoh-debian.zip /tmp/zenoh-debian \
+    | bash -s -- --to /usr/local/bin
 
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
@@ -48,15 +48,20 @@ ENV UV_NO_DEV=1
 WORKDIR /acies-os
 
 # --- deps layer: rebuilds only when lockfile changes ---
-COPY pyproject.toml uv.lock ./
-COPY packages/core/pyproject.toml        packages/core/pyproject.toml
-COPY packages/sensors/pyproject.toml     packages/sensors/pyproject.toml
+# COPY pyproject.toml uv.lock ./
+# COPY packages/core/pyproject.toml        packages/core/pyproject.toml
+# COPY packages/sensors/pyproject.toml     packages/sensors/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=packages/core/pyproject.toml,target=packages/core/pyproject.toml \
+    --mount=type=bind,source=packages/sensors/pyproject.toml,target=packages/sensors/pyproject.toml \
+    uv sync --locked --no-install-project --no-dev
 
 # --- source layer: rebuilds when source changes ---
-COPY packages/core/src    packages/core/src
-COPY packages/sensors/src packages/sensors/src
+# COPY packages/core/src    packages/core/src
+# COPY packages/sensors/src packages/sensors/src
+COPY . /acies-os
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 

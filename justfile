@@ -1,8 +1,6 @@
-import 'docker.justfile'
-
 [private]
 default:
-    @just --list
+    @just -f {{ justfile() }} --list
 
 # Format code with ruff
 fmt path=".":

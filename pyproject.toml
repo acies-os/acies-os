@@ -16,7 +16,8 @@ requires-python = ">= 3.10"
 
 [tool.uv.workspace]
 members = [
-  "packages/*",
+  "packages/core",
+  "packages/sensors",
 ]
 
 [tool.uv]
