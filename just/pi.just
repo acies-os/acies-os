@@ -9,4 +9,5 @@ pi-shell:
     docker run --rm -it \
         -v {{ pi_app_dir }}:/acies-os \
         -v /data:/data \
+        --group-add dialout \
         acies-pi:latest bash
