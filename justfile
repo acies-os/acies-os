@@ -1,3 +1,5 @@
+import 'docker.justfile'
+
 [private]
 default:
     @just --list
