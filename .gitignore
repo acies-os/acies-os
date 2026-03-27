@@ -6,7 +6,7 @@ dist/
 docs/_build/
 wheels/
 *.egg-info
-*.lock
+# *.lock
 
 # venv
 .venv

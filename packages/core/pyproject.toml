@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Jinyang Li", email = "jinyang7@illinois.edu" }]
 dependencies = [
     "msgspec>=0.20.0",
-    "eclipse-zenoh>=1.8.0",
+    "eclipse-zenoh>=1.8.0,<2",
     "click>=8.3.1",
 ]
 # dependencies = [
