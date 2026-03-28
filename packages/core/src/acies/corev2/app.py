@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import heapq
 import inspect
-import signal
 import socket
 import threading
 import time
@@ -31,6 +30,7 @@ from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
 from .namespace import CtlTopic, Namespace, Topic, TopicArg
 from .router import Router
+from .signal_handlers import temporary_signal_handlers
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
 from .transport import ZenohTransport
 
@@ -253,7 +253,11 @@ class AciesApp:
                 return f'{self._ns.ctl.base}/{topic.path}'
 
     def run(self) -> None:  # noqa: C901
-        """Start all subsystems, run lifecycle hooks, block until stop() is called."""
+        """Start all subsystems, run lifecycle hooks, block until stop() is called.
+
+        Must be called from the main thread. Blocking until shutdown is the
+        intended usage — call this as the last statement in main().
+        """
 
         self._ns = Namespace(self._app_state.config['sys']['host'], self._app_state.config['sys']['name'])
 
@@ -336,36 +340,24 @@ class AciesApp:
         with self._app_state.lock:
             self._app_state.config['sys']['state'] = 'active'
 
-        for hook in self._startup_hooks:
-            hook(hook_ctx)
-
-        # handle SIGINT and SIGTERM for graceful shutdown; restore old handlers on exit
-        old_sigint = None
-        old_sigterm = None
-        handlers_installed = False
-
-        def _handle_signal(signum: int, frame: Any) -> None:  # pyright: ignore[reportUnusedParameter]
-            self.stop()
-
-        if threading.current_thread() is threading.main_thread():
-            old_sigint = signal.signal(signal.SIGINT, _handle_signal)
-            old_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
-            handlers_installed = True
-
-        try:
+        startup_ok = False
+        with temporary_signal_handlers(self.stop):
             try:
-                _ = self._stop_event.wait()
-            except KeyboardInterrupt:
-                self.stop()
-        finally:
-            if handlers_installed:
-                _ = signal.signal(signal.SIGINT, old_sigint)
-                _ = signal.signal(signal.SIGTERM, old_sigterm)
+                for hook in self._startup_hooks:
+                    hook(hook_ctx)
+                startup_ok = True
 
-            self._router.stop()
-            self._executor.stop()
-            for hook in self._shutdown_hooks:
-                hook(hook_ctx)
+                # Block until stop() is called (via signal, or directly by app code).
+                # SIGINT/SIGTERM are handled by temporary_signal_handlers above,
+                # which calls stop() -> sets the event -> wait() returns normally.
+                _ = self._stop_event.wait()
+
+            finally:
+                self._router.stop()
+                self._executor.stop()
+                if startup_ok:
+                    for hook in self._shutdown_hooks:
+                        hook(hook_ctx)
 
     def stop(self) -> None:
         """Signal run() to begin shutdown. Safe to call from any thread."""
