@@ -27,4 +27,4 @@ mic = "acies.sensors.mic:main"
 
 [tool.uv.sources]
 acies-core = { workspace = true }
-rawshake = { git = "https://github.com/jinyangustc/rawshake.git", tag = "v0.1.3" }
+rawshake = { git = "https://github.com/jinyangustc/rawshake.git", rev = "00eec29f3476cd67d277d286ac2798e7815670ef" }
