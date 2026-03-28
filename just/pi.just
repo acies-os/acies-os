@@ -5,7 +5,7 @@ pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 #     @just -f {{ justfile() }} --list
 
 # Fix ownership of /data files to the current user
-fix-data-ownership:
+own-data:
     sudo chown -R $(id -u):$(id -g) /data
 
 # Run an interactive shell in the Pi image with source code mounted
