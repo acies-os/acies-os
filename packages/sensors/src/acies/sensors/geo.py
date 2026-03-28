@@ -18,7 +18,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import socket
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -54,7 +53,7 @@ app = AciesApp()
 def setup(ctx: AciesContext) -> None:
     port: str = ctx.app.config['port']
     baud: int = ctx.app.config['baud']
-    output: str = ctx.app.config['output']
+    output: str = ctx.app.config['output'] or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
     reader = GeoReader(port=port, baudrate=baud)
     reader.start()
     logger.info('geo reader started on %s @ %d baud', port, baud)
@@ -136,12 +135,11 @@ def publish(ctx: AciesContext) -> None:
 @click.option('--baud', default=230400, type=int, show_default=True, help='Baud rate.')
 @click.option(
     '--output',
-    default=f'/data/{socket.gethostname().removesuffix(".local")}-geo.db',
-    show_default=True,
-    help='SQLite database output path.',
+    default=None,
+    help='SQLite database output path. Defaults to /data/<acies-host>-<acies-name>.db.',
 )
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
-def main(port: str, baud: int, output: str, topic: str | None) -> None:
+def main(port: str, baud: int, output: str | None, topic: str | None) -> None:
     app.state.config.update({'port': port, 'baud': baud, 'output': output, 'topic': topic})
     setup_logging(app.name)
     app.run()
