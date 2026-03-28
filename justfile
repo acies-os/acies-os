@@ -1,3 +1,4 @@
+set dotenv-load := true
 set allow-duplicate-variables := true
 
 import 'just/dev.just'
