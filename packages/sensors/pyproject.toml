@@ -26,6 +26,13 @@ scripts.acies-dump = "acies.sensors.dump:main"
 scripts.acies-geo = "acies.sensors.geo:main"
 scripts.acies-mic = "acies.sensors.mic:main"
 
+[dependency-groups]
+dev = [
+  "matplotlib>=3.10.8",
+  "polars>=1.39.3",
+  "scipy>=1.15.3",
+]
+
 [tool.hatch]
 build.targets.wheel.packages = [ "src/acies" ]
 metadata.allow-direct-references = true
