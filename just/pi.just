@@ -8,14 +8,14 @@ pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 own-data:
     sudo chown -R $(id -u):$(id -g) /data
 
-# Run an interactive shell in the Pi image with source code mounted
-pi-shell:
+# Run an interactive shell in the Pi image. Pass dev=true to mount source code.
+pi-shell dev="false":
     @touch ~/.docker_bash_history
     @mkdir -p ~/.acies/logs
     -docker run --rm -it \
         -e HISTFILE=/root/.bash_history \
         -e PROMPT_COMMAND='history -a' \
-        -v {{ pi_app_dir }}:/acies-os \
+        {{ if dev == "true" { "-v " + pi_app_dir + ":/acies-os \\" } else { "" } }} \
         -v /data:/data \
         -v ~/.docker_bash_history:/root/.bash_history \
         -v ~/.acies:/root/.acies \
