@@ -9,10 +9,10 @@ Output columns: timestamp_ns, value, channel, source, topic
 
 Usage::
 
-    acies-dump /data/host-geo.db > out.csv
-    acies-dump /data/host-geo.db --duration 30 > out.csv
-    acies-dump /data/host-geo.db --start 1700000000000000000 --duration 10 > out.csv
-    acies-dump /data/host-mic.db --topic rs1/mic > out.csv
+    python dump.py /data/host-geo.db > out.csv
+    python dump.py /data/host-geo.db --duration 30 > out.csv
+    python dump.py /data/host-geo.db --start 1700000000000000000 --duration 10 > out.csv
+    python dump.py /data/host-mic.db --topic rs1/mic > out.csv
 """
 
 from __future__ import annotations
