@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import queue
 import sqlite3
+import time
 from dataclasses import dataclass, field
 
 import click
@@ -33,14 +34,15 @@ DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces 
 SAMPLE_DTYPE = 'int16'
 
 
-_sample_queue: queue.Queue[npt.NDArray[np.int16]] = queue.Queue()
+_sample_queue: queue.Queue[tuple[int, npt.NDArray[np.int16]]] = queue.Queue()
 
 
 def _audio_callback(indata: npt.NDArray[np.int16], _frames: int, _time: object, status: sd.CallbackFlags) -> None:
     if status:
         logger.warning('sounddevice status: %s', status)
     # indata shape: (frames, 1) since channels=1; take channel 0 as a copy
-    _sample_queue.put(indata[:, 0].copy())
+    # time.time_ns() here is close to actual capture time (callback fires after block completes)
+    _sample_queue.put((time.time_ns(), indata[:, 0].copy()))
 
 
 @dataclass
@@ -49,7 +51,6 @@ class MicState:
     con: sqlite3.Connection
     sample_rate: int
     topic: str
-    sample_buf: list[int] = field(default_factory=list)
     db_buf: list[DbRow] = field(default_factory=list)
 
 
@@ -119,20 +120,15 @@ def teardown(ctx: AciesContext) -> None:
 @app.schedule(interval=0.5)
 def publish(ctx: AciesContext) -> None:
     state: MicState = ctx.app.data['state']
-    sr = state.sample_rate
 
     while True:
         try:
-            state.sample_buf.extend(_sample_queue.get_nowait().tolist())
+            ts_ns, chunk = _sample_queue.get_nowait()
         except queue.Empty:
             break
 
-    while len(state.sample_buf) >= sr:
-        samples = state.sample_buf[:sr]
-        del state.sample_buf[:sr]
-
+        samples = chunk.tolist()
         topic = state.topic
-        ts_ns = ctx.now()
 
         ctx.publish(
             topic,
@@ -141,12 +137,12 @@ def publish(ctx: AciesContext) -> None:
                 timestamp=ts_ns,
                 payload=[np.array(samples, dtype=SAMPLE_DTYPE).tobytes()],
                 channels=[0],
-                sampling_rate=sr,
+                sampling_rate=state.sample_rate,
                 dtype=SAMPLE_DTYPE,
             ),
         )
 
-        metadata = {'channel': 0, 'sampling_rate': sr}
+        metadata = {'channel': 0, 'sampling_rate': state.sample_rate}
         state.db_buf.append(
             (
                 topic,
