@@ -81,7 +81,7 @@ def teardown(ctx: AciesContext) -> None:
     logger.info('geo reader stopped')
     if state.db_buf:
         n_rows = flush(state.con, state.db_buf)
-        logger.info('flushed %d buffered rows to database', n_rows)
+        logger.debug('flushed %d remaining rows to database', n_rows)
         state.db_buf.clear()
     state.con.close()
     logger.info('database connection closed')
@@ -127,7 +127,7 @@ def publish(ctx: AciesContext) -> None:
         )
         if len(state.db_buf) >= DB_BATCH:
             n_rows = flush(state.con, state.db_buf)
-            logger.info('flushed %d rows to database', n_rows)
+            logger.debug('flushed %d rows to database', n_rows)
             state.db_buf.clear()
 
 
