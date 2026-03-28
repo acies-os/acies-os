@@ -13,6 +13,7 @@ ARG ZENOH_DOWNLOAD_URL="https://github.com/eclipse-zenoh/zenoh/releases/download
 #   iproute2      -- ip, ss (network state)
 #   iputils-ping  -- ping (connectivity check)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    alsa-utils \
     ca-certificates \
     curl \
     git \

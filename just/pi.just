@@ -6,8 +6,8 @@ pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 
 # Run an interactive shell in the Pi image with source code mounted
 pi-shell:
-    touch ~/.docker_bash_history
-    mkdir -p ~/.acies/logs
+    @touch ~/.docker_bash_history
+    @mkdir -p ~/.acies/logs
     docker run --rm -it \
         -e HISTFILE=/root/.bash_history \
         -e PROMPT_COMMAND='history -a' \
@@ -16,5 +16,8 @@ pi-shell:
         -v ~/.docker_bash_history:/root/.bash_history \
         -v ~/.acies:/root/.acies \
         --group-add dialout \
+        --group-add audio \
         --device /dev/serial0:/dev/serial0 \
+        --device /dev/snd:/dev/snd \
+        --device /dev/bus/usb:/dev/bus/usb \
         acies-pi:latest bash
