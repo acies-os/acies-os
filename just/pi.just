@@ -8,6 +8,8 @@ pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 pi-shell:
     touch ~/.docker_bash_history
     docker run --rm -it \
+        -e HISTFILE=/root/.bash_history \
+        -e PROMPT_COMMAND='history -a' \
         -v {{ pi_app_dir }}:/acies-os \
         -v /data:/data \
         -v ~/.docker_bash_history:/root/.bash_history \
