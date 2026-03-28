@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import queue
-import socket
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -60,7 +59,7 @@ app = AciesApp()
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
     device = ctx.app.config['device']
-    output = ctx.app.config['output']
+    output = ctx.app.config['output'] or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
     device_key: str | int | None = None if device == 'default' else device
 
     try:
@@ -173,12 +172,11 @@ def publish(ctx: AciesContext) -> None:
 )
 @click.option(
     '--output',
-    default=f'/data/{socket.gethostname().removesuffix(".local")}-mic.db',
-    show_default=True,
-    help='SQLite database output path.',
+    default=None,
+    help='SQLite database output path. Defaults to /data/<acies-host>-<acies-name>.db.',
 )
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
-def main(device: str, output: str, topic: str | None) -> None:
+def main(device: str, output: str | None, topic: str | None) -> None:
     app.state.config.update({'device': device, 'output': output, 'topic': topic})
     setup_logging(app.name)
     app.run()
