@@ -15,7 +15,7 @@ pi-shell dev="false":
     -docker run --rm -it \
         -e HISTFILE=/root/.bash_history \
         -e PROMPT_COMMAND='history -a' \
-        {{ if dev == "true" { "-v " + pi_app_dir + ":/acies-os \\" } else { "" } }} \
+        {{ if dev == "true" { "-v " + pi_app_dir + ":/acies-os" } else { "" } }} \
         -v /data:/data \
         -v ~/.docker_bash_history:/root/.bash_history \
         -v ~/.acies:/root/.acies \
