@@ -23,7 +23,7 @@ import msgspec.json
 import numpy as np
 import numpy.typing as npt
 import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
-from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries
+from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries, setup_logging
 
 from .db import DbRow, flush, open_db
 
@@ -79,6 +79,7 @@ def setup(ctx: AciesContext) -> None:
 
     try:
         con = open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT)
+        logger.info('opened database %r', output)
     except Exception:
         logger.exception('failed to open database %r; shutting down', output)
         stream.stop()
@@ -98,10 +99,13 @@ def teardown(ctx: AciesContext) -> None:
     state: MicState = ctx.app.data['state']
     state.stream.stop()
     state.stream.close()
+    logger.info('mic stream stopped')
     if state.db_buf:
-        _ = flush(state.con, state.db_buf)
+        n_rows = flush(state.con, state.db_buf)
+        logger.debug('flushed %d remaining rows to database', n_rows)
         state.db_buf.clear()
     state.con.close()
+    logger.info('database connection closed')
 
 
 @app.schedule(interval=0.5)
@@ -146,7 +150,8 @@ def publish(ctx: AciesContext) -> None:
             )
         )
         if len(state.db_buf) >= DB_BATCH:
-            _ = flush(state.con, state.db_buf)
+            n_rows = flush(state.con, state.db_buf)
+            logger.debug('flushed %d rows to database', n_rows)
             state.db_buf.clear()
 
 
@@ -166,6 +171,7 @@ def publish(ctx: AciesContext) -> None:
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
 def main(device: str, output: str, topic: str | None) -> None:
     app.state.config.update({'device': device, 'output': output, 'topic': topic})
+    setup_logging(app.name)
     app.run()
 
 
