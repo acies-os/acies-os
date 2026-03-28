@@ -98,8 +98,8 @@ deploy:
         exit 1
     fi
     for pi in {{ pi_hosts }}; do
-        echo "==> pushing latest images to $pi"
-        ssh "$pi" "docker pull {{ registry_external }}/acies-pi:latest \
-            && docker tag {{ registry_external }}/acies-pi:latest acies-pi:latest \
-            && docker rmi {{ registry_external }}/acies-pi:latest"
+        echo "==> pushing acies-pi:{{ tag }} images to $pi"
+        ssh "$pi" "docker pull {{ registry_external }}/acies-pi:{{ tag }} \
+            && docker tag {{ registry_external }}/acies-pi:{{ tag }} acies-pi:{{ tag }} \
+            && docker rmi {{ registry_external }}/acies-pi:{{ tag }}"
     done
