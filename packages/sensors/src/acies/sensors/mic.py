@@ -117,7 +117,7 @@ def teardown(ctx: AciesContext) -> None:
     logger.info('database connection closed')
 
 
-@app.schedule(interval=0.5)
+@app.schedule(interval=0.1)
 def publish(ctx: AciesContext) -> None:
     state: MicState = ctx.app.data['state']
 
