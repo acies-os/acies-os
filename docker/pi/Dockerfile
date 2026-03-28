@@ -58,6 +58,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=packages/core/pyproject.toml,target=packages/core/pyproject.toml \
     --mount=type=bind,source=packages/sensors/pyproject.toml,target=packages/sensors/pyproject.toml \
     uv sync --locked --no-install-project --no-dev
+# TODO: https://github.com/astral-sh/uv/blob/main/docs/guides/integration/docker.md#intermediate-layers-in-workspaces
 
 # --- source layer: rebuilds when source changes ---
 # COPY packages/core/src    packages/core/src
