@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 import click
 import msgspec.json
 import numpy as np
-from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries
+from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries, setup_logging
 from rawshake.geophone import Channel, GeoReader, get_samples
 
 from .db import DbRow, flush, open_db
@@ -140,6 +140,7 @@ def publish(ctx: AciesContext) -> None:
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
 def main(port: str, baud: int, output: str, topic: str | None) -> None:
     app.state.config.update({'port': port, 'baud': baud, 'output': output, 'topic': topic})
+    setup_logging(app.name)
     app.run()
 
 

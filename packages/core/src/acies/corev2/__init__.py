@@ -1,6 +1,7 @@
 import logging
 
 from .app import AciesApp
+from .log import setup_logging
 from .context import AciesContext, AppState, TaskState
 from .msg import (
     AciesDel,
@@ -45,6 +46,7 @@ __all__ = [
     'NanoSecond',
     'Ok',
     'ScheduleSpec',
+    'setup_logging',
     'ServiceSpec',
     'SubscriberSpec',
     'TaskState',
