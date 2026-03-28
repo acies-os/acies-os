@@ -1,3 +1,5 @@
+# See: https://github.com/astral-sh/uv/blob/main/docs/guides/integration/docker.md
+
 FROM ghcr.io/astral-sh/uv:0.10.11-python3.12-trixie-slim
 
 ARG ZENOH_VERSION=1.8.0
@@ -48,24 +50,22 @@ ENV UV_NO_DEV=1
 
 WORKDIR /acies-os
 
-# --- deps layer: rebuilds only when lockfile changes ---
-# COPY pyproject.toml uv.lock ./
-# COPY packages/core/pyproject.toml        packages/core/pyproject.toml
-# COPY packages/sensors/pyproject.toml     packages/sensors/pyproject.toml
+# -------------- deps layer: rebuild only when lock file changes --------------
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=packages/core/pyproject.toml,target=packages/core/pyproject.toml \
     --mount=type=bind,source=packages/sensors/pyproject.toml,target=packages/sensors/pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
-# TODO: https://github.com/astral-sh/uv/blob/main/docs/guides/integration/docker.md#intermediate-layers-in-workspaces
+    uv sync --frozen --no-install-workspace --no-dev
 
-# --- source layer: rebuilds when source changes ---
-# COPY packages/core/src    packages/core/src
-# COPY packages/sensors/src packages/sensors/src
-COPY . /acies-os
+# ----------------- source layer: rebuilds when source changes -----------------
+COPY pyproject.toml uv.lock ./
+COPY packages/core/pyproject.toml    packages/core/pyproject.toml
+COPY packages/sensors/pyproject.toml packages/sensors/pyproject.toml
+COPY packages/core/src               packages/core/src
+COPY packages/sensors/src            packages/sensors/src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked
+    uv sync --locked --package acies-sensors
 
 # Reset the entrypoint, don't invoke `uv`
 ENTRYPOINT []
