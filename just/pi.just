@@ -6,7 +6,8 @@ pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 
 # Run an interactive shell in the Pi image with source code mounted
 pi-shell:
-    touch ~/.docker_bash_history ~/.acies/logs
+    touch ~/.docker_bash_history
+    mkidr -p ~/.acies/logs
     docker run --rm -it \
         -e HISTFILE=/root/.bash_history \
         -e PROMPT_COMMAND='history -a' \
