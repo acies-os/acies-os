@@ -68,9 +68,9 @@ def setup(ctx: AciesContext) -> None:
     except (sd.PortAudioError, ValueError) as e:
         logger.error('audio device %r not found: %s', device, e)
         logger.error('available input devices:')
-        for dev in sd.query_devices():  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-            if dev['max_input_channels'] > 0:  # pyright: ignore[reportUnknownMemberType]
-                logger.error('  [%d] %s', dev['index'], dev['name'])  # pyright: ignore[reportUnknownMemberType]
+        for dev in sd.query_devices():  # pyright: ignore[reportUnknownMemberType]
+            if dev['max_input_channels'] > 0:
+                logger.error('  [%d] %s', dev['index'], dev['name'])
         logger.error('use --device <index or name> to select a device')
         raise SystemExit(1)
     sample_rate = int(dev_info['default_samplerate'])

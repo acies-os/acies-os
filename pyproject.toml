@@ -1,24 +1,49 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
+
 [project]
 name = "acies-os"
 version = "0.2.2"
 description = "A Content-Centric Platform for Edge AI Twinning and Orchestration"
+readme = "readme.md"
 authors = [
-    { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
-    { name = "Shangchen Wu", email = "sw57@illinois.edu" },
-    { name = "Yizhuo Chen", email = "yizhuoc@illinois.edu" },
-    { name = "Tianshi Wang", email = "tianshi34@illinois.edu" },
-    { name = "Tommy Kimura", email = "tkimura4@illinois.edu" },
-    { name = "Denizhan Kara", email = "kara4@illinois.edu" },
+  { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
+  { name = "Shangchen Wu", email = "sw57@illinois.edu" },
+  { name = "Yizhuo Chen", email = "yizhuoc@illinois.edu" },
+  { name = "Tianshi Wang", email = "tianshi34@illinois.edu" },
+  { name = "Tommy Kimura", email = "tkimura4@illinois.edu" },
+  { name = "Denizhan Kara", email = "kara4@illinois.edu" },
+]
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 dependencies = []
-readme = "readme.md"
-requires-python = ">= 3.10"
 
-[tool.uv.workspace]
-members = [
-  "packages/core",
-  "packages/sensors",
+[dependency-groups]
+dev = [
+  "pytest>=8",
 ]
+docs = [
+  "livereload>=2.7.1",
+  "myst-parser>=4.0.1",
+  "pydata-sphinx-theme>=0.16.1",
+  "sphinx>=8.1.3",
+  "sphinx-autobuild>=2024.10.3",
+  "sphinx-autodoc-typehints>=3.0.1",
+  "sphinx-copybutton>=0.5.2",
+  "sphinx-design>=0.6.1",
+]
+
+[tool.hatch]
+build.targets.wheel.packages = [ "src/acies" ]
+metadata.allow-direct-references = true
 
 [tool.uv]
 environments = [
@@ -26,28 +51,22 @@ environments = [
   "sys_platform == 'linux' and platform_machine == 'aarch64'", # Pi (arm64)
   "sys_platform == 'linux' and platform_machine == 'x86_64'",  # server (amd64)
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/acies"]
+workspace.members = [
+  "packages/core",
+  "packages/sensors",
+]
 
 [tool.ruff]
 line-length = 120
-lint.extend-select = ['Q', 'RUF100', 'C90', 'I']
-lint.unfixable = ['F401']
-lint.flake8-quotes = { inline-quotes = 'single', multiline-quotes = 'double' }
+format = { quote-style = "single" }
+lint.extend-select = [ "C90", "I", "Q", "RUF100" ]
+lint.unfixable = [ "F401" ]
+lint.flake8-quotes = { inline-quotes = "single", multiline-quotes = "double" }
 lint.mccabe = { max-complexity = 13 }
-format = { quote-style = 'single' }
 
 [tool.basedpyright]
 typeCheckingMode = "recommended"
-include = ["packages/*/src"]
+include = [ "packages/*/src" ]
 extraPaths = [
   "packages/core/src",
   "packages/sensors/src",
@@ -61,18 +80,3 @@ reportImplicitOverride = false
 reportImplicitStringConcatenation = false
 reportMissingTypeArgument = false
 reportUnknownLambdaType = false
-
-[dependency-groups]
-dev = [
-    "pytest>=8.0.0",
-]
-docs = [
-    "livereload>=2.7.1",
-    "myst-parser>=4.0.1",
-    "pydata-sphinx-theme>=0.16.1",
-    "sphinx>=8.1.3",
-    "sphinx-autobuild>=2024.10.3",
-    "sphinx-autodoc-typehints>=3.0.1",
-    "sphinx-copybutton>=0.5.2",
-    "sphinx-design>=0.6.1",
-]
