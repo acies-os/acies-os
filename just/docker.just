@@ -43,6 +43,10 @@ build-pi:
         -f docker/pi/Dockerfile \
         .
 
+# Clean up build cache and dangling images
+build-prune:
+    docker buildx prune --all --force
+
 # ------------------------------- local registry -------------------------------
 
 # Start docker daemon with Colima if not already running. (macOS only)
@@ -97,6 +101,7 @@ deploy:
         echo "error: PI_HOSTS not set. Add PI_HOSTS='pi@192.168.1.20 pi@192.168.1.21' to .env"
         exit 1
     fi
+    echo "deploying to {{ pi_hosts }}..."
     for pi in {{ pi_hosts }}; do
         echo "==> pushing acies-pi:{{ tag }} images to $pi"
         ssh "$pi" "docker pull {{ registry_external }}/acies-pi:{{ tag }} \
