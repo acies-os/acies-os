@@ -8,6 +8,7 @@ wheels/
 *.egg-info
 # *.lock
 
-# venv
 .venv
+
 *.log
+.env
