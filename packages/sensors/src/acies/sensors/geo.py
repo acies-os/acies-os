@@ -61,6 +61,7 @@ def setup(ctx: AciesContext) -> None:
 
     try:
         con = open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT)
+        logger.info('opened database %r', output)
     except Exception:
         logger.exception('failed to open database %r; shutting down', output)
         reader.stop()
@@ -79,7 +80,8 @@ def teardown(ctx: AciesContext) -> None:
     state.reader.stop()
     logger.info('geo reader stopped')
     if state.db_buf:
-        _ = flush(state.con, state.db_buf)
+        n_rows = flush(state.con, state.db_buf)
+        logger.info('flushed %d buffered rows to database', n_rows)
         state.db_buf.clear()
     state.con.close()
     logger.info('database connection closed')
@@ -124,7 +126,8 @@ def publish(ctx: AciesContext) -> None:
             )
         )
         if len(state.db_buf) >= DB_BATCH:
-            _ = flush(state.con, state.db_buf)
+            n_rows = flush(state.con, state.db_buf)
+            logger.info('flushed %d rows to database', n_rows)
             state.db_buf.clear()
 
 
