@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import heapq
 import inspect
+import signal
 import socket
 import threading
 import time
@@ -338,13 +339,33 @@ class AciesApp:
         for hook in self._startup_hooks:
             hook(hook_ctx)
 
-        _ = self._stop_event.wait()
+        # handle SIGINT and SIGTERM for graceful shutdown; restore old handlers on exit
+        old_sigint = None
+        old_sigterm = None
+        handlers_installed = False
 
-        self._router.stop()
-        self._executor.stop()
+        def _handle_signal(signum: int, frame: Any) -> None:  # pyright: ignore[reportUnusedParameter]
+            self.stop()
 
-        for hook in self._shutdown_hooks:
-            hook(hook_ctx)
+        if threading.current_thread() is threading.main_thread():
+            old_sigint = signal.signal(signal.SIGINT, _handle_signal)
+            old_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
+            handlers_installed = True
+
+        try:
+            try:
+                _ = self._stop_event.wait()
+            except KeyboardInterrupt:
+                self.stop()
+        finally:
+            if handlers_installed:
+                _ = signal.signal(signal.SIGINT, old_sigint)
+                _ = signal.signal(signal.SIGTERM, old_sigterm)
+
+            self._router.stop()
+            self._executor.stop()
+            for hook in self._shutdown_hooks:
+                hook(hook_ctx)
 
     def stop(self) -> None:
         """Signal run() to begin shutdown. Safe to call from any thread."""
