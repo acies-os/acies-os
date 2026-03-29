@@ -13,8 +13,8 @@ pi-shell dev="false":
     @touch ~/.docker_bash_history
     @mkdir -p ~/.acies/logs
     -docker run --rm -it \
+        --detach-keys="ctrl-z,z" \
         -e HISTFILE=/root/.bash_history \
-        -e PROMPT_COMMAND='history -a' \
         {{ if dev == "true" { "-v " + pi_app_dir + ":/acies-os" } else { "" } }} \
         -v /data:/data \
         -v ~/.docker_bash_history:/root/.bash_history \
