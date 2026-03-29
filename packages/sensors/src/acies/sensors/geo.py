@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass, field
 
 import click
@@ -86,10 +88,14 @@ def teardown(ctx: AciesContext) -> None:
     logger.info('database connection closed')
 
 
-@app.schedule(interval=0.5)
-def publish(ctx: AciesContext) -> None:
+@app.thread
+def publish(ctx: AciesContext, stop: threading.Event) -> None:
     state: ReaderState = ctx.app.data['state']
-    while (msg := state.reader.get(timeout=0)) is not None:
+    while not stop.is_set():
+        msg = state.reader.get(timeout=1.0)
+        if msg is None:
+            continue
+
         ts_ns, channel_samples = get_samples(msg)
         # Pick the first preferred channel present in the message.
         # GEO_CHANNELS order encodes preference: SH3 (RS1D) before EH3 (RS4D).
@@ -112,6 +118,23 @@ def publish(ctx: AciesContext) -> None:
                 dtype=SAMPLE_DTYPE,
             ),
         )
+
+        # log latency
+        publish_ns = time.time_ns()
+        capture_to_publish_ms = (publish_ns - ts_ns) / 1_000_000
+        ready_to_publish_ms = (publish_ns - ts_ns - 1_000_000_000) / 1_000_000
+        if ready_to_publish_ms > 1000:
+            logger.warning(
+                'window latency: capture_to_publish=%.0f ms ready_to_publish=%.0f ms',
+                capture_to_publish_ms,
+                ready_to_publish_ms,
+            )
+        else:
+            logger.debug(
+                'window latency: capture_to_publish=%.0f ms ready_to_publish=%.0f ms',
+                capture_to_publish_ms,
+                ready_to_publish_ms,
+            )
 
         metadata = {'channel': channel, 'sampling_rate': SAMPLING_RATE}
         state.db_buf.append(

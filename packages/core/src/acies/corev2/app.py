@@ -10,12 +10,14 @@ Thread model:
   Timer thread      — one shared thread; fires SCHEDULE jobs into executor
   Dispatcher thread — owned by Executor; drains internal queue; submits to pool
   Worker threads    — execute handlers; call ctx.publish() synchronously
+  Managed threads   — @app.thread fns; started after startup hooks, joined before shutdown hooks
 """
 
 from __future__ import annotations
 
 import heapq
 import inspect
+import logging
 import socket
 import threading
 import time
@@ -31,8 +33,10 @@ from .executor import Executor
 from .namespace import CtlTopic, Namespace, Topic, TopicArg
 from .router import Router
 from .signal_handlers import temporary_signal_handlers
-from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec
+from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec, ThreadSpec
 from .transport import ZenohTransport
+
+logger = logging.getLogger(__name__)
 
 
 def _get_msg_encoding_metadata(t: type) -> dict[str, str | bool] | None:
@@ -138,6 +142,29 @@ class AciesApp:
 
     # ---------------------------- task decorators ----------------------------
 
+    def thread(self, fn: Callable[..., None]) -> Callable[..., None]:
+        """Long-running thread: fn(ctx, stop) loops until stop.is_set().
+
+        The thread is started after startup hooks and joined (timeout=5s)
+        before shutdown hooks run. Any unhandled exception is logged and
+        triggers global shutdown. Signature::
+
+            @app.thread
+            def my_thread(ctx: AciesContext, stop: threading.Event) -> None:
+                while not stop.is_set():
+                    ...
+        """
+
+        def _run(ctx: AciesContext, stop: threading.Event) -> None:
+            try:
+                fn(ctx, stop)
+            except Exception:
+                logger.exception('managed thread %r crashed; triggering shutdown', fn.__name__)
+                self.stop()
+
+        self._tasks.append(ThreadSpec(name=fn.__name__, fn=_run))
+        return fn
+
     def subscribe(self, *topics: TopicArg) -> Callable[..., Callable[..., None]]:
         """Message-driven: handler is called for each message on any of the topics.
 
@@ -221,6 +248,8 @@ class AciesApp:
                 result = spec.fn(ctx, msg)
                 if job.reply_fn is not None:
                     job.reply_fn(msgspec.msgpack.encode(result))
+            case ThreadSpec():
+                raise AssertionError(f'ThreadSpec {job.spec.name!r} must never be dispatched')
 
     # ------------------------------- Run & Stop -------------------------------
 
@@ -315,7 +344,7 @@ class AciesApp:
                         self._router.subscribe(self._resolve_topic(topic), task)
                 case ServiceSpec():
                     self._router.advertise(self._resolve_topic(task.topic), task)
-                case ScheduleSpec():
+                case ScheduleSpec() | ThreadSpec():
                     pass  # handled by timer thread
 
         periodic_tasks = [t for t in self._tasks if isinstance(t, ScheduleSpec)]
@@ -341,11 +370,22 @@ class AciesApp:
             self._app_state.config['sys']['state'] = 'active'
 
         startup_ok = False
+        managed_threads: list[threading.Thread] = []
         with temporary_signal_handlers(self.stop):
             try:
                 for hook in self._startup_hooks:
                     hook(hook_ctx)
                 startup_ok = True
+
+                for spec in (t for t in self._tasks if isinstance(t, ThreadSpec)):
+                    t = threading.Thread(
+                        target=spec.fn,
+                        args=(self._task_ctxs[spec], self._stop_event),
+                        name=spec.name,
+                        daemon=True,
+                    )
+                    t.start()
+                    managed_threads.append(t)
 
                 # Block until stop() is called (via signal, or directly by app code).
                 # SIGINT/SIGTERM are handled by temporary_signal_handlers above,
@@ -355,6 +395,11 @@ class AciesApp:
             finally:
                 self._router.stop()
                 self._executor.stop()
+                deadline = time.monotonic() + 5.0
+                for t in managed_threads:
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        t.join(timeout=remaining)
                 if startup_ok:
                     for hook in self._shutdown_hooks:
                         hook(hook_ctx)

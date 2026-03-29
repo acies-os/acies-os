@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import queue
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Protocol, cast
@@ -43,14 +44,16 @@ SAMPLE_DTYPE = 'int16'
 BLOCK_SIZE = 1024
 
 
-_sample_queue: queue.Queue[tuple[int, npt.NDArray[np.int16]]] = queue.Queue()
+# queue of (capture timestamp, audio chunk) tuples from the audio callback to the publisher thread
+SAMPLE_QUEUE: queue.Queue[tuple[int, npt.NDArray[np.int16]]] = queue.Queue()
 
-_pa0: float | None = None
-_wall0_ns: int | None = None
+# PA0 and WALL0_NS are initialized at the first callback to calibrate the PortAudio clock to the wall clock.
+pa_epoch: float | None = None
+wall_epoch_ns: int | None = None
 
 
 def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object, status: sd.CallbackFlags) -> None:
-    global _pa0, _wall0_ns
+    global pa_epoch, wall_epoch_ns
 
     if status:
         logger.warning('sounddevice status: %s', status)
@@ -62,22 +65,22 @@ def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object,
     t = cast(PaTimeInfo, cb_time)
     pa_now = t.inputBufferAdcTime
 
-    if _pa0 is None:
+    if pa_epoch is None:
         # Calibrate PA clock to wall clock at first callback.
         # pa_now is the ADC capture time of this block's first sample;
         # time.time_ns() at this moment is the wall clock equivalent of
         # pa_now + one block duration (callback fires after capture completes).
         # We store the offset so all subsequent timestamps use the same anchor.
-        _wall0_ns, _pa0 = time.time_ns() - block_ns, pa_now
+        wall_epoch_ns, pa_epoch = time.time_ns() - block_ns, pa_now
 
-    assert _wall0_ns is not None and _pa0 is not None
-    capture_ts_ns = _wall0_ns + int((pa_now - _pa0) * 1_000_000_000)
+    assert wall_epoch_ns is not None and pa_epoch is not None
+    capture_ts_ns = wall_epoch_ns + int((pa_now - pa_epoch) * 1_000_000_000)
 
     # indata shape: (frames, n_channels); mix down to mono
     mono = indata[:, 0].copy()  # first channel only
     # mono = np.rint(indata.astype(np.float32).mean(axis=1)).clip(-32768, 32767).astype(np.int16)
 
-    _sample_queue.put((capture_ts_ns, mono))
+    SAMPLE_QUEUE.put((capture_ts_ns, mono))
 
 
 @dataclass
@@ -168,15 +171,14 @@ def teardown(ctx: AciesContext) -> None:
     logger.info('database connection closed')
 
 
-@app.schedule(interval=0.05)
-def publish(ctx: AciesContext) -> None:
+@app.thread
+def publish(ctx: AciesContext, stop: threading.Event) -> None:
     state: MicState = ctx.app.data['state']
-
-    while True:
+    while not stop.is_set():
         try:
-            ts_ns, chunk = _sample_queue.get_nowait()
+            ts_ns, chunk = SAMPLE_QUEUE.get(timeout=1.0)
         except queue.Empty:
-            break
+            continue
 
         if state.buf_frames == 0:
             state.buf_start_ts_ns = ts_ns
@@ -198,7 +200,7 @@ def publish(ctx: AciesContext) -> None:
 
         topic = state.topic
 
-        # pubilsh to topic
+        # publish to topic
         ctx.publish(
             topic,
             AciesTimeSeries(
