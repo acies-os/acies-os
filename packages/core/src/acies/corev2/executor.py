@@ -16,13 +16,17 @@ handling SERVICE replies without the handler knowing about query mechanics.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, TypeAlias
 
 from ._concurrency import SENTINEL, Sentinel
 from .task import Job
+
+logger = logging.getLogger(__name__)
 
 # Injected by AciesApp; responsible for decoding, calling the handler,
 # and sending the reply for ServiceSpec jobs.
@@ -98,8 +102,15 @@ class Executor:
             if item is SENTINEL:
                 break
             assert isinstance(item, Job), f'Expected Job, got {type(item)}'
+            wait_ms = (time.monotonic() - item.created_at) * 1000
+            if wait_ms > 200:
+                logger.warning('job %r waited %.0f ms in queue', item.spec.name, wait_ms)
             _ = self._pool.submit(self._run_job, item)
 
     def _run_job(self, job: Job) -> None:
         assert self._dispatch is not None, '_run_job called before dispatch was initialized'
+        t0 = time.monotonic()
         self._dispatch(job)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        if elapsed_ms > 500:
+            logger.warning('job %r took %.0f ms', job.spec.name, elapsed_ms)
