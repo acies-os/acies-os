@@ -212,12 +212,21 @@ def publish(ctx: AciesContext) -> None:
         )
 
         # log latency
-        latency_ms = (time.time_ns() - window_ts_ns) / 1_000_000
-        # expected: ~1000ms capture + 500ms publish interval = ~1500ms
-        if latency_ms > 2000:
-            logger.warning('window latency %.0f ms (expected <1500 ms)', latency_ms)
+        publish_ns = time.time_ns()
+        capture_to_publish_ms = (publish_ns - window_ts_ns) / 1_000_000
+        ready_to_publish_ms = (publish_ns - window_ts_ns - 1_000_000_000) / 1_000_000
+        if ready_to_publish_ms > 1000:
+            logger.warning(
+                'window latency: capture_to_publish=%.0f ms ready_to_publish=%.0f ms',
+                capture_to_publish_ms,
+                ready_to_publish_ms,
+            )
         else:
-            logger.debug('window latency %.0f ms', latency_ms)
+            logger.debug(
+                'window latency: capture_to_publish=%.0f ms ready_to_publish=%.0f ms',
+                capture_to_publish_ms,
+                ready_to_publish_ms,
+            )
 
         # save to db
         samples = samples_1s.tolist()
