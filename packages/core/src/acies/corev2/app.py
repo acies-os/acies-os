@@ -47,6 +47,24 @@ def _get_msg_encoding_metadata(t: type) -> dict[str, str | bool] | None:
     return None
 
 
+def _has_var_keyword(fn: Callable[..., Any]) -> bool:
+    """Return True if fn accepts **kwargs. If so, all keyword args are absorbed
+    and named parameter checks can be skipped."""
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in inspect.signature(fn).parameters.values())
+
+
+def _check_param(fn: Callable[..., Any], decorator: str, name: str, annotation: str | None = None) -> None:
+    """Raise TypeError if fn is missing a required named parameter.
+
+    Skipped if fn accepts **kwargs.
+    """
+    if _has_var_keyword(fn):
+        return
+    if name not in inspect.signature(fn).parameters:
+        param = f'{name}: {annotation}' if annotation else name
+        raise TypeError(f"{decorator} '{fn.__name__}': handler must have a '{param}' parameter")
+
+
 class AciesApp:
     def __init__(
         self,
@@ -133,10 +151,24 @@ class AciesApp:
     # ----------------------------- Lifecyle hooks -----------------------------
 
     def on_startup(self, fn: Callable[..., None]) -> Callable[..., None]:
+        """Called once after all subsystems are started, before managed threads::
+
+        @app.on_startup
+        def setup(ctx: AciesContext) -> None:
+            ...
+        """
+        _check_param(fn, 'on_startup', 'ctx', 'AciesContext')
         self._startup_hooks.append(fn)
         return fn
 
     def on_shutdown(self, fn: Callable[..., None]) -> Callable[..., None]:
+        """Called once after managed threads are joined, during shutdown::
+
+        @app.on_shutdown
+        def teardown(ctx: AciesContext) -> None:
+            ...
+        """
+        _check_param(fn, 'on_shutdown', 'ctx', 'AciesContext')
         self._shutdown_hooks.append(fn)
         return fn
 
@@ -147,7 +179,11 @@ class AciesApp:
 
         The thread is started after startup hooks and joined (timeout=5s)
         before shutdown hooks run. Any unhandled exception is logged and
-        triggers global shutdown. Signature::
+        triggers global shutdown.
+
+        The function MUST check stop.is_set() and return promptly when set.
+        A thread that ignores stop will be abandoned after the join timeout
+        and will not block process exit (threads are daemon). Signature::
 
             @app.thread
             def my_thread(ctx: AciesContext, stop: threading.Event) -> None:
@@ -155,9 +191,12 @@ class AciesApp:
                     ...
         """
 
+        _check_param(fn, 'thread', 'ctx', 'AciesContext')
+        _check_param(fn, 'thread', 'stop', 'threading.Event')
+
         def _run(ctx: AciesContext, stop: threading.Event) -> None:
             try:
-                fn(ctx, stop)
+                fn(ctx=ctx, stop=stop)
             except Exception:
                 logger.exception('managed thread %r crashed; triggering shutdown', fn.__name__)
                 self.stop()
@@ -176,8 +215,8 @@ class AciesApp:
         """
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            if 'msg' not in inspect.signature(fn).parameters:
-                raise TypeError(f"subscriber '{fn.__name__}': handler must have a 'msg' parameter")
+            _check_param(fn, 'subscriber', 'ctx', 'AciesContext')
+            _check_param(fn, 'subscriber', 'msg')
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
             self._tasks.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
@@ -186,9 +225,15 @@ class AciesApp:
         return decorator
 
     def schedule(self, interval: float) -> Callable[..., Callable[..., None]]:
-        """Timer-driven: handler is called every `interval` seconds."""
+        """Timer-driven: handler is called every `interval` seconds::
+
+        @app.schedule(interval=1.0)
+        def on_tick(ctx: AciesContext) -> None:
+            ...
+        """
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
+            _check_param(fn, 'schedule', 'ctx', 'AciesContext')
             self._tasks.append(ScheduleSpec(name=fn.__name__, fn=fn, interval=interval))
             return fn
 
@@ -207,12 +252,12 @@ class AciesApp:
         """
 
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
-            if 'msg' not in inspect.signature(fn).parameters:
-                raise TypeError(f"service '{fn.__name__}': handler must have a 'msg' parameter")
+            _check_param(fn, 'service', 'ctx', 'AciesContext')
+            _check_param(fn, 'service', 'msg')
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
             return_type = hints.get('return')
-            if msg_type is None or msg_type is msgspec.Struct:
+            if not _has_var_keyword(fn) and (msg_type is None or msg_type is msgspec.Struct):
                 raise TypeError(
                     f"service '{fn.__name__}': 'msg' parameter must have a specific type annotation "
                     f'(not bare msgspec.Struct)'
@@ -237,7 +282,7 @@ class AciesApp:
         ctx = self._task_ctxs[job.spec]
         match job.spec:
             case ScheduleSpec():
-                job.spec.fn(ctx)
+                job.spec.fn(ctx=ctx)
             case SubscriberSpec() | ServiceSpec() as spec:
                 assert job.raw is not None, 'SubscriberSpec/ServiceSpec job must have raw bytes'
                 msg = (  # pyright: ignore[reportUnknownVariableType]
@@ -245,7 +290,7 @@ class AciesApp:
                     if spec.msg_type is not None
                     else msgspec.msgpack.decode(job.raw)
                 )
-                result = spec.fn(ctx, msg)
+                result = spec.fn(ctx=ctx, msg=msg)
                 if job.reply_fn is not None:
                     job.reply_fn(msgspec.msgpack.encode(result))
             case ThreadSpec():
@@ -286,6 +331,25 @@ class AciesApp:
 
         Must be called from the main thread. Blocking until shutdown is the
         intended usage — call this as the last statement in main().
+
+        Startup order:
+          1. Executor and Router started
+          2. Tasks registered with Router (subscribe/advertise)
+          3. Timer thread started (ScheduleSpec)
+          4. Startup hooks called
+          5. Managed threads (ThreadSpec) started — after hooks so ctx.app.data
+             is fully populated before any thread accesses it
+          6. Main thread blocks on _stop_event
+
+        Shutdown order (triggered by stop()):
+          1. _stop_event set -> main thread unblocks
+          2. Router stopped — no new inbound jobs enqueued
+          3. Executor stopped — drains queue, then pool shuts down; no handler
+             can publish after this point
+          4. Managed threads joined (5s shared deadline) — threads exit because
+             _stop_event is already set; joined before shutdown hooks so hooks
+             can safely close resources the threads were using
+          5. Shutdown hooks called
         """
 
         self._ns = Namespace(self._app_state.config['sys']['host'], self._app_state.config['sys']['name'])
@@ -374,7 +438,7 @@ class AciesApp:
         with temporary_signal_handlers(self.stop):
             try:
                 for hook in self._startup_hooks:
-                    hook(hook_ctx)
+                    hook(ctx=hook_ctx)
                 startup_ok = True
 
                 for spec in (t for t in self._tasks if isinstance(t, ThreadSpec)):
@@ -382,7 +446,7 @@ class AciesApp:
                         target=spec.fn,
                         args=(self._task_ctxs[spec], self._stop_event),
                         name=spec.name,
-                        daemon=True,
+                        daemon=True,  # process exit is not blocked if thread outlives join timeout
                     )
                     t.start()
                     managed_threads.append(t)
@@ -402,7 +466,7 @@ class AciesApp:
                         t.join(timeout=remaining)
                 if startup_ok:
                     for hook in self._shutdown_hooks:
-                        hook(hook_ctx)
+                        hook(ctx=hook_ctx)
 
     def stop(self) -> None:
         """Signal run() to begin shutdown. Safe to call from any thread."""
