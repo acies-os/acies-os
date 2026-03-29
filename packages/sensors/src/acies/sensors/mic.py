@@ -35,14 +35,25 @@ SAMPLE_DTYPE = 'int16'
 
 
 _sample_queue: queue.Queue[tuple[int, npt.NDArray[np.int16]]] = queue.Queue()
+_base_wall_ns: int | None = None
+_frames_seen: int = 0
+_sample_rate: int = 0
 
 
-def _audio_callback(indata: npt.NDArray[np.int16], _frames: int, _time: object, status: sd.CallbackFlags) -> None:
+def _audio_callback(indata: npt.NDArray[np.int16], frames: int, _time: object, status: sd.CallbackFlags) -> None:
+    global _base_wall_ns, _frames_seen
+
     if status:
         logger.warning('sounddevice status: %s', status)
+
+    if _base_wall_ns is None:
+        _base_wall_ns = time.time_ns()
+
+    capture_ts_ns = _base_wall_ns + int(_frames_seen * 1_000_000_000 / _sample_rate)
+    _frames_seen += frames
+
     # indata shape: (frames, 1) since channels=1; take channel 0 as a copy
-    # time.time_ns() here is close to actual capture time (callback fires after block completes)
-    _sample_queue.put((time.time_ns(), indata[:, 0].copy()))
+    _sample_queue.put((capture_ts_ns, indata[:, 0].copy()))
 
 
 @dataclass
@@ -74,6 +85,8 @@ def setup(ctx: AciesContext) -> None:
         logger.error('use --device <index or name> to select a device')
         raise SystemExit(1)
     sample_rate = int(dev_info['default_samplerate'])
+    global _sample_rate
+    _sample_rate = sample_rate
 
     stream = sd.InputStream(
         device=device_key,
@@ -117,7 +130,7 @@ def teardown(ctx: AciesContext) -> None:
     logger.info('database connection closed')
 
 
-@app.schedule(interval=0.1)
+@app.schedule(interval=0.5)
 def publish(ctx: AciesContext) -> None:
     state: MicState = ctx.app.data['state']
 
