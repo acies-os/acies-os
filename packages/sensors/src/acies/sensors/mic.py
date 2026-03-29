@@ -55,8 +55,8 @@ def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object,
     if status:
         logger.warning('sounddevice status: %s', status)
 
-    if frames != _sample_rate:
-        logger.warning('unexpected frame count: got %d, expected %d', frames, _sample_rate)
+    if frames != BLOCK_SIZE:
+        logger.warning('unexpected frame count: got %d, expected %d', frames, BLOCK_SIZE)
 
     block_ns = int(frames * 1_000_000_000 / _sample_rate)
     t = cast(PaTimeInfo, cb_time)
