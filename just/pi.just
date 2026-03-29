@@ -25,3 +25,7 @@ pi-shell dev="false":
         --device /dev/snd:/dev/snd \
         --device /dev/bus/usb:/dev/bus/usb \
         acies-pi:latest bash
+
+# Record 40 seconds of audio from the USB microphone array and save it to /data/alsa-test.wav
+record output="/data/alsa-test.wav":
+    arecord -D hw:ArrayUAC10,0 -f S16_LE -r 16000 -c 6 -d 40 {{ output }}
