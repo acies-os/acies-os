@@ -173,18 +173,7 @@ def publish(ctx: AciesContext) -> None:
         samples = chunk.tolist()
         topic = state.topic
 
-        ctx.publish(
-            topic,
-            AciesTimeSeries(
-                source=ctx.ns.base,
-                timestamp=ts_ns,
-                payload=[np.array(samples, dtype=SAMPLE_DTYPE).tobytes()],
-                channels=['mono'],
-                sampling_rate=state.sample_rate,
-                dtype=SAMPLE_DTYPE,
-            ),
-        )
-
+        # DB write first: decoupled from publish delays
         metadata = {'channel': 'mono', 'sampling_rate': state.sample_rate}
         state.db_buf.append(
             (
@@ -200,6 +189,18 @@ def publish(ctx: AciesContext) -> None:
             n_rows = flush(state.con, state.db_buf)
             logger.debug('flushed %d rows to database', n_rows)
             state.db_buf.clear()
+
+        ctx.publish(
+            topic,
+            AciesTimeSeries(
+                source=ctx.ns.base,
+                timestamp=ts_ns,
+                payload=[np.array(samples, dtype=SAMPLE_DTYPE).tobytes()],
+                channels=['mono'],
+                sampling_rate=state.sample_rate,
+                dtype=SAMPLE_DTYPE,
+            ),
+        )
 
 
 @app.cli()
