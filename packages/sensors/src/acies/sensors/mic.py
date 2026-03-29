@@ -125,7 +125,13 @@ def setup(ctx: AciesContext) -> None:
         callback=_audio_callback,
     )
     stream.start()
-    logger.info('mic stream started on device %r at %d Hz, %d channels mixed to mono', device, sample_rate, n_channels)
+    logger.info(
+        'mic stream started on device %r: %d Hz, block size %d, %d input channels mixed to mono',
+        device,
+        sample_rate,
+        BLOCK_SIZE,
+        n_channels,
+    )
 
     try:
         con = open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT)
@@ -166,19 +172,11 @@ def teardown(ctx: AciesContext) -> None:
 def publish(ctx: AciesContext) -> None:
     state: MicState = ctx.app.data['state']
 
-    block_ns = int(BLOCK_SIZE * 1_000_000_000 / state.sample_rate)
-
     while True:
         try:
             ts_ns, chunk = _sample_queue.get_nowait()
         except queue.Empty:
             break
-
-        # queue_age_ms: time since this block was fully captured.
-        # Normal: <500ms (one publish interval). >1s suggests backpressure.
-        queue_age_ms = (time.time_ns() - ts_ns) / 1_000_000 - block_ns / 1_000_000
-        if queue_age_ms > 1000:
-            logger.warning('block queued %.0f ms after capture (backpressure?)', queue_age_ms)
 
         if state.buf_frames == 0:
             state.buf_start_ts_ns = ts_ns
@@ -198,10 +196,31 @@ def publish(ctx: AciesContext) -> None:
         if state.buf_frames:
             state.buf_start_ts_ns = window_ts_ns + 1_000_000_000
 
-        samples = samples_1s.tolist()
         topic = state.topic
 
-        # DB write first: decoupled from publish delays
+        # pubilsh to topic
+        ctx.publish(
+            topic,
+            AciesTimeSeries(
+                source=ctx.ns.base,
+                timestamp=window_ts_ns,
+                payload=[samples_1s.tobytes()],
+                channels=['mono'],
+                sampling_rate=state.sample_rate,
+                dtype=SAMPLE_DTYPE,
+            ),
+        )
+
+        # log latency
+        latency_ms = (time.time_ns() - window_ts_ns) / 1_000_000
+        # expected: ~1000ms capture + 500ms publish interval = ~1500ms
+        if latency_ms > 2000:
+            logger.warning('window latency %.0f ms (expected <1500 ms)', latency_ms)
+        else:
+            logger.debug('window latency %.0f ms', latency_ms)
+
+        # save to db
+        samples = samples_1s.tolist()
         metadata = {'channel': 'mono', 'sampling_rate': state.sample_rate}
         state.db_buf.append(
             (
@@ -217,18 +236,6 @@ def publish(ctx: AciesContext) -> None:
             n_rows = flush(state.con, state.db_buf)
             logger.debug('flushed %d rows to database', n_rows)
             state.db_buf.clear()
-
-        ctx.publish(
-            topic,
-            AciesTimeSeries(
-                source=ctx.ns.base,
-                timestamp=window_ts_ns,
-                payload=[samples_1s.tobytes()],
-                channels=['mono'],
-                sampling_rate=state.sample_rate,
-                dtype=SAMPLE_DTYPE,
-            ),
-        )
 
 
 @app.cli()
