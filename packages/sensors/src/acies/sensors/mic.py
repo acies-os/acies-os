@@ -52,8 +52,8 @@ def _audio_callback(indata: npt.NDArray[np.int16], frames: int, _time: object, s
     capture_ts_ns = _base_wall_ns + int(_frames_seen * 1_000_000_000 / _sample_rate)
     _frames_seen += frames
 
-    # indata shape: (frames, 1) since channels=1; take channel 0 as a copy
-    _sample_queue.put((capture_ts_ns, indata[:, 0].copy()))
+    # indata shape: (frames, n_channels); mix down to mono
+    _sample_queue.put((capture_ts_ns, indata.mean(axis=1).astype(np.int16)))
 
 
 @dataclass
@@ -85,19 +85,20 @@ def setup(ctx: AciesContext) -> None:
         logger.error('use --device <index or name> to select a device')
         raise SystemExit(1)
     sample_rate = int(dev_info['default_samplerate'])
+    n_channels = int(dev_info['max_input_channels'])
     global _sample_rate
     _sample_rate = sample_rate
 
     stream = sd.InputStream(
         device=device_key,
-        channels=1,
+        channels=n_channels,
         dtype=SAMPLE_DTYPE,
         samplerate=sample_rate,
         blocksize=sample_rate,  # 1 second per callback
         callback=_audio_callback,
     )
     stream.start()
-    logger.info('mic stream started on device %r at %d Hz', device, sample_rate)
+    logger.info('mic stream started on device %r at %d Hz, %d channels mixed to mono', device, sample_rate, n_channels)
 
     try:
         con = open_db(output, check_same_thread=False, wal_autocheckpoint=DB_WAL_CHECKPOINT)
@@ -149,13 +150,13 @@ def publish(ctx: AciesContext) -> None:
                 source=ctx.ns.base,
                 timestamp=ts_ns,
                 payload=[np.array(samples, dtype=SAMPLE_DTYPE).tobytes()],
-                channels=[0],
+                channels=['mono'],
                 sampling_rate=state.sample_rate,
                 dtype=SAMPLE_DTYPE,
             ),
         )
 
-        metadata = {'channel': 0, 'sampling_rate': state.sample_rate}
+        metadata = {'channel': 'mono', 'sampling_rate': state.sample_rate}
         state.db_buf.append(
             (
                 topic,
