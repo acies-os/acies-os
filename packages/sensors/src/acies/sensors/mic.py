@@ -49,6 +49,7 @@ def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object,
     wall_ns = time.time_ns()
 
     if _base_wall_ns is None:
+        logger.info('audio callback started at wall clock %d ns', wall_ns)
         _base_wall_ns = wall_ns
 
     capture_ts_ns = _base_wall_ns + int(_frames_seen * 1_000_000_000 / _sample_rate)
@@ -64,6 +65,8 @@ def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object,
             drift_ms,
             frames,
         )
+    if frames != _sample_rate:
+        logger.warning('unexpected frame count: got %d, expected %d', frames, _sample_rate)
 
     # indata shape: (frames, n_channels); mix down to mono
     _sample_queue.put((capture_ts_ns, indata.mean(axis=1).astype(np.int16)))
