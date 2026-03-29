@@ -40,6 +40,7 @@ class PaTimeInfo(Protocol):
 DB_BATCH = 60  # rows to accumulate before flushing (~60s of data, ~2MB in RAM)
 DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces I/O spikes on Pi
 SAMPLE_DTYPE = 'int16'
+BLOCK_SIZE = 1024
 
 
 _sample_queue: queue.Queue[tuple[int, npt.NDArray[np.int16]]] = queue.Queue()
@@ -117,7 +118,7 @@ def setup(ctx: AciesContext) -> None:
         channels=n_channels,
         dtype=SAMPLE_DTYPE,
         samplerate=sample_rate,
-        blocksize=sample_rate,  # 1 second per callback
+        blocksize=BLOCK_SIZE,  # 1 second per callback
         callback=_audio_callback,
     )
     stream.start()
