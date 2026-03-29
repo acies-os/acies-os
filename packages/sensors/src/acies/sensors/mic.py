@@ -73,7 +73,8 @@ def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object,
     capture_ts_ns = _wall0_ns + int((pa_now - _pa0) * 1_000_000_000)
 
     # indata shape: (frames, n_channels); mix down to mono
-    mono = np.rint(indata.astype(np.float32).mean(axis=1)).clip(-32768, 32767).astype(np.int16)
+    mono = indata[:, 0].copy()  # first channel only
+    # mono = np.rint(indata.astype(np.float32).mean(axis=1)).clip(-32768, 32767).astype(np.int16)
 
     _sample_queue.put((capture_ts_ns, mono))
 
@@ -163,11 +164,11 @@ def publish(ctx: AciesContext) -> None:
         except queue.Empty:
             break
 
-        # Expected: block_ns (capture) + up to publish_interval (0.5s) after ts_ns.
-        # More than 2s suggests callback or scheduler backpressure.
-        age_ms = (time.time_ns() - ts_ns) / 1_000_000
-        if age_ms > 1000:
-            logger.warning('block aged %.0f ms before publish (backpressure?)', age_ms)
+        # queue_age_ms: time since block was fully captured (ts_ns + 1s).
+        # Normal: <500ms (one publish interval). >1s suggests backpressure.
+        queue_age_ms = (time.time_ns() - ts_ns) / 1_000_000 - 1000
+        if queue_age_ms > 1000:
+            logger.warning('block queued %.0f ms after capture (backpressure?)', queue_age_ms)
 
         samples = chunk.tolist()
         topic = state.topic
