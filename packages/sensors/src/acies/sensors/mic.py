@@ -87,6 +87,9 @@ class MicState:
     sample_rate: int
     topic: str
     db_buf: list[DbRow] = field(default_factory=list)
+    sample_buf: list[npt.NDArray[np.int16]] = field(default_factory=list)
+    buf_frames: int = 0
+    buf_start_ts_ns: int = 0
 
 
 app = AciesApp()
@@ -118,7 +121,7 @@ def setup(ctx: AciesContext) -> None:
         channels=n_channels,
         dtype=SAMPLE_DTYPE,
         samplerate=sample_rate,
-        blocksize=BLOCK_SIZE,  # 1 second per callback
+        blocksize=BLOCK_SIZE,
         callback=_audio_callback,
     )
     stream.start()
@@ -147,6 +150,10 @@ def teardown(ctx: AciesContext) -> None:
     state.stream.stop()
     state.stream.close()
     logger.info('mic stream stopped')
+    if state.sample_buf:
+        logger.debug('discarding %d partial frames at shutdown', state.buf_frames)
+        state.sample_buf.clear()
+        state.buf_frames = 0
     if state.db_buf:
         n_rows = flush(state.con, state.db_buf)
         logger.debug('flushed %d remaining rows to database', n_rows)
@@ -159,19 +166,39 @@ def teardown(ctx: AciesContext) -> None:
 def publish(ctx: AciesContext) -> None:
     state: MicState = ctx.app.data['state']
 
+    block_ns = int(BLOCK_SIZE * 1_000_000_000 / state.sample_rate)
+
     while True:
         try:
             ts_ns, chunk = _sample_queue.get_nowait()
         except queue.Empty:
             break
 
-        # queue_age_ms: time since block was fully captured (ts_ns + 1s).
+        # queue_age_ms: time since this block was fully captured.
         # Normal: <500ms (one publish interval). >1s suggests backpressure.
-        queue_age_ms = (time.time_ns() - ts_ns) / 1_000_000 - 1000
+        queue_age_ms = (time.time_ns() - ts_ns) / 1_000_000 - block_ns / 1_000_000
         if queue_age_ms > 1000:
             logger.warning('block queued %.0f ms after capture (backpressure?)', queue_age_ms)
 
-        samples = chunk.tolist()
+        if state.buf_frames == 0:
+            state.buf_start_ts_ns = ts_ns
+        state.sample_buf.append(chunk)
+        state.buf_frames += len(chunk)
+
+        if state.buf_frames < state.sample_rate:
+            continue
+
+        # --- assemble 1-second window ---
+        window = np.concatenate(state.sample_buf)
+        window_ts_ns = state.buf_start_ts_ns
+        samples_1s = window[: state.sample_rate]
+        leftover = window[state.sample_rate :]
+        state.sample_buf = [leftover] if len(leftover) else []
+        state.buf_frames = len(leftover)
+        if state.buf_frames:
+            state.buf_start_ts_ns = window_ts_ns + 1_000_000_000
+
+        samples = samples_1s.tolist()
         topic = state.topic
 
         # DB write first: decoupled from publish delays
@@ -180,7 +207,7 @@ def publish(ctx: AciesContext) -> None:
             (
                 topic,
                 SAMPLE_DTYPE,
-                ts_ns,
+                window_ts_ns,
                 ctx.ns.base,
                 msgspec.json.encode(samples),
                 msgspec.json.encode(metadata),
@@ -195,8 +222,8 @@ def publish(ctx: AciesContext) -> None:
             topic,
             AciesTimeSeries(
                 source=ctx.ns.base,
-                timestamp=ts_ns,
-                payload=[np.array(samples, dtype=SAMPLE_DTYPE).tobytes()],
+                timestamp=window_ts_ns,
+                payload=[samples_1s.tobytes()],
                 channels=['mono'],
                 sampling_rate=state.sample_rate,
                 dtype=SAMPLE_DTYPE,
