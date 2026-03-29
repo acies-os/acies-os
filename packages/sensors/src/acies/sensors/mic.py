@@ -40,17 +40,30 @@ _frames_seen: int = 0
 _sample_rate: int = 0
 
 
-def _audio_callback(indata: npt.NDArray[np.int16], frames: int, _time: object, status: sd.CallbackFlags) -> None:
+def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object, status: sd.CallbackFlags) -> None:
     global _base_wall_ns, _frames_seen
 
     if status:
         logger.warning('sounddevice status: %s', status)
 
+    wall_ns = time.time_ns()
+
     if _base_wall_ns is None:
-        _base_wall_ns = time.time_ns()
+        _base_wall_ns = wall_ns
 
     capture_ts_ns = _base_wall_ns + int(_frames_seen * 1_000_000_000 / _sample_rate)
     _frames_seen += frames
+
+    # diagnostic: log divergence between wall clock and frame-count timestamp
+    drift_ms = (wall_ns - capture_ts_ns) / 1_000_000
+    if abs(drift_ms) > 50:
+        logger.warning(
+            'callback drift: wall=%.0f frame=%.0f diff=%.1f ms frames=%d',
+            wall_ns / 1e6,
+            capture_ts_ns / 1e6,
+            drift_ms,
+            frames,
+        )
 
     # indata shape: (frames, n_channels); mix down to mono
     _sample_queue.put((capture_ts_ns, indata.mean(axis=1).astype(np.int16)))
