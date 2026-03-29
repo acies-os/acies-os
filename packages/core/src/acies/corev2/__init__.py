@@ -1,8 +1,8 @@
 import logging
 
 from .app import AciesApp
-from .log import setup_logging
 from .context import AciesContext, AppState, TaskState
+from .log import setup_logging
 from .msg import (
     AciesDel,
     AciesGet,
@@ -21,7 +21,7 @@ from .msg import (
     TopicRename,
 )
 from .namespace import CtlTopic, Topic
-from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
+from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, ThreadSpec
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
@@ -37,7 +37,6 @@ __all__ = [
     'AciesRouteRequest',
     'AciesRouteResponse',
     'AciesSet',
-    'AciesTensor',
     'AciesTimeSeries',
     'AppState',
     'Err',
@@ -50,6 +49,7 @@ __all__ = [
     'ServiceSpec',
     'SubscriberSpec',
     'TaskState',
+    'ThreadSpec',
     'Topic',
     'TopicRename',
     'CtlTopic',

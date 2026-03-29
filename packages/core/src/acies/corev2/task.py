@@ -1,6 +1,6 @@
-"""SubscriberSpec, ScheduleSpec, ServiceSpec, Job — core data structures.
+"""SubscriberSpec, ScheduleSpec, ServiceSpec, ThreadSpec, Job — core data structures.
 
-Three distinct frozen dataclasses, one per trigger kind. Their union is the
+Four distinct frozen dataclasses, one per trigger kind. Their union is the
 TaskSpec type alias. The sum type pattern makes invalid states unrepresentable:
 a ScheduleSpec cannot have topics; a SubscriberSpec cannot have an interval.
 No TaskKind enum is needed — the type itself is the discriminant.
@@ -8,6 +8,7 @@ No TaskKind enum is needed — the type itself is the discriminant.
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     ScheduleHandler: TypeAlias = Callable[[AciesContext], None]
     SubscriberHandler: TypeAlias = Callable[[AciesContext, Any], None]
     ServiceHandler: TypeAlias = Callable[[AciesContext, Any], Any]
+    ThreadHandler: TypeAlias = Callable[[AciesContext, threading.Event], None]
 
 
 @dataclass(frozen=True)
@@ -49,7 +51,14 @@ class ServiceSpec:
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
-TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec
+@dataclass(frozen=True)
+class ThreadSpec:
+    name: str
+    fn: ThreadHandler
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
+TaskSpec = SubscriberSpec | ScheduleSpec | ServiceSpec | ThreadSpec
 
 
 @dataclass
