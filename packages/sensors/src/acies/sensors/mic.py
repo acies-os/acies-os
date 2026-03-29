@@ -17,6 +17,7 @@ import queue
 import sqlite3
 import time
 from dataclasses import dataclass, field
+from typing import Protocol, cast
 
 import click
 import msgspec.json
@@ -29,47 +30,52 @@ from .db import DbRow, flush, open_db
 
 logger = logging.getLogger(__name__)
 
+
+class PaTimeInfo(Protocol):
+    inputBufferAdcTime: float
+    outputBufferDacTime: float
+    currentTime: float
+
+
 DB_BATCH = 60  # rows to accumulate before flushing (~60s of data, ~2MB in RAM)
 DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces I/O spikes on Pi
 SAMPLE_DTYPE = 'int16'
 
 
 _sample_queue: queue.Queue[tuple[int, npt.NDArray[np.int16]]] = queue.Queue()
-_base_wall_ns: int | None = None
-_frames_seen: int = 0
-_sample_rate: int = 0
+
+_pa0: float | None = None
+_wall0_ns: int | None = None
 
 
 def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object, status: sd.CallbackFlags) -> None:
-    global _base_wall_ns, _frames_seen
+    global _pa0, _wall0_ns
 
     if status:
         logger.warning('sounddevice status: %s', status)
 
-    wall_ns = time.time_ns()
-
-    if _base_wall_ns is None:
-        logger.info('audio callback started at wall clock %d ns', wall_ns)
-        _base_wall_ns = wall_ns
-
-    capture_ts_ns = _base_wall_ns + int(_frames_seen * 1_000_000_000 / _sample_rate)
-    _frames_seen += frames
-
-    # diagnostic: log divergence between wall clock and frame-count timestamp
-    drift_ms = (wall_ns - capture_ts_ns) / 1_000_000
-    if abs(drift_ms) > 50:
-        logger.warning(
-            'callback drift: wall=%.0f frame=%.0f diff=%.1f ms frames=%d',
-            wall_ns / 1e6,
-            capture_ts_ns / 1e6,
-            drift_ms,
-            frames,
-        )
     if frames != _sample_rate:
         logger.warning('unexpected frame count: got %d, expected %d', frames, _sample_rate)
 
+    block_ns = int(frames * 1_000_000_000 / _sample_rate)
+    t = cast(PaTimeInfo, cb_time)
+    pa_now = t.inputBufferAdcTime
+
+    if _pa0 is None:
+        # Calibrate PA clock to wall clock at first callback.
+        # pa_now is the ADC capture time of this block's first sample;
+        # time.time_ns() at this moment is the wall clock equivalent of
+        # pa_now + one block duration (callback fires after capture completes).
+        # We store the offset so all subsequent timestamps use the same anchor.
+        _wall0_ns, _pa0 = time.time_ns() - block_ns, pa_now
+
+    assert _wall0_ns is not None and _pa0 is not None
+    capture_ts_ns = _wall0_ns + int((pa_now - _pa0) * 1_000_000_000)
+
     # indata shape: (frames, n_channels); mix down to mono
-    _sample_queue.put((capture_ts_ns, indata.mean(axis=1).astype(np.int16)))
+    mono = np.rint(indata.astype(np.float32).mean(axis=1)).clip(-32768, 32767).astype(np.int16)
+
+    _sample_queue.put((capture_ts_ns, mono))
 
 
 @dataclass
@@ -156,6 +162,12 @@ def publish(ctx: AciesContext) -> None:
             ts_ns, chunk = _sample_queue.get_nowait()
         except queue.Empty:
             break
+
+        # Expected: block_ns (capture) + up to publish_interval (0.5s) after ts_ns.
+        # More than 2s suggests callback or scheduler backpressure.
+        age_ms = (time.time_ns() - ts_ns) / 1_000_000
+        if age_ms > 1000:
+            logger.warning('block aged %.0f ms before publish (backpressure?)', age_ms)
 
         samples = chunk.tolist()
         topic = state.topic
