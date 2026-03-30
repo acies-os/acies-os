@@ -40,4 +40,4 @@ metadata.allow-direct-references = true
 
 [tool.uv]
 sources.acies-core = { workspace = true }
-sources.rawshake = { git = "https://github.com/jinyangustc/rawshake.git", rev = "bac9ea73d620b7ee06b370672f6020f530b06097" }
+sources.rawshake = { git = "https://github.com/jinyangustc/rawshake.git", rev = "8636cde7293a16cb67c19b4281135bc0d5a645f6" }
