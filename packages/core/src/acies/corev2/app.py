@@ -343,13 +343,12 @@ class AciesApp:
 
         Shutdown order (triggered by stop()):
           1. _stop_event set -> main thread unblocks
-          2. Router stopped — no new inbound jobs enqueued
-          3. Executor stopped — drains queue, then pool shuts down; no handler
-             can publish after this point
-          4. Managed threads joined (5s shared deadline) — threads exit because
-             _stop_event is already set; joined before shutdown hooks so hooks
-             can safely close resources the threads were using
-          5. Shutdown hooks called
+          2. Managed threads joined (5s shared deadline) — threads exit because
+             _stop_event is already set; joined first so they can still publish
+             during wind-down (router is still up)
+          3. Router stopped — no new inbound jobs enqueued after this point
+          4. Executor stopped — drains queue, then pool shuts down
+          5. Shutdown hooks called — router already down; hooks must not publish
         """
 
         self._ns = Namespace(self._app_state.config['sys']['host'], self._app_state.config['sys']['name'])
@@ -457,13 +456,13 @@ class AciesApp:
                 _ = self._stop_event.wait()
 
             finally:
-                self._router.stop()
-                self._executor.stop()
                 deadline = time.monotonic() + 5.0
                 for t in managed_threads:
                     remaining = deadline - time.monotonic()
                     if remaining > 0:
                         t.join(timeout=remaining)
+                self._router.stop()
+                self._executor.stop()
                 if startup_ok:
                     for hook in self._shutdown_hooks:
                         hook(ctx=hook_ctx)
