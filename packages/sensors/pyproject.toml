@@ -23,6 +23,7 @@ dependencies = [
   "sounddevice>=0.5.5",
 ]
 scripts.acies-geo = "acies.sensors.geo:main"
+scripts.acies-idle = "acies.sensors.idle:main"
 scripts.acies-mic = "acies.sensors.mic:main"
 
 [dependency-groups]
