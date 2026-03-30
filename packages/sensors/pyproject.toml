@@ -30,7 +30,7 @@ dev = [
   "matplotlib>=3.10.8",
   "polars>=1.39.3",
   "scipy>=1.15.3",
-  "scipy-stubs>=1.15.3.0",
+  "scipy-stubs>=1.15.3",
 ]
 
 [tool.hatch]
@@ -39,4 +39,4 @@ metadata.allow-direct-references = true
 
 [tool.uv]
 sources.acies-core = { workspace = true }
-sources.rawshake = { git = "https://github.com/jinyangustc/rawshake.git", tag = "v0.1.4" }
+sources.rawshake = { git = "https://github.com/jinyangustc/rawshake.git", tag = "v0.1.5" }
