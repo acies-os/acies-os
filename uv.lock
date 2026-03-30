@@ -194,7 +194,7 @@ requires-dist = [
     { name = "acies-core", editable = "packages/core" },
     { name = "msgspec", specifier = ">=0.20" },
     { name = "numpy", specifier = ">=1.24" },
-    { name = "rawshake", git = "https://github.com/jinyangustc/rawshake.git?rev=bac9ea73d620b7ee06b370672f6020f530b06097" },
+    { name = "rawshake", git = "https://github.com/jinyangustc/rawshake.git?rev=3473da4e20a13c7712c955d521f78204e741cff6" },
     { name = "sounddevice", specifier = ">=0.5.5" },
 ]
 
@@ -1492,8 +1492,8 @@ wheels = [
 
 [[package]]
 name = "rawshake"
-version = "0.1.11"
-source = { git = "https://github.com/jinyangustc/rawshake.git?rev=bac9ea73d620b7ee06b370672f6020f530b06097#bac9ea73d620b7ee06b370672f6020f530b06097" }
+version = "0.1.12"
+source = { git = "https://github.com/jinyangustc/rawshake.git?rev=3473da4e20a13c7712c955d521f78204e741cff6#3473da4e20a13c7712c955d521f78204e741cff6" }
 dependencies = [
     { name = "pyserial", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform == 'darwin')" },
