@@ -13,6 +13,7 @@ Usage::
 
     acies-geo [--port /dev/serial0] [--baud 230400] [--output /data/host-geo.db]
               [--acies-host HOST] [--acies-name NAME]
+              [--condition] [--hp HZ] [--lp HZ] [--condition-seconds N]
 """
 
 from __future__ import annotations
@@ -26,8 +27,10 @@ from dataclasses import dataclass, field
 import click
 import msgspec.json
 import numpy as np
+import numpy.typing as npt
 from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries, setup_logging
 from rawshake.geophone import Channel, GeoReader, get_samples
+from rawshake.processing import RollingConditioner
 
 from .db import DbRow, flush, open_db
 
@@ -35,7 +38,8 @@ logger = logging.getLogger(__name__)
 
 GEO_CHANNELS: tuple[Channel, Channel] = ('SH3', 'EH3')  # RS1D: SH3, RS4D: EH3; order is preference
 SAMPLING_RATE = 200  # Hz, fixed for all RaspberryShake devices
-SAMPLE_DTYPE = 'int32'
+SAMPLE_DTYPE_RAW = 'int32'
+SAMPLE_DTYPE_CONDITIONED = 'float64'
 DB_BATCH = 60  # rows to accumulate before flushing (~60s of data)
 DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces I/O spikes on Pi
 
@@ -45,6 +49,7 @@ class ReaderState:
     reader: GeoReader
     con: sqlite3.Connection
     topic: str
+    conditioner: RollingConditioner | None = None
     db_buf: list[DbRow] = field(default_factory=list)
 
 
@@ -68,10 +73,24 @@ def setup(ctx: AciesContext) -> None:
         reader.stop()
         raise SystemExit(1)
 
+    conditioner: RollingConditioner | None = None
+    if ctx.app.config.get('condition'):
+        hp: float | None = ctx.app.config.get('hp')
+        lp: float | None = ctx.app.config.get('lp')
+        seconds: int = ctx.app.config.get('condition_seconds') or 5
+        conditioner = RollingConditioner(fs=SAMPLING_RATE, seconds=seconds, hp=hp, lp=lp)
+        logger.info(
+            'RollingConditioner enabled: hp=%s Hz, lp=%s Hz, buffer=%ds',
+            hp,
+            lp,
+            seconds,
+        )
+
     ctx.app.data['state'] = ReaderState(
         reader=reader,
         con=con,
         topic=ctx.app.config.get('topic') or ctx.ns.base,
+        conditioner=conditioner,
     )
 
 
@@ -104,7 +123,15 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             logger.warning('no geo channel in message; available: %s', list(channel_samples))
             continue
 
-        samples = channel_samples[channel]
+        if state.conditioner is not None:
+            # push all channels so every buffer stays current; select after
+            conditioned = state.conditioner.push(channel_samples)
+            samples_array: npt.NDArray[np.float64] = conditioned[channel]
+            dtype = SAMPLE_DTYPE_CONDITIONED
+        else:
+            samples_array = np.array(channel_samples[channel], dtype=SAMPLE_DTYPE_RAW)
+            dtype = SAMPLE_DTYPE_RAW
+
         topic = state.topic
 
         ctx.publish(
@@ -112,10 +139,10 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             AciesTimeSeries(
                 source=ctx.ns.base,
                 timestamp=ts_ns,
-                payload=[np.array(samples, dtype=SAMPLE_DTYPE).tobytes()],
+                payload=[samples_array.tobytes()],
                 channels=[channel],
                 sampling_rate=SAMPLING_RATE,
-                dtype=SAMPLE_DTYPE,
+                dtype=dtype,
             ),
         )
 
@@ -140,10 +167,10 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
         state.db_buf.append(
             (
                 topic,
-                SAMPLE_DTYPE,
+                dtype,
                 ts_ns,
                 ctx.ns.base,
-                msgspec.json.encode(samples),
+                msgspec.json.encode(samples_array.tolist()),
                 msgspec.json.encode(metadata),
             )
         )
@@ -162,8 +189,43 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
     help='SQLite database output path. Defaults to /data/<acies-host>-<acies-name>.db.',
 )
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
-def main(port: str, baud: int, output: str | None, topic: str | None) -> None:
-    app.state.config.update({'port': port, 'baud': baud, 'output': output, 'topic': topic})
+@click.option(
+    '--condition/--no-condition',
+    default=False,
+    show_default=True,
+    help='Apply RollingConditioner (DC removal, detrend, optional bandpass).',
+)
+@click.option('--hp', default=None, type=float, help='High-pass corner frequency in Hz.')
+@click.option('--lp', default=None, type=float, help='Low-pass corner frequency in Hz.')
+@click.option(
+    '--condition-seconds',
+    default=5,
+    type=int,
+    show_default=True,
+    help='Rolling buffer length in seconds for the conditioner.',
+)
+def main(
+    port: str,
+    baud: int,
+    output: str | None,
+    topic: str | None,
+    condition: bool,
+    hp: float | None,
+    lp: float | None,
+    condition_seconds: int,
+) -> None:
+    app.state.config.update(
+        {
+            'port': port,
+            'baud': baud,
+            'output': output,
+            'topic': topic,
+            'condition': condition,
+            'hp': hp,
+            'lp': lp,
+            'condition_seconds': condition_seconds,
+        }
+    )
     setup_logging(app.name)
     app.run()
 
