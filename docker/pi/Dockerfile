@@ -65,7 +65,9 @@ COPY packages/sensors/pyproject.toml packages/sensors/pyproject.toml
 COPY packages/core/src               packages/core/src
 COPY packages/sensors/src            packages/sensors/src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --package acies-sensors
+    uv sync --locked --no-dev \
+        --package acies-sensors \
+        --package acies-classifier
 
 # Reset the entrypoint, don't invoke `uv`
 ENTRYPOINT []
