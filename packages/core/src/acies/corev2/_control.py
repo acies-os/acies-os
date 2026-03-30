@@ -8,6 +8,7 @@ Provides:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from .context import AciesContext
@@ -36,11 +37,14 @@ if TYPE_CHECKING:
 
 _DEFAULT_HEARTBEAT_INTERVAL: float = 5.0
 
+logger = logging.getLogger(__name__)
+
 
 # --------------------------------- heartbeat ---------------------------------
 
 
 def _heartbeat(ctx: AciesContext) -> None:
+    logger.debug('publishing heartbeat')
     sys = ctx.app.config.get('sys', {})
     ctx.publish(
         ctx.ns.ctl.heartbeat,
