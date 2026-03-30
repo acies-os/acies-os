@@ -60,14 +60,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ----------------- source layer: rebuilds when source changes -----------------
 COPY pyproject.toml uv.lock ./
-COPY packages/core/pyproject.toml    packages/core/pyproject.toml
-COPY packages/sensors/pyproject.toml packages/sensors/pyproject.toml
-COPY packages/core/src               packages/core/src
-COPY packages/sensors/src            packages/sensors/src
+COPY packages/core/pyproject.toml        packages/core/pyproject.toml
+COPY packages/core/src                   packages/core/src
+COPY packages/sensors/pyproject.toml     packages/sensors/pyproject.toml
+COPY packages/sensors/src                packages/sensors/src
+COPY packages/classifiers/pyproject.toml packages/classifiers/pyproject.toml
+COPY packages/classifiers/src            packages/classifiers/src
+COPY packages/buffers/pyproject.toml     packages/buffers/pyproject.toml
+COPY packages/buffers/src                packages/buffers/src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev \
-        --package acies-sensors \
-        --package acies-classifier
+        --package acies-sensors 
 
 # Reset the entrypoint, don't invoke `uv`
 ENTRYPOINT []
