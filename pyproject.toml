@@ -52,6 +52,8 @@ environments = [
   "sys_platform == 'linux' and platform_machine == 'x86_64'",  # server (amd64)
 ]
 workspace.members = [
+  "packages/buffers",
+  "packages/classifiers",
   "packages/core",
   "packages/sensors",
 ]
