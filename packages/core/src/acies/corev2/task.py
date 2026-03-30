@@ -12,16 +12,27 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, TypeAlias
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 if TYPE_CHECKING:
     from .context import AciesContext
     from .namespace import TopicArg
 
-    ScheduleHandler: TypeAlias = Callable[[AciesContext], None]
-    SubscriberHandler: TypeAlias = Callable[[AciesContext, Any], None]
-    ServiceHandler: TypeAlias = Callable[[AciesContext, Any], Any]
-    ThreadHandler: TypeAlias = Callable[[AciesContext, threading.Event], None]
+
+class ScheduleHandler(Protocol):
+    def __call__(self, ctx: AciesContext) -> None: ...
+
+
+class SubscriberHandler(Protocol):
+    def __call__(self, ctx: AciesContext, msg: Any) -> None: ...
+
+
+class ServiceHandler(Protocol):
+    def __call__(self, ctx: AciesContext, msg: Any) -> Any: ...
+
+
+class ThreadHandler(Protocol):
+    def __call__(self, ctx: AciesContext, stop: threading.Event) -> None: ...
 
 
 @dataclass(frozen=True)
