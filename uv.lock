@@ -146,7 +146,7 @@ requires-dist = [
     { name = "acies-core", editable = "packages/core" },
     { name = "msgspec", specifier = ">=0.20" },
     { name = "numpy", specifier = ">=1.24" },
-    { name = "rawshake", git = "https://github.com/jinyangustc/rawshake.git?tag=v0.1.4" },
+    { name = "rawshake", git = "https://github.com/jinyangustc/rawshake.git?tag=v0.1.5" },
     { name = "sounddevice", specifier = ">=0.5.5" },
 ]
 
@@ -155,7 +155,7 @@ dev = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "polars", specifier = ">=1.39.3" },
     { name = "scipy", specifier = ">=1.15.3" },
-    { name = "scipy-stubs", specifier = ">=1.15.3.0" },
+    { name = "scipy-stubs", specifier = ">=1.15.3" },
 ]
 
 [[package]]
@@ -1257,8 +1257,8 @@ wheels = [
 
 [[package]]
 name = "rawshake"
-version = "0.1.4"
-source = { git = "https://github.com/jinyangustc/rawshake.git?tag=v0.1.4#431b3ba53d50300e34a75aae38350a9069077ed1" }
+version = "0.1.5"
+source = { git = "https://github.com/jinyangustc/rawshake.git?tag=v0.1.5#eed83cba9ad209a799ae025d11a0b4f5658aa20b" }
 dependencies = [
     { name = "pyserial", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
 ]
