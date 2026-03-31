@@ -60,7 +60,8 @@ def _check_param(fn: Callable[..., Any], decorator: str, name: str, annotation: 
     """
     if _has_var_keyword(fn):
         return
-    if name not in inspect.signature(fn).parameters:
+    params = inspect.signature(fn).parameters
+    if name not in params and f'_{name}' not in params:
         param = f'{name}: {annotation}' if annotation else name
         raise TypeError(f"{decorator} '{fn.__name__}': handler must have a '{param}' parameter")
 
