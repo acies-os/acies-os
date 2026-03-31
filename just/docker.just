@@ -33,11 +33,14 @@ builder-setup:
 
 # Cross-compile Pi image for linux/arm64 and push to registry.
 # Native on Apple Silicon (no QEMU needed -- same arch, different OS).
+# Forward the host SSH agent into this build step by "--ssh default" so uv can
+# fetch private GitHub dependencies without copying keys into the image.
 
 # Run `just builder-setup` once before using this.
 build-pi:
     docker buildx build \
         --platform linux/arm64 \
+        --ssh default \
         -t {{ registry }}/acies-pi:{{ tag }} \
         --push \
         -f docker/pi/Dockerfile \
