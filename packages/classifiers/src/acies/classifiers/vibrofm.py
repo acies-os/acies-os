@@ -31,13 +31,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import click
-import msgspec
 import numpy as np
 import numpy.typing as npt
 import torch
 from acies.buffers import TemporalBuffer
 from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries, setup_logging
-from acies.FoundationSense.inference import ModelForInference
+from acies.corev2.msg import AciesInference, AciesPrediction
+from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)
 
@@ -54,33 +54,6 @@ _MOD_MAPPING: dict[str, str] = {
     'audio': 'mic',
     'aco': 'mic',
 }
-
-
-# --- output message type ---
-
-
-class AciesInference(msgspec.Struct, frozen=True):
-    """Inference result published by a classifier node.
-
-    ``logits[i][j]`` is the raw pre-softmax score for target i, class j.
-    Apply softmax to convert to probabilities. ``labels`` gives the class
-    name for each column index.
-
-    ``distances`` and ``speeds`` are optional per-target outputs; empty when
-    the model does not produce them. All non-empty per-target lists have the
-    same length as ``logits``.
-    """
-
-    source: str
-    timestamp: int  # ns since Unix epoch (time.time_ns())
-    labels: list[str]  # class names, one per logit column
-    logits: list[list[float]]  # logits[i] = score vector for target i
-    inference_time_ms: float
-    distances: list[float] = []  # metres, one per target
-    speeds: list[float] = []  # m/s, one per target
-
-
-# --- per-run state ---
 
 
 @dataclass
@@ -152,7 +125,7 @@ def setup(ctx: AciesContext) -> None:
 
 
 @app.on_shutdown
-def teardown(ctx: AciesContext) -> None:
+def teardown(_ctx: AciesContext) -> None:
     logger.info('vibrofm stopped')
 
 
@@ -201,14 +174,15 @@ def run_inference(ctx: AciesContext) -> None:
     data: dict[str, dict[str, torch.Tensor]] = {'shake': {}}
     for mod in state.modalities:
         topic = _mod_to_topic[mod]
-        arr = np.concatenate([v for _, v in sorted(samples[topic].items())])
-        arr = arr.astype(np.float32)
+        arr: npt.NDArray[np.float32] = np.concatenate([v for _, v in sorted(samples[topic].items())]).astype(np.float32)
         if mod == 'geo':
             # 2s x 200 Hz = 400 -> downsample x2 -> 200 -> (1, 1, 10, 20)
-            data['shake']['seismic'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 20))
+            seismic_np = arr[::2].reshape(1, 1, 10, 20)
+            data['shake']['seismic'] = torch.from_numpy(seismic_np)  # pyright: ignore[reportUnknownMemberType]
         else:
             # 2s x 16000 Hz = 32000 -> downsample x2 -> 16000 -> (1, 1, 10, 1600)
-            data['shake']['audio'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 1600))
+            acoustic_np = arr[::2].reshape(1, 1, 10, 1600)
+            data['shake']['audio'] = torch.from_numpy(acoustic_np)  # pyright: ignore[reportUnknownMemberType]
 
     t0 = time.perf_counter_ns()
     logit = state.model(data)  # returns [[score_0, score_1, ...]]
@@ -225,15 +199,13 @@ def run_inference(ctx: AciesContext) -> None:
     # shape: (ensemble_win, num_targets, num_classes) -> mean over axis 0
     ensemble_logits: list[list[float]] = np.array(list(state.ensemble_buf)).mean(axis=0).tolist()
 
+    raw = np.array(ensemble_logits[0])
+    probs = np.exp(raw - raw.max())
+    probs /= probs.sum()
+    preds = [AciesPrediction(label=label, score=float(score)) for label, score in zip(state.labels, probs)]
     ctx.publish(
         state.output_topic,
-        AciesInference(
-            source=ctx.ns.base,
-            timestamp=ctx.now(),
-            labels=state.labels,
-            logits=ensemble_logits,
-            inference_time_ms=infer_ms,
-        ),
+        AciesInference(source=ctx.ns.base, timestamp=ctx.now(), predictions=preds),
     )
 
 

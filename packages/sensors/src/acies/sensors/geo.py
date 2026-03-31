@@ -28,7 +28,8 @@ import click
 import msgspec.json
 import numpy as np
 import numpy.typing as npt
-from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries, setup_logging
+from acies.corev2 import AciesApp, AciesContext, setup_logging
+from acies.corev2.msg import AciesTimeSeries
 from rawshake.geophone import Channel, GeoReader, get_samples
 from rawshake.processing import RollingConditioner
 
