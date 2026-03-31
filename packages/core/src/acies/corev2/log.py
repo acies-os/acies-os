@@ -4,6 +4,10 @@ Configures a root logger with two handlers:
   - Console (StreamHandler): INFO and above
   - File (RotatingFileHandler): DEBUG and above, saved to ~/.acies/logs/<name>.log
 
+Per-logger level overrides can be set via the ``ACIES_LOG`` environment variable::
+
+    ACIES_LOG=acies.corev2=INFO,acies.sensors.geo=DEBUG acies-geo ...
+
 Usage::
 
     from acies.corev2 import setup_logging
@@ -15,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 import pathlib
 
 
@@ -32,6 +37,10 @@ def setup_logging(name: str) -> None:
 
     where <level> is the first character of the level name (D/I/W/E/C) and
     the fractional seconds field is milliseconds zero-padded to 6 digits.
+
+    Per-logger level overrides are applied from the ``ACIES_LOG`` environment
+    variable (comma-separated ``name=LEVEL`` pairs) after the root logger is
+    configured, so they take precedence over the defaults.
 
     Args:
         name: Log file base name (e.g. 'geo' -> ~/.acies/logs/geo.log).
@@ -58,3 +67,13 @@ def setup_logging(name: str) -> None:
     root.setLevel(logging.DEBUG)
     root.addHandler(file_handler)
     root.addHandler(console_handler)
+
+    # suppress middleware debug noise by default; override via ACIES_LOG
+    logging.getLogger('acies.corev2').setLevel(logging.INFO)
+
+    for entry in os.environ.get('ACIES_LOG', '').split(','):
+        entry = entry.strip()
+        if '=' not in entry:
+            continue
+        logger_name, level = entry.split('=', 1)
+        logging.getLogger(logger_name.strip()).setLevel(level.strip())
