@@ -148,3 +148,49 @@ class AciesTimeSeries(msgspec.Struct, frozen=True):
     channels: list[str | int]
     sampling_rate: int
     dtype: str  # numpy dtype string: 'int16', 'int32', etc.
+
+
+class AciesPrediction(msgspec.Struct, frozen=True, omit_defaults=True):
+    """One ranked prediction from a classifier.
+
+    ``label`` and ``score`` are always present. Optional fields are omitted
+    from the wire encoding when absent (``omit_defaults=True``).
+
+    Example (truck detection with range and location)::
+
+        AciesPrediction(
+            label='truck',
+            score=0.92,
+            distance=340.5,
+            latitude=37.7749,
+            longitude=-122.4194,
+        )
+    """
+
+    label: str
+    score: float
+    distance: float | None = None  # estimated range in metres
+    speed: float | None = None  # estimated speed in m/s
+    latitude: float | None = None  # decimal degrees
+    longitude: float | None = None  # decimal degrees
+    extras: dict[str, Any] = {}  # model-specific metadata
+
+
+class AciesInference(msgspec.Struct, frozen=True):
+    """Inference result message published by a classifier.
+
+    Example (two-target vehicle classification)::
+
+        AciesInference(
+            source='edge-01/classifier',
+            timestamp=...,
+            predictions=[
+                AciesPrediction(label='truck', score=0.92),
+                AciesPrediction(label='car', score=0.61, distance=340.5),
+            ],
+        )
+    """
+
+    source: str
+    timestamp: NanoSecond
+    predictions: list[AciesPrediction]
