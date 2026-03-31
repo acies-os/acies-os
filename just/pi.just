@@ -14,6 +14,7 @@ pi-shell dev="false":
     @mkdir -p ~/.acies/logs
     -docker run --rm -it \
         --detach-keys="ctrl-z,z" \
+        --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
         -e HISTFILE=/root/.bash_history \
         {{ if dev == "true" { "-v " + pi_app_dir + ":/acies-os" } else { "" } }} \
         -v /data:/data \
