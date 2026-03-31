@@ -6,7 +6,6 @@ requires = [ "hatchling" ]
 name = "acies-buffers"
 version = "0.1.1"
 description = "Buffer utilities for Acies"
-readme = "README.md"
 authors = [
   { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
   { name = "Tommy Kimura", email = "tkimura4@illinois.edu" },

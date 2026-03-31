@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     just \
     less \
     libportaudio2 \
+    openssh-client \
     procps \
     unzip \
     vim \
@@ -51,7 +52,9 @@ ENV UV_NO_DEV=1
 WORKDIR /acies-os
 
 # Set up SSH known hosts for git dependencies.
-RUN mkdir -p -m 0700 /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
+RUN mkdir -p -m 0700 /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts \
+     && printf "Host github.com\n  IdentityFile /root/.ssh/myshake\n  IdentitiesOnly yes\n" > /root/.ssh/config \
+     && chmod 600 /root/.ssh/config
 
 # -------------- deps layer: rebuild only when lock file changes --------------
 RUN --mount=type=cache,target=/root/.cache/uv \
