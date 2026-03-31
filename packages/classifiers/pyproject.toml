@@ -6,7 +6,6 @@ requires = [ "hatchling" ]
 name = "acies-classifiers"
 version = "0.3.0"
 description = "Acies classifilers built with state-of-the-art models."
-readme = "README.md"
 authors = [
   { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
   { name = "Shangchen Wu", email = "sw57@illinois.edu" },

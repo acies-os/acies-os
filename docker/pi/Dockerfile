@@ -53,11 +53,14 @@ WORKDIR /acies-os
 
 # Set up SSH known hosts for git dependencies.
 RUN mkdir -p -m 0700 /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts \
-     && printf "Host github.com\n  IdentityFile /root/.ssh/myshake\n  IdentitiesOnly yes\n" > /root/.ssh/config \
+     && printf "Host github.com\n    User git\n  IdentityAgent SSH_AUTH_SOCK\n" > /root/.ssh/config \
      && chmod 600 /root/.ssh/config
 
 # -------------- deps layer: rebuild only when lock file changes --------------
-RUN --mount=type=cache,target=/root/.cache/uv \
+# Forward the host SSH agent into this build step by "--mount=type=ssh" so uv
+# can fetch private GitHub dependencies without copying keys into the image.
+RUN --mount=type=ssh \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=packages/core/pyproject.toml,target=packages/core/pyproject.toml \
@@ -74,9 +77,10 @@ COPY packages/classifiers/pyproject.toml packages/classifiers/pyproject.toml
 COPY packages/classifiers/src            packages/classifiers/src
 COPY packages/buffers/pyproject.toml     packages/buffers/pyproject.toml
 COPY packages/buffers/src                packages/buffers/src
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=ssh \
+    --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev \
-        --package acies-sensors 
+        --package acies-sensors --package acies-classifiers
 
 # Reset the entrypoint, don't invoke `uv`
 ENTRYPOINT []

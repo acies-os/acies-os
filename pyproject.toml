@@ -6,7 +6,6 @@ requires = [ "hatchling" ]
 name = "acies-os"
 version = "0.2.2"
 description = "A Content-Centric Platform for Edge AI Twinning and Orchestration"
-readme = "readme.md"
 authors = [
   { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
   { name = "Shangchen Wu", email = "sw57@illinois.edu" },
