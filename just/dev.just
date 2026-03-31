@@ -19,6 +19,10 @@ fix path=".":
 clean:
     rm -f *.log
 
+# Install dependencies
+deps:
+    uv sync --package acies-sensors --package acies-classifiers
+
 DOCS_SOURCE := "source"
 DOCS_BUILD := "_build"
 
