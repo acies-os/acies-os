@@ -19,10 +19,8 @@ Usage::
 from __future__ import annotations
 
 import logging
-import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
 
 import click
 import msgspec.json
@@ -45,23 +43,14 @@ DB_BATCH = 60  # rows to accumulate before flushing (~60s of data)
 DB_WAL_CHECKPOINT = 16000  # WAL checkpoint threshold in pages (~64MB); reduces I/O spikes on Pi
 
 
-@dataclass
-class ReaderState:
-    reader: GeoReader
-    con: sqlite3.Connection
-    topic: str
-    conditioner: RollingConditioner | None = None
-    db_buf: list[DbRow] = field(default_factory=list)
-
-
 app = AciesApp()
 
 
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
-    port: str = ctx.app.config['port']
-    baud: int = ctx.app.config['baud']
-    output: str = ctx.app.config['output'] or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
+    port: str = ctx.cfg['port']
+    baud: int = ctx.cfg['baud']
+    output: str = ctx.cfg.get('output') or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
     reader = GeoReader(port=port, baudrate=baud)
     reader.start()
     logger.info('geo reader started on %s @ %d baud', port, baud)
@@ -75,10 +64,10 @@ def setup(ctx: AciesContext) -> None:
         raise SystemExit(1)
 
     conditioner: RollingConditioner | None = None
-    if ctx.app.config.get('condition'):
-        hp: float | None = ctx.app.config.get('hp')
-        lp: float | None = ctx.app.config.get('lp')
-        seconds: int = ctx.app.config.get('condition_seconds') or 5
+    if ctx.cfg.get('condition'):
+        hp: float | None = ctx.cfg.get('hp')
+        lp: float | None = ctx.cfg.get('lp')
+        seconds: int = ctx.cfg.get('condition_seconds') or 5
         conditioner = RollingConditioner(fs=SAMPLING_RATE, seconds=seconds, hp=hp, lp=lp)
         logger.info(
             'RollingConditioner enabled: hp=%s Hz, lp=%s Hz, buffer=%ds',
@@ -87,32 +76,31 @@ def setup(ctx: AciesContext) -> None:
             seconds,
         )
 
-    ctx.app.data['state'] = ReaderState(
-        reader=reader,
-        con=con,
-        topic=ctx.app.config.get('topic') or ctx.ns.base,
-        conditioner=conditioner,
-    )
+    ctx.app['reader'] = reader
+    ctx.app['con'] = con
+    ctx.app['topic'] = ctx.cfg.get('topic') or ctx.ns.base
+    ctx.app['conditioner'] = conditioner
+    ctx.app['db_buf'] = []
 
 
 @app.on_shutdown
 def teardown(ctx: AciesContext) -> None:
-    state: ReaderState = ctx.app.data['state']
-    state.reader.stop()
+    ctx.app['reader'].stop()
     logger.info('geo reader stopped')
-    if state.db_buf:
-        n_rows = flush(state.con, state.db_buf)
+    db_buf: list[DbRow] = ctx.app['db_buf']
+    if db_buf:
+        n_rows = flush(ctx.app['con'], db_buf)
         logger.debug('flushed %d remaining rows to database', n_rows)
-        state.db_buf.clear()
-    state.con.close()
+        db_buf.clear()
+    ctx.app['con'].close()
     logger.info('database connection closed')
 
 
 @app.thread
 def publish(ctx: AciesContext, stop: threading.Event) -> None:
-    state: ReaderState = ctx.app.data['state']
+    db_buf: list[DbRow] = ctx.app['db_buf']
     while not stop.is_set():
-        msg = state.reader.get(timeout=1.0)
+        msg = ctx.app['reader'].get(timeout=1.0)
         if msg is None:
             continue
 
@@ -124,17 +112,17 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             logger.warning('no geo channel in message; available: %s', list(channel_samples))
             continue
 
-        if state.conditioner is not None:
+        conditioner: RollingConditioner | None = ctx.app['conditioner']
+        if conditioner is not None:
             # push all channels so every buffer stays current; select after
-            conditioned = state.conditioner.push(channel_samples)
+            conditioned = conditioner.push(channel_samples)
             samples_array: npt.NDArray[np.float64] = conditioned[channel]
             dtype = SAMPLE_DTYPE_CONDITIONED
         else:
             samples_array = np.array(channel_samples[channel], dtype=SAMPLE_DTYPE_RAW)
             dtype = SAMPLE_DTYPE_RAW
 
-        topic = state.topic
-
+        topic: str = ctx.app['topic']
         ctx.publish(
             topic,
             AciesTimeSeries(
@@ -165,7 +153,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             )
 
         metadata = {'channel': channel, 'sampling_rate': SAMPLING_RATE}
-        state.db_buf.append(
+        db_buf.append(
             (
                 topic,
                 dtype,
@@ -175,10 +163,10 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
                 msgspec.json.encode(metadata),
             )
         )
-        if len(state.db_buf) >= DB_BATCH:
-            n_rows = flush(state.con, state.db_buf)
+        if len(db_buf) >= DB_BATCH:
+            n_rows = flush(ctx.app['con'], db_buf)
             logger.debug('flushed %d rows to database', n_rows)
-            state.db_buf.clear()
+            db_buf.clear()
 
 
 @app.cli()
