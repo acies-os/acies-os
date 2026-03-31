@@ -15,6 +15,8 @@ pi-shell dev="false":
     -docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
+        -v $SSH_AUTH_SOCK:/ssh-agent \
+        -e SSH_AUTH_SOCK=/ssh-agent \
         -e HISTFILE=/root/.bash_history \
         {{ if dev == "true" { "-v " + pi_app_dir + ":/acies-os" } else { "" } }} \
         -v /data:/data \
