@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import logging
 import queue
-import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 import click
@@ -84,25 +82,13 @@ def _audio_callback(indata: npt.NDArray[np.int16], frames: int, cb_time: object,
     SAMPLE_QUEUE.put((capture_ts_ns, mono))
 
 
-@dataclass
-class MicState:
-    stream: sd.InputStream
-    con: sqlite3.Connection
-    sample_rate: int
-    topic: str
-    db_buf: list[DbRow] = field(default_factory=list)
-    sample_buf: list[npt.NDArray[np.int16]] = field(default_factory=list)
-    buf_frames: int = 0
-    buf_start_ts_ns: int = 0
-
-
 app = AciesApp()
 
 
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
-    device = ctx.app.config['device']
-    output = ctx.app.config['output'] or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
+    device = ctx.cfg['device']
+    output = ctx.cfg.get('output') or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
     device_key: str | int | None = None if device == 'default' else device
 
     try:
@@ -146,60 +132,67 @@ def setup(ctx: AciesContext) -> None:
         stream.close()
         raise SystemExit(1)
 
-    ctx.app.data['state'] = MicState(
-        stream=stream,
-        con=con,
-        sample_rate=sample_rate,
-        topic=ctx.app.config.get('topic') or ctx.ns.base,
-    )
+    ctx.app['stream'] = stream
+    ctx.app['con'] = con
+    ctx.app['sample_rate'] = sample_rate
+    ctx.app['topic'] = ctx.cfg.get('topic') or ctx.ns.base
+    ctx.app['db_buf'] = []
+    ctx.app['sample_buf'] = []
+    ctx.app['buf_frames'] = 0
+    ctx.app['buf_start_ts_ns'] = 0
 
 
 @app.on_shutdown
 def teardown(ctx: AciesContext) -> None:
-    state: MicState = ctx.app.data['state']
-    state.stream.stop()
-    state.stream.close()
+    ctx.app['stream'].stop()
+    ctx.app['stream'].close()
     logger.info('mic stream stopped')
-    if state.sample_buf:
-        logger.debug('discarding %d partial frames at shutdown', state.buf_frames)
-        state.sample_buf.clear()
-        state.buf_frames = 0
-    if state.db_buf:
-        n_rows = flush(state.con, state.db_buf)
+    sample_buf: list[npt.NDArray[np.int16]] = ctx.app['sample_buf']
+    if sample_buf:
+        logger.debug('discarding %d partial frames at shutdown', ctx.app['buf_frames'])
+        sample_buf.clear()
+        ctx.app['buf_frames'] = 0
+    db_buf: list[DbRow] = ctx.app['db_buf']
+    if db_buf:
+        n_rows = flush(ctx.app['con'], db_buf)
         logger.debug('flushed %d remaining rows to database', n_rows)
-        state.db_buf.clear()
-    state.con.close()
+        db_buf.clear()
+    ctx.app['con'].close()
     logger.info('database connection closed')
 
 
 @app.thread
 def publish(ctx: AciesContext, stop: threading.Event) -> None:
-    state: MicState = ctx.app.data['state']
+    sample_buf: list[npt.NDArray[np.int16]] = ctx.app['sample_buf']
+    db_buf: list[DbRow] = ctx.app['db_buf']
     while not stop.is_set():
         try:
             ts_ns, chunk = SAMPLE_QUEUE.get(timeout=1.0)
         except queue.Empty:
             continue
 
-        if state.buf_frames == 0:
-            state.buf_start_ts_ns = ts_ns
-        state.sample_buf.append(chunk)
-        state.buf_frames += len(chunk)
+        if ctx.app['buf_frames'] == 0:
+            ctx.app['buf_start_ts_ns'] = ts_ns
+        sample_buf.append(chunk)
+        ctx.app['buf_frames'] += len(chunk)
 
-        if state.buf_frames < state.sample_rate:
+        if ctx.app['buf_frames'] < ctx.app['sample_rate']:
             continue
 
         # --- assemble 1-second window ---
-        window = np.concatenate(state.sample_buf)
-        window_ts_ns = state.buf_start_ts_ns
-        samples_1s = window[: state.sample_rate]
-        leftover = window[state.sample_rate :]
-        state.sample_buf = [leftover] if len(leftover) else []
-        state.buf_frames = len(leftover)
-        if state.buf_frames:
-            state.buf_start_ts_ns = window_ts_ns + 1_000_000_000
+        sample_rate: int = ctx.app['sample_rate']
+        window = np.concatenate(sample_buf)
+        window_ts_ns = ctx.app['buf_start_ts_ns']
+        samples_1s = window[:sample_rate]
+        leftover = window[sample_rate:]
+        sample_buf.clear()
+        if len(leftover):
+            sample_buf.append(leftover)
+        ctx.app['buf_frames'] = len(leftover)
+        if ctx.app['buf_frames']:
+            ctx.app['buf_start_ts_ns'] = window_ts_ns + 1_000_000_000
 
-        topic = state.topic
+        topic: str = ctx.app['topic']
 
         # publish to topic
         ctx.publish(
@@ -209,7 +202,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
                 timestamp=window_ts_ns,
                 payload=[samples_1s.tobytes()],
                 channels=['mono'],
-                sampling_rate=state.sample_rate,
+                sampling_rate=sample_rate,
                 dtype=SAMPLE_DTYPE,
             ),
         )
@@ -232,22 +225,21 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             )
 
         # save to db
-        samples = samples_1s.tolist()
-        metadata = {'channel': 'mono', 'sampling_rate': state.sample_rate}
-        state.db_buf.append(
+        metadata = {'channel': 'mono', 'sampling_rate': sample_rate}
+        db_buf.append(
             (
                 topic,
                 SAMPLE_DTYPE,
                 window_ts_ns,
                 ctx.ns.base,
-                msgspec.json.encode(samples),
+                msgspec.json.encode(samples_1s.tolist()),
                 msgspec.json.encode(metadata),
             )
         )
-        if len(state.db_buf) >= DB_BATCH:
-            n_rows = flush(state.con, state.db_buf)
+        if len(db_buf) >= DB_BATCH:
+            n_rows = flush(ctx.app['con'], db_buf)
             logger.debug('flushed %d rows to database', n_rows)
-            state.db_buf.clear()
+            db_buf.clear()
 
 
 @app.cli()
