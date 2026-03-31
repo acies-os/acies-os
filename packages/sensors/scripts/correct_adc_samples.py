@@ -1,3 +1,4 @@
+# pyright: strict, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Reprocess a parquet file column from Rust 32-bit signed to Python 24-bit signed.
 
 The Rust parser interprets geophone hex strings as u32 cast to i32 (full 32-bit
