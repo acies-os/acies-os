@@ -1,3 +1,4 @@
+# pyright: strict, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Export AciesOS sensor SQLite data to CSV for plotting.
 
 Each DB row holds 1 second of samples. Per-sample timestamps are interpolated
@@ -62,7 +63,7 @@ def _expand_row(
 ) -> Iterator[tuple[int, int, object, str, str]]:
     """Expand one DB row into (timestamp_ns, value, channel, source, topic) per sample."""
     samples: list[int] = msgspec.json.decode(payload)
-    meta: dict = msgspec.json.decode(metadata)
+    meta: dict = msgspec.json.decode(metadata)  # pyright: ignore[reportMissingTypeArgument]
     sampling_rate = meta['sampling_rate']
     channel = meta['channel']
     ns_per_sample = 1_000_000_000 / sampling_rate
