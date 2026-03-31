@@ -50,6 +50,9 @@ ENV UV_NO_DEV=1
 
 WORKDIR /acies-os
 
+# Set up SSH known hosts for git dependencies.
+RUN mkdir -p -m 0700 /root/.ssh && ssh-keyscan github.com >> /root/.ssh/known_hosts
+
 # -------------- deps layer: rebuild only when lock file changes --------------
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
