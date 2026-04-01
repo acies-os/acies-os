@@ -19,10 +19,12 @@ classifiers = [
 dependencies = [
   "acies-buffers",
   "acies-core",
+  "tomli>=2.4",
 ]
-
 # scripts.acies-controller = "acies.controller.base:main"
 # scripts.acies-twinctl = "acies.twin.twinctl:main"
+scripts.acies-gateway = "acies.gateway.gateway:main"
+
 [tool.hatch]
 build.targets.wheel.packages = [ "src/acies" ]
 metadata.allow-direct-references = true

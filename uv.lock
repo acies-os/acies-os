@@ -93,12 +93,14 @@ source = { editable = "packages/controllers" }
 dependencies = [
     { name = "acies-buffers", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "acies-core", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "tomli", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "acies-buffers", editable = "packages/buffers" },
     { name = "acies-core", editable = "packages/core" },
+    { name = "tomli", specifier = ">=2.4.0" },
 ]
 
 [[package]]
