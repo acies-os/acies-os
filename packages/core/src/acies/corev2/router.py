@@ -27,6 +27,7 @@ In tests the default is LocalTransport, which requires no daemon.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from typing import TYPE_CHECKING
@@ -39,6 +40,8 @@ from .transport import ReplyCallback, Transport
 
 if TYPE_CHECKING:
     from .executor import Executor
+
+logger = logging.getLogger(__name__)
 
 # If the router grows more complicated, we may group fields with their own
 # locks into separate dataclasses, e.g.:
@@ -112,23 +115,29 @@ class Router:
         """
         if prefix is not None:
             self._prefix_routes.append((prefix, transport))
+            logger.debug('transport registered: %s prefix=%r', type(transport).__name__, prefix)
         else:
             self._default_transport = transport
+            logger.debug('default transport registered: %s', type(transport).__name__)
 
     def start(self, executor: 'Executor') -> None:
         """Start all transports and the router thread."""
-        for transport in self._all_transports():
+        transports = self._all_transports()
+        for transport in transports:
             transport.start(self._on_message)
         self._thread = threading.Thread(target=self._route_loop, args=(executor,), name='router', daemon=True)
         self._thread.start()
+        logger.debug('started with %d transport(s)', len(transports))
 
     def stop(self) -> None:
         """Stop router thread and all transports."""
+        logger.debug('stop requested')
         self._inbound.put(SENTINEL)
         if self._thread:
             self._thread.join()
         for transport in self._all_transports():
             transport.stop()
+        logger.debug('stopped')
 
     def subscribe(self, topic: str, spec: SubscriberSpec) -> None:
         """Register a SubscriberSpec to receive messages on topic."""
@@ -137,6 +146,7 @@ class Router:
         with self._io_lock:
             self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) | {topic}
         self._transport_for(topic).subscribe(topic)
+        logger.debug('subscribed %r -> %r', spec.name, topic)
 
     def unsubscribe(self, topic: str, spec: SubscriberSpec) -> None:
         """Remove a SubscriberSpec from topic; undeclares transport subscription if no specs remain."""
@@ -152,6 +162,7 @@ class Router:
             self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) - {topic}
         if last:
             self._transport_for(topic).unsubscribe(topic)
+        logger.debug('unsubscribed %r -> %r%s', spec.name, topic, ' (transport undeclared)' if last else '')
 
     def advertise(self, topic: str, spec: ServiceSpec) -> None:
         """Register a ServiceSpec as a queryable service on topic."""
@@ -160,6 +171,7 @@ class Router:
         with self._io_lock:
             self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) | {topic}
         self._transport_for(topic).advertise(topic)
+        logger.debug('advertised %r -> %r', spec.name, topic)
 
     def unadvertise(self, topic: str) -> None:
         """Remove a ServiceSpec queryable from topic."""
@@ -169,6 +181,7 @@ class Router:
             with self._io_lock:
                 self._spec_inputs[spec] = self._spec_inputs.get(spec, frozenset()) - {topic}
         self._transport_for(topic).unadvertise(topic)
+        logger.debug('unadvertised %r', topic)
 
     def find_spec(self, spec_id: str | None, spec_name: str | None) -> TaskSpec | None:
         """Find an active spec by id (preferred) or name (fallback).
@@ -218,6 +231,7 @@ class Router:
             if not updated:
                 new_table[rename.old] = rename.new
             self._output_remap[spec] = new_table
+        logger.debug('remap_output %r: %r -> %r', spec.name, rename.old, rename.new)
 
     def resolve_output(self, spec: TaskSpec, topic: str) -> str | None:
         """Return the effective output topic for spec after applying any remap.
@@ -310,6 +324,7 @@ class Router:
         return result
 
     def _route_loop(self, executor: 'Executor') -> None:
+        logger.debug('router thread running')
         while True:
             item = self._inbound.get()
             if item is SENTINEL:
@@ -317,17 +332,28 @@ class Router:
             assert isinstance(item, tuple)
             topic, raw, reply_fn = item
 
-            # TODO: log/warn unmatched messages
             with self._routing_lock:
                 if reply_fn is not None:
                     # Incoming query — route to the matching service spec
+                    matched = False
                     for pattern, spec in self._services.items():
                         if matches(pattern, topic):
                             executor.enqueue(Job(spec=spec, raw=raw, reply_fn=reply_fn))
+                            logger.debug('query %r -> %r (%d bytes)', topic, spec.name, len(raw))
+                            matched = True
                             break
+                    if not matched:
+                        logger.warning('unmatched query on %r (%d bytes)', topic, len(raw))
                 else:
                     # Incoming pub — fan out to all matching subscriber specs
+                    n_matched = 0
                     for pattern, specs in self._subscriptions.items():
                         if matches(pattern, topic):
                             for spec in specs:
                                 executor.enqueue(Job(spec=spec, raw=raw))
+                                n_matched += 1
+                    if n_matched:
+                        logger.debug('pub %r -> %d handler(s) (%d bytes)', topic, n_matched, len(raw))
+                    else:
+                        logger.warning('unmatched pub on %r (%d bytes)', topic, len(raw))
+        logger.debug('router thread exiting')
