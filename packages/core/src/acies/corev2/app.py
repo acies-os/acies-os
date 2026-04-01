@@ -67,6 +67,12 @@ def _check_param(fn: Callable[..., Any], decorator: str, name: str, annotation: 
         raise TypeError(f"{decorator} '{fn.__name__}': handler must have a '{param}' parameter")
 
 
+# TODO: consider FastAPI-style dependency injection for handler arguments.
+# Extra parameters beyond the required set (ctx, msg, stop) could be resolved
+# from ctx.app.data by name at dispatch time. A From('key') marker (like
+# Depends() in FastAPI) would keep the source explicit and allow validation
+# at run() time. Deferred because ctx.app['key'] is already concise and
+# the added framework complexity is not yet justified.
 def _call_handler(fn: Callable[..., Any], **kwargs: Any) -> Any:
     """Call fn with kwargs, remapping canonical names to _name variants if needed.
 
