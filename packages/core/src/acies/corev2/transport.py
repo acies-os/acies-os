@@ -28,6 +28,7 @@ the reply.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from typing import Callable, Protocol, TypeAlias
@@ -96,6 +97,8 @@ class Transport(Protocol):
 class LocalTransport:
     """In-process queue-based transport for testing and single-process apps.
 
+    Logger: acies.corev2.transport.local
+
     Always handles all topics. Add to Router last so prefixed transports like
     WebSocketTransport take priority.
 
@@ -112,6 +115,8 @@ class LocalTransport:
        the encoded bytes.
     """
 
+    _log: logging.Logger = logging.getLogger(f'{__name__}.local')
+
     def __init__(self) -> None:
         self._subscriptions: set[str] = set()
         self._advertisers: set[str] = set()
@@ -123,38 +128,50 @@ class LocalTransport:
         self._on_message = on_message
         self._thread = threading.Thread(target=self._receiver_loop, name='local-transport', daemon=True)
         self._thread.start()
+        self._log.debug('started')
 
     def stop(self) -> None:
+        self._log.debug('stop requested')
         self._queue.put(SENTINEL)
         if self._thread:
             self._thread.join()
+        self._log.debug('stopped')
 
     def abort(self) -> None:
+        n_discarded = 0
         while True:
             try:
                 _ = self._queue.get(block=False)
+                n_discarded += 1
             except queue.Empty:
                 break
+        self._log.debug('abort: discarded %d queued messages', n_discarded)
         self._queue.put(SENTINEL)
         if self._thread:
             self._thread.join()
+        self._log.debug('aborted')
 
     def subscribe(self, topic: str) -> None:
         self._subscriptions.add(topic)
+        self._log.debug('subscribed %r', topic)
 
     def unsubscribe(self, topic: str) -> None:
         self._subscriptions.discard(topic)
+        self._log.debug('unsubscribed %r', topic)
 
     def advertise(self, topic: str) -> None:
         self._advertisers.add(topic)
+        self._log.debug('advertised %r', topic)
 
     def unadvertise(self, topic: str) -> None:
         self._advertisers.discard(topic)
+        self._log.debug('unadvertised %r', topic)
 
     def publish(self, topic: str, raw: bytes) -> None:
         """Deliver raw bytes if topic matches any active subscription."""
         if any(matches(pattern, topic) for pattern in self._subscriptions):
             self._queue.put((topic, raw, None))
+            self._log.debug('publish %r (%d bytes)', topic, len(raw))
 
     def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
         """Send a query and block until a reply arrives or timeout elapses."""
@@ -170,11 +187,13 @@ class LocalTransport:
             self._queue.put((topic, raw, reply_fn))
 
         _ = event.wait(timeout)
+        if result[0] is None:
+            self._log.warning('query %r timed out after %.1fs', topic, timeout)
+        else:
+            self._log.debug('query %r -> %d bytes', topic, len(result[0]))
         return result[0]
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    # ---------------------------- internal helpers ----------------------------
 
     def _is_advertised(self, topic: str) -> bool:
         return any(matches(pattern, topic) for pattern in self._advertisers)
@@ -198,10 +217,14 @@ class ZenohTransport:
     uses UDP multicast discovery (no daemon required); for explicit
     endpoints pass a custom zenoh.Config.
 
+    Logger: acies.corev2.transport.zenoh
+
     Args:
         config: Optional zenoh.Config. Defaults to zenoh.Config() (peer
                 mode, UDP multicast discovery).
     """
+
+    _log: logging.Logger = logging.getLogger(f'{__name__}.zenoh')
 
     def __init__(self, config: zenoh.Config | None = None) -> None:
         self._config: zenoh.Config = config if config is not None else zenoh.Config()
@@ -214,9 +237,12 @@ class ZenohTransport:
         """Open the zenoh session and store the inbound message callback."""
         self._on_message = on_message
         self._session = zenoh.open(self._config)
+        self._log.debug('session opened')
 
     def stop(self) -> None:
         """Undeclare all subscribers/queryables and close the session."""
+        n_subs = len(self._subscribers)
+        n_qbs = len(self._queryables)
         for sub in self._subscribers.values():
             sub.undeclare()  # pyright: ignore[reportUnknownMemberType]
         self._subscribers.clear()
@@ -226,9 +252,11 @@ class ZenohTransport:
         if self._session is not None:
             self._session.close()  # pyright: ignore[reportUnknownMemberType]
             self._session = None
+        self._log.debug('session closed (%d subscribers, %d queryables undeclared)', n_subs, n_qbs)
 
     def abort(self) -> None:
         """Immediate shutdown — same as stop() for zenoh."""
+        self._log.debug('abort requested')
         self.stop()
 
     def subscribe(self, topic: str) -> None:
@@ -240,16 +268,19 @@ class ZenohTransport:
             self._on_message(str(sample.key_expr), bytes(sample.payload), None)
 
         self._subscribers[topic] = self._session.declare_subscriber(topic, _on_sample)
+        self._log.debug('subscribed %r', topic)
 
     def unsubscribe(self, topic: str) -> None:
         sub = self._subscribers.pop(topic, None)
         if sub is not None:
             sub.undeclare()  # pyright: ignore[reportUnknownMemberType]
+            self._log.debug('unsubscribed %r', topic)
 
     def publish(self, topic: str, raw: bytes) -> None:
         """Put raw bytes to topic."""
         assert self._session is not None, 'call start() before publish()'
         self._session.put(topic, raw)  # pyright: ignore[reportUnknownMemberType]
+        self._log.debug('publish %r (%d bytes)', topic, len(raw))
 
     def advertise(self, topic: str) -> None:
         """Declare a zenoh queryable.
@@ -271,11 +302,13 @@ class ZenohTransport:
             self._on_message(str(query.key_expr), raw, reply_fn)
 
         self._queryables[topic] = self._session.declare_queryable(topic, _on_query)
+        self._log.debug('advertised %r', topic)
 
     def unadvertise(self, topic: str) -> None:
         qb = self._queryables.pop(topic, None)
         if qb is not None:
             qb.undeclare()  # pyright: ignore[reportUnknownMemberType]
+            self._log.debug('unadvertised %r', topic)
 
     def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
         """Send a zenoh get and block until a reply arrives or timeout elapses."""
@@ -293,4 +326,8 @@ class ZenohTransport:
         self._session.get(topic, _on_reply, payload=raw, timeout=timeout)
         # Wait slightly longer than zenoh's own timeout so zenoh fires first.
         _ = event.wait(timeout + 0.5)
+        if result[0] is None:
+            self._log.warning('query %r timed out after %.1fs', topic, timeout)
+        else:
+            self._log.debug('query %r -> %d bytes', topic, len(result[0]))
         return result[0]
