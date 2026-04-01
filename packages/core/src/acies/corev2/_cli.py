@@ -100,6 +100,14 @@ def create_acies_cli(
             envvar='ACIES_CONFIG',
             help='Path to JSON config file. CLI args take precedence.',
         )
+        @click.option(
+            '--acies-workers',
+            default=4,
+            show_default=True,
+            type=int,
+            envvar='ACIES_WORKERS',
+            help='Number of worker threads in the executor thread pool.',
+        )
         @functools.wraps(user_fn)
         def wrapper(
             acies_host: str,
@@ -109,6 +117,7 @@ def create_acies_cli(
             acies_connect: tuple[str, ...],
             acies_listen: tuple[str, ...],
             acies_config: str,
+            acies_workers: int,
             **user_kwargs: Any,
         ) -> Any:
             configure(
@@ -121,6 +130,7 @@ def create_acies_cli(
                         'connect': list(acies_connect),
                         'listen': list(acies_listen),
                         'config_file': acies_config,
+                        'workers': acies_workers,
                     }
                 }
             )

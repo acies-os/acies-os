@@ -1,5 +1,6 @@
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 acies_log := env("ACIES_LOG", "")
+acies_host := env("ACIES_HOST", `hostname -s`)
 
 # [private]
 # default:
@@ -37,6 +38,8 @@ pi-mic *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
+        -e ACIES_HOST={{ acies_host }} \
+        -e ACIES_NAME=mic \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add audio \
@@ -50,6 +53,8 @@ pi-geo *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
+        -e ACIES_HOST={{ acies_host }} \
+        -e ACIES_NAME=geo \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add dialout \
@@ -64,6 +69,8 @@ pi-vfm *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
+        -e ACIES_HOST={{ acies_host }} \
+        -e ACIES_NAME=vfm \
         -v /data:/data \
         -v /model:/model \
         -v ~/.acies:/root/.acies \
