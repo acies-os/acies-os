@@ -2,7 +2,7 @@ services:
   acies-geo:
     image: acies-pi:latest
     profiles: [geo, geo-classifier, multimodal]
-    command: uv run acies-geo
+    command: .venv/bin/acies-geo
     volumes:
       - ./:/acies-os
       - /data:/data
@@ -15,7 +15,7 @@ services:
   acies-mic:
     image: acies-pi:latest
     profiles: [mic, mic-classifier, multimodal]
-    command: uv run acies-mic
+    command: .venv/bin/acies-mic
     volumes:
       - ./:/acies-os
       - /data:/data
@@ -23,6 +23,15 @@ services:
       - /dev/snd:/dev/snd
     group_add:
       - audio
+    restart: unless-stopped
+
+  acies-vfm:
+    image: acies-pi:latest
+    profiles: [geo-classifier, mic-classifier, multimodal]
+    command: .venv/bin/acies-vfm --weight ${VFM_WEIGHT} --geo ${VFM_GEO_TOPIC} --mic ${VFM_MIC_TOPIC}
+    volumes:
+      - ./:/acies-os
+      - /data:/data
     restart: unless-stopped
 
   zenohd:
