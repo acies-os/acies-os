@@ -221,6 +221,7 @@ class AciesApp:
             hints = get_type_hints(fn)
             msg_type = hints.get('msg')
             self._tasks.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
+            logger.debug('subscribe %r registered on %d topic(s)', fn.__name__, len(topics))
             return fn
 
         return decorator
@@ -236,6 +237,7 @@ class AciesApp:
         def decorator(fn: Callable[..., None]) -> Callable[..., None]:
             _check_param(fn, 'schedule', 'ctx', 'AciesContext')
             self._tasks.append(ScheduleSpec(name=fn.__name__, fn=fn, interval=interval))
+            logger.debug('schedule %r registered: interval=%.1fs', fn.__name__, interval)
             return fn
 
         return decorator
@@ -268,6 +270,7 @@ class AciesApp:
             self._tasks.append(
                 ServiceSpec(name=fn.__name__, fn=fn, topic=topic, msg_type=msg_type, return_type=return_type)
             )
+            logger.debug('service %r registered on %r', fn.__name__, topic)
             return fn
 
         return decorator
@@ -281,21 +284,26 @@ class AciesApp:
         encoding happen — keeping the router and executor byte-agnostic.
         """
         ctx = self._task_ctxs[job.spec]
-        match job.spec:
-            case ScheduleSpec():
-                job.spec.fn(ctx=ctx)
-            case SubscriberSpec() | ServiceSpec() as spec:
-                assert job.raw is not None, 'SubscriberSpec/ServiceSpec job must have raw bytes'
-                msg = (  # pyright: ignore[reportUnknownVariableType]
-                    msgspec.msgpack.decode(job.raw, type=spec.msg_type)
-                    if spec.msg_type is not None
-                    else msgspec.msgpack.decode(job.raw)
-                )
-                result = spec.fn(ctx=ctx, msg=msg)
-                if job.reply_fn is not None:
-                    job.reply_fn(msgspec.msgpack.encode(result))
-            case ThreadSpec():
-                raise AssertionError(f'ThreadSpec {job.spec.name!r} must never be dispatched')
+        try:
+            match job.spec:
+                case ScheduleSpec():
+                    job.spec.fn(ctx=ctx)
+                case SubscriberSpec() | ServiceSpec() as spec:
+                    assert job.raw is not None, 'SubscriberSpec/ServiceSpec job must have raw bytes'
+                    msg = (  # pyright: ignore[reportUnknownVariableType]
+                        msgspec.msgpack.decode(job.raw, type=spec.msg_type)
+                        if spec.msg_type is not None
+                        else msgspec.msgpack.decode(job.raw)
+                    )
+                    result = spec.fn(ctx=ctx, msg=msg)
+                    if job.reply_fn is not None:
+                        job.reply_fn(msgspec.msgpack.encode(result))
+                case ThreadSpec():
+                    raise AssertionError(f'ThreadSpec {job.spec.name!r} must never be dispatched')
+        except msgspec.DecodeError:
+            logger.exception('decode error in %r (%d bytes)', job.spec.name, len(job.raw or b''))
+        except Exception:
+            logger.exception('unhandled exception in handler %r', job.spec.name)
 
     # ------------------------------- Run & Stop -------------------------------
 
@@ -353,6 +361,7 @@ class AciesApp:
         """
 
         self._ns = Namespace(self._app_state.config['sys']['host'], self._app_state.config['sys']['name'])
+        logger.info('starting: host=%r name=%r tasks=%d', self._ns.host, self._ns.name, len(self._tasks))
 
         def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
             def _publish(topic: str, raw: bytes) -> None:
@@ -377,6 +386,7 @@ class AciesApp:
         }
         self._executor.start(self.dispatch)
         self._router.start(self._executor)
+        logger.debug('executor and router started')
 
         # Populate sys.schemas before registering tasks so ctl/schema is
         # ready as soon as the app is wired.
@@ -398,18 +408,23 @@ class AciesApp:
                     entry['response'] = resp
                 schemas[task.id] = entry
         self._app_state.config['sys']['schemas'] = schemas
+        logger.debug('service schemas registered: %d', len(schemas))
 
         # Register tasks before startup hooks so the app is fully wired
         # when user code in on_startup runs.
+        n_subs, n_svcs = 0, 0
         for task in self._tasks:
             match task:
                 case SubscriberSpec():
                     for topic in task.topics:
                         self._router.subscribe(self._resolve_topic(topic), task)
+                    n_subs += 1
                 case ServiceSpec():
                     self._router.advertise(self._resolve_topic(task.topic), task)
+                    n_svcs += 1
                 case ScheduleSpec() | ThreadSpec():
                     pass  # handled by timer thread
+        logger.debug('tasks registered: %d subscriber(s) %d service(s)', n_subs, n_svcs)
 
         periodic_tasks = [t for t in self._tasks if isinstance(t, ScheduleSpec)]
         if periodic_tasks:
@@ -420,6 +435,7 @@ class AciesApp:
                 daemon=True,
             )
             self._timer_thread.start()
+            logger.debug('timer started: %d schedule(s)', len(periodic_tasks))
 
         hook_ctx = AciesContext(
             publish_fn=self._router.publish,
@@ -438,8 +454,10 @@ class AciesApp:
         with temporary_signal_handlers(self.stop):
             try:
                 for hook in self._startup_hooks:
+                    logger.debug('startup hook: %r', hook.__name__)
                     hook(ctx=hook_ctx)
                 startup_ok = True
+                logger.info('startup hooks registered: %d', len(self._startup_hooks))
 
                 for spec in (t for t in self._tasks if isinstance(t, ThreadSpec)):
                     t = threading.Thread(
@@ -450,11 +468,15 @@ class AciesApp:
                     )
                     t.start()
                     managed_threads.append(t)
+                    logger.debug('managed thread %r started', spec.name)
+                logger.info('managed threads started: %d', len(managed_threads))
 
+                logger.info('startup ok: entering main loop')
                 # Block until stop() is called (via signal, or directly by app code).
                 # SIGINT/SIGTERM are handled by temporary_signal_handlers above,
                 # which calls stop() -> sets the event -> wait() returns normally.
                 _ = self._stop_event.wait()
+                logger.info('shutdown initiated')
 
             finally:
                 deadline = time.monotonic() + 5.0
@@ -462,14 +484,20 @@ class AciesApp:
                     remaining = deadline - time.monotonic()
                     if remaining > 0:
                         t.join(timeout=remaining)
+                    if t.is_alive():
+                        logger.warning('managed thread %r did not exit within deadline', t.name)
                 self._router.stop()
                 self._executor.stop()
+                logger.debug('router and executor stopped')
                 if startup_ok:
                     for hook in self._shutdown_hooks:
+                        logger.debug('shutdown hook: %r', hook.__name__)
                         hook(ctx=hook_ctx)
+                logger.info('stopped')
 
     def stop(self) -> None:
         """Signal run() to begin shutdown. Safe to call from any thread."""
+        logger.debug('stop requested')
         self._stop_event.set()
 
     def _timer_loop(self, schedule_specs: list[ScheduleSpec]) -> None:
@@ -479,6 +507,7 @@ class AciesApp:
         all timers. Sleeps exactly until the next due time via
         _stop_event.wait(timeout), which also serves as the shutdown signal.
         """
+        logger.debug('timer thread running: %d schedule(s)', len(schedule_specs))
         now = time.monotonic()
         heap: list[tuple[float, ScheduleSpec]] = [(now + spec.interval, spec) for spec in schedule_specs]
         heapq.heapify(heap)
@@ -491,4 +520,6 @@ class AciesApp:
             if self._stop_event.is_set():
                 break
             _ = heapq.heapreplace(heap, (time.monotonic() + spec.interval, spec))
+            logger.debug('timer firing %r', spec.name)
             self._executor.enqueue(Job(spec=spec, raw=None))
+        logger.debug('timer thread exiting')
