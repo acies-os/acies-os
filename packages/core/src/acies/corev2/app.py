@@ -23,6 +23,7 @@ import threading
 import time
 import uuid
 from typing import Any, Callable, get_type_hints
+from urllib.parse import urlparse
 
 import msgspec
 
@@ -34,9 +35,22 @@ from .namespace import CtlTopic, Namespace, Topic, TopicArg
 from .router import Router
 from .signal_handlers import temporary_signal_handlers
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec, ThreadSpec
-from .transport import ZenohTransport
+from .transport import WebSocketTransport, ZenohTransport
 
 logger = logging.getLogger(__name__)
+
+_WS_PREFIX = 'ws://'
+_WS_DEFAULT_HOST = '0.0.0.0'
+_WS_DEFAULT_PORT = 8765
+
+
+def _parse_ws_endpoint(endpoint: str) -> tuple[str, int]:
+    """Parse a WebSocket listen endpoint into (host, port)."""
+    parsed = urlparse(endpoint)
+    parsed = urlparse(endpoint)
+    ws_host = parsed.hostname or _WS_DEFAULT_HOST
+    ws_port = parsed.port or _WS_DEFAULT_PORT
+    return ws_host, ws_port
 
 
 def _get_msg_encoding_metadata(t: type) -> dict[str, str | bool] | None:
@@ -409,6 +423,28 @@ class AciesApp:
             )
             for task in self._tasks
         }
+        seen_ws: set[str] = set()
+        for endpoint in self._app_state.config['sys'].get('listen', []):
+            if not endpoint.startswith(_WS_PREFIX) or endpoint in seen_ws:
+                continue
+            seen_ws.add(endpoint)
+            ws_host, ws_port = _parse_ws_endpoint(endpoint)
+            self._router.add_transport(WebSocketTransport(host=ws_host, port=ws_port), prefix=_WS_PREFIX)
+            logger.info('ws:// transport registered: %s:%d', ws_host, ws_port)
+
+        has_ws_subs = any(
+            any(isinstance(t, str) and t.startswith(_WS_PREFIX) for t in spec.topics)
+            for spec in self._tasks
+            if isinstance(spec, SubscriberSpec)
+        )
+        if has_ws_subs and not self._router.has_prefix_transport(_WS_PREFIX):
+            logger.warning(
+                'handlers subscribed to `ws://` topics, but no `ws://` listen endpoint is configured; '
+                'these handlers will never be invoked; '
+                'pass `--acies-listen=ws://<host>:<port>` to enable the `ws://` handlers, '
+                'for example `--acies-listen=ws://0.0.0.0:8765'
+            )
+
         self._executor.start(self.dispatch, n_workers=self._app_state.config['sys'].get('workers', 4))
         self._router.start(self._executor)
         logger.debug('executor and router started')
