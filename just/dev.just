@@ -21,7 +21,9 @@ clean:
 
 # Install dependencies
 deps:
-    uv sync --package acies-sensors --package acies-classifiers
+    uv sync --package acies-sensors \
+        --package acies-classifiers \
+        --package acies-controllers
 
 DOCS_SOURCE := "source"
 DOCS_BUILD := "_build"

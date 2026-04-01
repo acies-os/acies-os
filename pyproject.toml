@@ -53,6 +53,7 @@ environments = [
 workspace.members = [
   "packages/buffers",
   "packages/classifiers",
+  "packages/controllers",
   "packages/core",
   "packages/sensors",
 ]

@@ -3,7 +3,7 @@ build-backend = "hatchling.build"
 requires = [ "hatchling" ]
 
 [project]
-name = "acies-controller"
+name = "acies-controllers"
 version = "0.2.0"
 description = "Acies Control Plane"
 authors = [ { name = "Jinyang Li", email = "jinyang7@illinois.edu" } ]
@@ -19,17 +19,10 @@ classifiers = [
 dependencies = [
   "acies-buffers",
   "acies-core",
-  "click>=8.1.7",
-  "ipdb>=0.13.13",
-  "numpy>=1.26.4",
-  "scipy>=1.13",
-  "tomli>=2.0.1",
-  "torch>=2.3",
-  "websockets>=12",
 ]
-scripts.acies-controller = "acies.controller.base:main"
-scripts.acies-twinctl = "acies.twin.twinctl:main"
 
+# scripts.acies-controller = "acies.controller.base:main"
+# scripts.acies-twinctl = "acies.twin.twinctl:main"
 [tool.hatch]
 build.targets.wheel.packages = [ "src/acies" ]
 metadata.allow-direct-references = true
@@ -37,11 +30,3 @@ metadata.allow-direct-references = true
 [tool.uv]
 sources.acies-buffers = { workspace = true }
 sources.acies-core = { workspace = true }
-
-[tool.ruff]
-line-length = 120
-format = { quote-style = "single" }
-lint.extend-select = [ "C90", "I", "Q", "RUF100" ]
-lint.unfixable = [ "F401" ]
-lint.flake8-quotes = { inline-quotes = "single", multiline-quotes = "double" }
-lint.mccabe = { max-complexity = 13 }
