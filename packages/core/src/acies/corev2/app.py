@@ -56,7 +56,8 @@ def _has_var_keyword(fn: Callable[..., Any]) -> bool:
 def _check_param(fn: Callable[..., Any], decorator: str, name: str, annotation: str | None = None) -> None:
     """Raise TypeError if fn is missing a required named parameter.
 
-    Skipped if fn accepts **kwargs.
+    Accepts either ``name`` or ``_name`` (underscore prefix to silence LSP
+    unused-variable warnings). Skipped if fn accepts **kwargs.
     """
     if _has_var_keyword(fn):
         return
@@ -64,6 +65,20 @@ def _check_param(fn: Callable[..., Any], decorator: str, name: str, annotation: 
     if name not in params and f'_{name}' not in params:
         param = f'{name}: {annotation}' if annotation else name
         raise TypeError(f"{decorator} '{fn.__name__}': handler must have a '{param}' parameter")
+
+
+def _call_handler(fn: Callable[..., Any], **kwargs: Any) -> Any:
+    """Call fn with kwargs, remapping canonical names to _name variants if needed.
+
+    Mirrors the ``_name`` acceptance in ``_check_param``: if the caller passes
+    ``ctx=...`` but the function declares ``_ctx``, the value is forwarded under
+    the actual parameter name so the call succeeds.
+    """
+    if _has_var_keyword(fn):
+        return fn(**kwargs)
+    params = inspect.signature(fn).parameters
+    mapped = {(f'_{k}' if f'_{k}' in params else k): v for k, v in kwargs.items()}
+    return fn(**mapped)
 
 
 class AciesApp:
@@ -197,7 +212,7 @@ class AciesApp:
 
         def _run(ctx: AciesContext, stop: threading.Event) -> None:
             try:
-                fn(ctx=ctx, stop=stop)
+                _call_handler(fn, ctx=ctx, stop=stop)
             except Exception:
                 logger.exception('managed thread %r crashed; triggering shutdown', fn.__name__)
                 self.stop()
@@ -287,7 +302,7 @@ class AciesApp:
         try:
             match job.spec:
                 case ScheduleSpec():
-                    job.spec.fn(ctx=ctx)
+                    _call_handler(job.spec.fn, ctx=ctx)
                 case SubscriberSpec() | ServiceSpec() as spec:
                     assert job.raw is not None, 'SubscriberSpec/ServiceSpec job must have raw bytes'
                     msg = (  # pyright: ignore[reportUnknownVariableType]
@@ -295,7 +310,7 @@ class AciesApp:
                         if spec.msg_type is not None
                         else msgspec.msgpack.decode(job.raw)
                     )
-                    result = spec.fn(ctx=ctx, msg=msg)
+                    result = _call_handler(spec.fn, ctx=ctx, msg=msg)
                     if job.reply_fn is not None:
                         job.reply_fn(msgspec.msgpack.encode(result))
                 case ThreadSpec():
@@ -455,7 +470,7 @@ class AciesApp:
             try:
                 for hook in self._startup_hooks:
                     logger.debug('startup hook: %r', hook.__name__)
-                    hook(ctx=hook_ctx)
+                    _call_handler(hook, ctx=hook_ctx)
                 startup_ok = True
                 logger.info('startup hooks registered: %d', len(self._startup_hooks))
 
@@ -492,7 +507,7 @@ class AciesApp:
                 if startup_ok:
                     for hook in self._shutdown_hooks:
                         logger.debug('shutdown hook: %r', hook.__name__)
-                        hook(ctx=hook_ctx)
+                        _call_handler(hook, ctx=hook_ctx)
                 logger.info('stopped')
 
     def stop(self) -> None:
