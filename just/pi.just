@@ -1,7 +1,7 @@
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
-zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7447")
+zenoh_connect := env("ZENOH_CONNECT", "unixsock-stream//root/.acies/run/local.sock")
 
 [private]
 default:
