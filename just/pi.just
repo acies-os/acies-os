@@ -39,7 +39,7 @@ pi-zenohd *args:
         --detach-keys="ctrl-z,z" \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-pi:latest zenohd --listen tcp/127.0.0.1:7447 {{ args }}
+        acies-pi:latest zenohd --listen {{ zenoh_connect }} {{ args }}
 
 # Run acies-mic in the Pi image. Arguments are forwarded to acies-mic directly.
 pi-mic *args:
