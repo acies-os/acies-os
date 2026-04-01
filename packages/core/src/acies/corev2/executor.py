@@ -64,14 +64,17 @@ class Executor:
         self._pool = ThreadPoolExecutor(max_workers=n_workers)
         self._dispatcher = threading.Thread(target=self._dispatch_loop, name='executor-dispatcher', daemon=True)
         self._dispatcher.start()
+        logger.debug('started: %d workers', n_workers)
 
     def stop(self) -> None:
         """Drain the queue, then shut down. All enqueued jobs will complete."""
+        logger.debug('stop requested; draining queue')
         self._queue.put(_SENTINEL_ENTRY)
         if self._dispatcher:
             self._dispatcher.join()
         if self._pool:
             self._pool.shutdown(wait=True)
+        logger.debug('stopped')
 
     def abort(self) -> None:
         """Stop immediately, discarding queued-but-not-yet-dispatched jobs.
@@ -84,33 +87,41 @@ class Executor:
         dequeued a job but not yet submitted it to the pool when abort() drains
         the queue, that job will still be submitted.
         """
+        n_discarded = 0
         while True:
             try:
                 _ = self._queue.get_nowait()
+                n_discarded += 1
             except queue.Empty:
                 break
+        logger.debug('abort: discarded %d queued jobs', n_discarded)
         self._queue.put(_SENTINEL_ENTRY)
         if self._dispatcher:
             self._dispatcher.join()
         if self._pool:
             self._pool.shutdown(cancel_futures=True, wait=False)
+        logger.debug('aborted')
 
     def _dispatch_loop(self) -> None:
         assert self._pool is not None, '_dispatch_loop started before pool was initialized'
+        logger.debug('dispatcher thread running')
         while True:
             _, _, item = self._queue.get()
             if item is SENTINEL:
                 break
             assert isinstance(item, Job), f'Expected Job, got {type(item)}'
             wait_ms = (time.monotonic() - item.created_at) * 1000
+            logger.debug('dispatching %r (queue_wait=%.1f ms)', item.spec.name, wait_ms)
             if wait_ms > 200:
                 logger.warning('job %r waited %.0f ms in queue', item.spec.name, wait_ms)
             _ = self._pool.submit(self._run_job, item)
+        logger.debug('dispatcher thread exiting')
 
     def _run_job(self, job: Job) -> None:
         assert self._dispatch is not None, '_run_job called before dispatch was initialized'
         t0 = time.monotonic()
         self._dispatch(job)
         elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.debug('job %r done (elapsed=%.1f ms)', job.spec.name, elapsed_ms)
         if elapsed_ms > 500:
             logger.warning('job %r took %.0f ms', job.spec.name, elapsed_ms)
