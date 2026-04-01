@@ -35,7 +35,7 @@ pi-shell dev="false":
 # Run zenohd in the Pi image. All pi-* services connect to it via TCP loopback.
 pi-zenohd *args:
     @mkdir -p ~/.acies/logs
-    -@docker run --rm -it \
+    -@docker run --rm -it --init \
         --detach-keys="ctrl-z,z" \
         --network host \
         -v ~/.acies:/root/.acies \
