@@ -141,7 +141,8 @@ def run_inference(ctx: AciesContext) -> None:
     keys = [_mod_to_topic[m] for m in modalities]
 
     try:
-        samples = ctx.app['buffer'].pop(keys, INPUT_LEN)
+        with ctx.app.lock:
+            samples = ctx.app['buffer'].pop(keys, INPUT_LEN)
     except ValueError:
         logger.debug('not enough buffered data for inference')
         return
