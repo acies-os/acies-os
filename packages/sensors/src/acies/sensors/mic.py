@@ -154,8 +154,11 @@ def teardown(ctx: AciesContext) -> None:
         ctx.app['buf_frames'] = 0
     db_buf: list[DbRow] = ctx.app['db_buf']
     if db_buf:
-        n_rows = flush(ctx.app['con'], db_buf)
-        logger.debug('flushed %d remaining rows to database', n_rows)
+        try:
+            n_rows = flush(ctx.app['con'], db_buf)
+            logger.debug('flushed %d remaining rows to database', n_rows)
+        except Exception:
+            logger.exception('database flush failed during shutdown; %d rows lost', len(db_buf))
         db_buf.clear()
     ctx.app['con'].close()
     logger.info('database connection closed')
@@ -237,9 +240,14 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             )
         )
         if len(db_buf) >= DB_BATCH:
-            n_rows = flush(ctx.app['con'], db_buf)
-            logger.debug('flushed %d rows to database', n_rows)
-            db_buf.clear()
+            try:
+                n_rows = flush(ctx.app['con'], db_buf)
+                logger.debug('flushed %d rows to database', n_rows)
+                db_buf.clear()
+            except Exception:
+                logger.exception('database flush failed; shutting down')
+                app.stop()
+                return
 
 
 @app.cli()
