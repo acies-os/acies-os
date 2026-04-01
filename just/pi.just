@@ -31,15 +31,24 @@ pi-shell dev="false":
         --device /dev/bus/usb:/dev/bus/usb \
         acies-pi:latest bash
 
+# Run zenohd in the Pi image, listening on the shared unix domain socket.
+pi-zenohd *args:
+    @mkdir -p ~/.acies/logs ~/.acies/run
+    -@docker run --rm -it \
+        --detach-keys="ctrl-z,z" \
+        -v ~/.acies:/root/.acies \
+        acies-pi:latest zenohd --listen unix-stream:///root/.acies/run/local.sock {{ args }}
+
 # Run acies-mic in the Pi image. Arguments are forwarded to acies-mic directly.
 pi-mic *args:
-    @mkdir -p ~/.acies/logs
+    @mkdir -p ~/.acies/logs ~/.acies/run
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=mic \
+        -e ACIES_CONNECT=unix-stream:///root/.acies/run/local.sock \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add audio \
@@ -48,13 +57,14 @@ pi-mic *args:
 
 # Run acies-geo in the Pi image. Arguments are forwarded to acies-geo directly.
 pi-geo *args:
-    @mkdir -p ~/.acies/logs
+    @mkdir -p ~/.acies/logs ~/.acies/run
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=geo \
+        -e ACIES_CONNECT=unix-stream:///root/.acies/run/local.sock \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add dialout \
@@ -64,13 +74,14 @@ pi-geo *args:
 
 # Run acies-vfm in the Pi image. Arguments are forwarded to acies-vfm directly.
 pi-vfm *args:
-    @mkdir -p ~/.acies/logs
+    @mkdir -p ~/.acies/logs ~/.acies/run
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=vfm \
+        -e ACIES_CONNECT=unix-stream:///root/.acies/run/local.sock \
         -v /data:/data \
         -v /model:/model \
         -v ~/.acies:/root/.acies \
