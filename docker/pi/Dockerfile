@@ -63,6 +63,9 @@ RUN --mount=type=ssh \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=packages/buffers/pyproject.toml,target=packages/buffers/pyproject.toml \
+    --mount=type=bind,source=packages/classifiers/pyproject.toml,target=packages/classifiers/pyproject.toml \
+    --mount=type=bind,source=packages/controllers/pyproject.toml,target=packages/controllers/pyproject.toml \
     --mount=type=bind,source=packages/core/pyproject.toml,target=packages/core/pyproject.toml \
     --mount=type=bind,source=packages/sensors/pyproject.toml,target=packages/sensors/pyproject.toml \
     uv sync --frozen --no-install-workspace --no-dev
@@ -79,7 +82,7 @@ COPY packages/buffers/pyproject.toml     packages/buffers/pyproject.toml
 COPY packages/buffers/src                packages/buffers/src
 RUN --mount=type=ssh \
     --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev \
+    uv sync --frozen --no-dev \
         --package acies-sensors --package acies-classifiers
 
 # Reset the entrypoint, don't invoke `uv`

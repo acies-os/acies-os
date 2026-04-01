@@ -1,6 +1,7 @@
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
+zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7447")
 
 [private]
 default:
@@ -31,13 +32,14 @@ pi-shell dev="false":
         --device /dev/bus/usb:/dev/bus/usb \
         acies-pi:latest bash
 
-# Run zenohd in the Pi image, listening on the shared unix domain socket.
+# Run zenohd in the Pi image. All pi-* services connect to it via TCP loopback.
 pi-zenohd *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
+        --network host \
         -v ~/.acies:/root/.acies \
-        acies-pi:latest zenohd --listen unix-stream:///root/.acies/run/local.sock {{ args }}
+        acies-pi:latest zenohd --listen tcp/127.0.0.1:7447 {{ args }}
 
 # Run acies-mic in the Pi image. Arguments are forwarded to acies-mic directly.
 pi-mic *args:
@@ -48,7 +50,8 @@ pi-mic *args:
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=mic \
-        -e ACIES_CONNECT=unix-stream:///root/.acies/run/local.sock \
+        -e ACIES_CONNECT={{ zenoh_connect }} \
+        --network host \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add audio \
@@ -64,7 +67,8 @@ pi-geo *args:
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=geo \
-        -e ACIES_CONNECT=unix-stream:///root/.acies/run/local.sock \
+        -e ACIES_CONNECT={{ zenoh_connect }} \
+        --network host \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add dialout \
@@ -81,7 +85,8 @@ pi-vfm *args:
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=vfm \
-        -e ACIES_CONNECT=unix-stream:///root/.acies/run/local.sock \
+        -e ACIES_CONNECT={{ zenoh_connect }} \
+        --network host \
         -v /data:/data \
         -v /model:/model \
         -v ~/.acies:/root/.acies \

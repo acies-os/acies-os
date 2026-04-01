@@ -100,7 +100,7 @@ dependencies = [
 requires-dist = [
     { name = "acies-buffers", editable = "packages/buffers" },
     { name = "acies-core", editable = "packages/core" },
-    { name = "tomli", specifier = ">=2.4.0" },
+    { name = "tomli", specifier = ">=2.4" },
 ]
 
 [[package]]
