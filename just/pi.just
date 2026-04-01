@@ -1,4 +1,5 @@
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
+acies_log := env("ACIES_LOG", "")
 
 # [private]
 # default:
@@ -35,7 +36,7 @@ pi-mic *args:
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
-        {{ if env("ACIES_LOG", "") != "" { "-e ACIES_LOG=" + env("ACIES_LOG", "") } else { "" } }} \
+        -e ACIES_LOG={{ acies_log }} \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add audio \
@@ -48,13 +49,24 @@ pi-geo *args:
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
-        {{ if env("ACIES_LOG", "") != "" { "-e ACIES_LOG=" + env("ACIES_LOG", "") } else { "" } }} \
+        -e ACIES_LOG={{ acies_log }} \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
         --group-add dialout \
         --device /dev/serial0:/dev/serial0 \
         --device /dev/bus/usb:/dev/bus/usb \
         acies-pi:latest acies-geo {{ args }}
+
+# Run acies-vfm in the Pi image. Arguments are forwarded to acies-vfm directly.
+pi-vfm *args:
+    @mkdir -p ~/.acies/logs
+    -@docker run --rm -it \
+        --detach-keys="ctrl-z,z" \
+        -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
+        -e ACIES_LOG={{ acies_log }} \
+        -v /data:/data \
+        -v ~/.acies:/root/.acies \
+        acies-pi:latest acies-vfm {{ args }}
 
 # Record 40 seconds of audio from the USB microphone array and save it to /data/alsa-test.wav
 record output="/data/alsa-test.wav":
