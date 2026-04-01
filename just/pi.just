@@ -32,7 +32,7 @@ pi-shell dev="false":
 # Run acies-mic in the Pi image. Arguments are forwarded to acies-mic directly.
 pi-mic *args:
     @mkdir -p ~/.acies/logs
-    -docker run --rm -it \
+    -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         {{ if env("ACIES_LOG", "") != "" { "-e ACIES_LOG=" + env("ACIES_LOG", "") } else { "" } }} \
@@ -45,7 +45,7 @@ pi-mic *args:
 # Run acies-geo in the Pi image. Arguments are forwarded to acies-geo directly.
 pi-geo *args:
     @mkdir -p ~/.acies/logs
-    -docker run --rm -it \
+    -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         {{ if env("ACIES_LOG", "") != "" { "-e ACIES_LOG=" + env("ACIES_LOG", "") } else { "" } }} \
