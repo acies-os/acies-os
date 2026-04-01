@@ -11,6 +11,7 @@ Concrete backends:
 
 from ._base import MessageHandler, ReplyCallback, Transport
 from .local import LocalTransport
+from .websocket import WebSocketTransport
 from .zenoh import ZenohTransport
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     'ReplyCallback',
     'Transport',
     'LocalTransport',
+    'WebSocketTransport',
     'ZenohTransport',
 ]

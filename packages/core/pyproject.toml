@@ -20,6 +20,7 @@ dependencies = [
   "click>=8.3.1",
   "eclipse-zenoh>=1.8,<2",
   "msgspec>=0.20",
+  "websockets>=16.0",
 ]
 scripts.acies-echo = "acies.core.echo:main"
 scripts.ash = "acies.core.shell:main"
