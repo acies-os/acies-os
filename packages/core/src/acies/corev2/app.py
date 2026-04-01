@@ -106,6 +106,7 @@ class AciesApp:
         self._startup_hooks: list[Callable[..., None]] = []
         self._shutdown_hooks: list[Callable[..., None]] = []
         self._stop_event: threading.Event = threading.Event()
+        self._startup_ok: bool = False
         self._timer_thread: threading.Thread | None = None
         self._task_ctxs: dict[TaskSpec, AciesContext] = {}
         self._app_state: AppState = AppState()
@@ -304,6 +305,9 @@ class AciesApp:
         This is the only place in the system where msgpack decoding and
         encoding happen — keeping the router and executor byte-agnostic.
         """
+        if not self._startup_ok:
+            logger.debug('dropping job %r: startup not complete', job.spec.name)
+            return
         ctx = self._task_ctxs[job.spec]
         try:
             match job.spec:
@@ -470,14 +474,13 @@ class AciesApp:
         with self._app_state.lock:
             self._app_state.config['sys']['state'] = 'active'
 
-        startup_ok = False
         managed_threads: list[threading.Thread] = []
         with temporary_signal_handlers(self.stop):
             try:
                 for hook in self._startup_hooks:
                     logger.debug('startup hook: %r', hook.__name__)
                     _call_handler(hook, ctx=hook_ctx)
-                startup_ok = True
+                self._startup_ok = True
                 logger.info('startup hooks registered: %d', len(self._startup_hooks))
 
                 for spec in (t for t in self._tasks if isinstance(t, ThreadSpec)):
@@ -510,7 +513,7 @@ class AciesApp:
                 self._router.stop()
                 self._executor.stop()
                 logger.debug('router and executor stopped')
-                if startup_ok:
+                if self._startup_ok:
                     for hook in self._shutdown_hooks:
                         logger.debug('shutdown hook: %r', hook.__name__)
                         _call_handler(hook, ctx=hook_ctx)
