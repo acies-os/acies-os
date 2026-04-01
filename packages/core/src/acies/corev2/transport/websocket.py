@@ -117,8 +117,13 @@ class WebSocketTransport:
     def unadvertise(self, topic: str) -> None:
         logger.debug('unadvertise %r (no-op)', topic)
 
-    def query(self, topic: str, _raw: bytes, _timeout: float) -> bytes | None:
-        logger.debug('query %r (no-op: WebSocket does not support RPC)', topic)
+    def query(self, topic: str, raw: bytes, timeout: float) -> bytes | None:
+        logger.debug(
+            'query %r (size=%d bytes, timeout=%d) (no-op: WebSocket does not support RPC)',
+            topic,
+            len(raw),
+            timeout,
+        )
         return None
 
     def publish(self, topic: str, raw: bytes) -> None:

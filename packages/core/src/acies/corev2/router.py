@@ -300,6 +300,10 @@ class Router:
         """
         return self._transport_for(topic).query(topic, raw, timeout)
 
+    def has_prefix_transport(self, prefix: str) -> bool:
+        """Return True if a transport is registered for the given prefix."""
+        return any(p == prefix for p, _ in self._prefix_routes)
+
     def _on_message(self, topic: str, raw: bytes, reply_fn: ReplyCallback | None = None) -> None:
         """Transport callback — push into the inbound queue."""
         self._inbound.put((topic, raw, reply_fn))
