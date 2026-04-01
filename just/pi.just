@@ -65,6 +65,7 @@ pi-vfm *args:
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
         -v /data:/data \
+        -v /model:/model \
         -v ~/.acies:/root/.acies \
         acies-pi:latest acies-vfm {{ args }}
 
