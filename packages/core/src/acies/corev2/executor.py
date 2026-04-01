@@ -49,6 +49,7 @@ class Executor:
 
     def enqueue(self, job: Job) -> None:
         """Called by the router thread and timer thread to submit a job."""
+        logger.debug('enqueue %r (deadline=%.3f)', job.spec.name, job.deadline)
         self._queue.put((job.deadline, job.created_at, job))
 
     def start(self, dispatch: Dispatcher, n_workers: int = 4) -> None:
