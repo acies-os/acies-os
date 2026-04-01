@@ -2,9 +2,9 @@ pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
 
-# [private]
-# default:
-#     @just -f {{ justfile() }} --list
+[private]
+default:
+    @just -f {{ justfile() }} --list
 
 # Fix ownership of /data files to the current user
 own-data:
