@@ -25,6 +25,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from collections import deque
 from pathlib import Path
@@ -63,7 +64,14 @@ def setup(ctx: AciesContext) -> None:
     freq_mae: bool = ctx.cfg.get('freq_mae', False)
     ensemble_win: int = ctx.cfg.get('ensemble_win', 1)
 
-    model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
+    # ModelForInference calls argparse.parse_args() internally at construction;
+    # clear sys.argv so it does not see our Click arguments and error out.
+    _saved_argv = sys.argv[:]
+    sys.argv = sys.argv[:1]
+    try:
+        model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
+    finally:
+        sys.argv = _saved_argv
     raw_mods: list[str] = model.args.dataset_config['modality_names']
     modalities = [_MOD_MAPPING[m] for m in raw_mods]
     logger.info(
