@@ -514,7 +514,7 @@ class AciesApp:
                     for hook in self._shutdown_hooks:
                         logger.debug('shutdown hook: %r', hook.__name__)
                         _call_handler(hook, ctx=hook_ctx)
-                logger.info('stopped')
+                logger.info(f'{self._ns.base} stopped; hasta luego!')
 
     def stop(self) -> None:
         """Signal run() to begin shutdown. Safe to call from any thread."""

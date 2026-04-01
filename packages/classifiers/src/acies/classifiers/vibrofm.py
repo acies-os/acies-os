@@ -161,7 +161,7 @@ def run_inference(ctx: AciesContext) -> None:
     logit = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
     infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
 
-    logits: list[list[float]] = [[float(x) for x in logit[0]]]
+    logits: list[list[float]] = [np.array(logit[0]).flatten().tolist()]
     ensemble_buf: deque[list[list[float]]] = ctx.app['ensemble_buf']
     ensemble_buf.append(logits)
     logger.debug('inference: logits=%s infer_ms=%.1f ensemble=%d', logits, infer_ms, len(ensemble_buf))
