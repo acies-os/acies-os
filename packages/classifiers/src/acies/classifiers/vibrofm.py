@@ -115,7 +115,8 @@ def on_geo(ctx: AciesContext, msg: AciesTimeSeries) -> None:
         logger.debug('geo energy %.1f below threshold %.1f; dropping window', energy, thresh)
         return
     ts_s = msg.timestamp // 1_000_000_000
-    ctx.app['buffer'].add(ctx.cfg['geo_topic'], ts_s, samples)
+    with ctx.app.lock:
+        ctx.app['buffer'].add(ctx.cfg['geo_topic'], ts_s, samples)
 
 
 @app.subscribe('{mic_topic}')
@@ -129,7 +130,8 @@ def on_mic(ctx: AciesContext, msg: AciesTimeSeries) -> None:
         logger.debug('mic energy %.1f below threshold %.1f; dropping window', energy, thresh)
         return
     ts_s = msg.timestamp // 1_000_000_000
-    ctx.app['buffer'].add(ctx.cfg['mic_topic'], ts_s, samples)
+    with ctx.app.lock:
+        ctx.app['buffer'].add(ctx.cfg['mic_topic'], ts_s, samples)
 
 
 @app.schedule(1.0)
