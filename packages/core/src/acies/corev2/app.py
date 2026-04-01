@@ -409,7 +409,7 @@ class AciesApp:
             )
             for task in self._tasks
         }
-        self._executor.start(self.dispatch, n_workers=self._app_state.config['sys']['workers'])
+        self._executor.start(self.dispatch, n_workers=self._app_state.config['sys'].get('workers', 4))
         self._router.start(self._executor)
         logger.debug('executor and router started')
 
