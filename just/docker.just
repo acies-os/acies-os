@@ -1,7 +1,7 @@
-# [private]
-# default:
-#     @just -f {{ justfile() }} --list
-#
+[private]
+default:
+    @just -f {{ justfile() }} --list
+
 # Docker build, registry, and deployment recipes.
 # Imported by justfile; can also be run directly:
 #   just --justfile docker.justfile <recipe>
