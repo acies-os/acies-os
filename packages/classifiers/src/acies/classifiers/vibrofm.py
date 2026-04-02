@@ -144,7 +144,9 @@ def run_inference(ctx: AciesContext) -> None:
         with ctx.app.lock:
             samples = ctx.app['buffer'].pop(keys, INPUT_LEN)
     except ValueError:
-        logger.debug('not enough buffered data for inference')
+        with ctx.app.lock:
+            ts_by_topic = {k: sorted(ctx.app['buffer']._data[k]) for k in keys}
+        logger.debug('not enough buffered data for inference; timestamps=%s', ts_by_topic)
         return
 
     # --- build FoundationSense model input ---
