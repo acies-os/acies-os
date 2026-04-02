@@ -43,7 +43,7 @@ services:
   acies-vfm:
     image: acies-pi:latest
     profiles: [geo-classifier, mic-classifier, multimodal]
-    command: acies-vfm --weight ${VFM_WEIGHT} --geo ${VFM_GEO_TOPIC} --mic ${VFM_MIC_TOPIC}
+    command: acies-vfm --weight ${VFM_WEIGHT} --geo ${ACIES_HOST:-}/geo --mic ${ACIES_HOST:-}/mic
     network_mode: host
     environment:
       - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
@@ -60,7 +60,7 @@ services:
   zenohd:
     image: acies-pi:latest
     profiles: [geo, mic, geo-classifier, mic-classifier, multimodal]
-    command: zenohd --listen ${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
+    command: zenohd --listen ${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock} ${ZENOH_BRIDGE}
     network_mode: host
     volumes:
       - ~/.acies:/root/.acies

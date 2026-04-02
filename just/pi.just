@@ -2,6 +2,7 @@ pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
 zenoh_connect := env("ZENOH_CONNECT", "unixsock-stream//root/.acies/run/local.sock")
+zenoh_bridge := env("ZENOH_BRIDGE", "")
 
 [private]
 default:
@@ -39,7 +40,7 @@ pi-zenohd *args:
         --detach-keys="ctrl-z,z" \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-pi:latest zenohd --listen {{ zenoh_connect }} {{ args }}
+        acies-pi:latest zenohd --listen {{ zenoh_connect }} {{ zenoh_bridge }} {{ args }}
 
 # Run acies-mic in the Pi image. Arguments are forwarded to acies-mic directly.
 pi-mic *args:
