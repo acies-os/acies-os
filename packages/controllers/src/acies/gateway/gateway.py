@@ -71,13 +71,14 @@ def run_ensemble(ctx: AciesContext) -> None:
         for pred in preds:
             label_scores[pred.label].append(pred.score)
 
+    logger.debug('-- ensemble t=%d, entires=%d --', now, len(entries))
     predictions: list[AciesPrediction] = []
     for label, scores in label_scores.items():
         avg = sum(scores) / len(scores)
         if avg > 0:
             pred = AciesPrediction(label=label, score=avg)
             predictions.append(pred)
-            logger.info('ensemble: %s', pred)
+            logger.info('%s', pred)
 
 
 @app.on_startup
