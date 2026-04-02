@@ -16,6 +16,7 @@ tag := env("TAG", "latest")
 
 pi_hosts := env("PI_HOSTS", "")
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
+server_hosts := env("SERVER_HOSTS", "")
 
 # ----------------------------------- build -----------------------------------
 
@@ -45,6 +46,61 @@ build-pi:
         --push \
         -f docker/pi/Dockerfile \
         .
+
+# Build server image for the host platform and load into the local Docker daemon.
+# Run on each machine, then push-server to upload to the registry,
+# then build-server-manifest on the laptop to combine into one multi-platform tag.
+
+# Run `just builder-setup` once before using this.
+build-server:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$(uname -m)" in
+        x86_64)        arch=amd64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+    esac
+    docker buildx build \
+        --ssh default \
+        -t acies-server:{{ tag }}-${arch} \
+        --load \
+        -f docker/server/Dockerfile \
+        .
+
+# Push the locally built arch-specific server image to the registry.
+
+# Use registry= on the laptop, registry_external= from a remote server.
+push-server:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$(uname -m)" in
+        x86_64)        arch=amd64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+    esac
+    docker tag acies-server:{{ tag }}-${arch} {{ registry }}/acies-server:{{ tag }}-${arch}
+    docker push {{ registry }}/acies-server:{{ tag }}-${arch}
+
+#
+# Workflow:
+#
+#   # on laptop (arm64): build + push to local registry
+#   just build-server
+#   just push-server
+#
+#   # on amd64 server: build + push to laptop's registry
+#   just build-server
+#   just push-server registry=10.8.0.102:5100
+#
+#   # back on laptop: combine into one manifest
+#   just build-server-manifest
+
+# Merge arch-specific server images into a single multi-platform manifest.
+build-server-manifest:
+    docker buildx imagetools create \
+        -t {{ registry }}/acies-server:{{ tag }} \
+        {{ registry }}/acies-server:{{ tag }}-amd64 \
+        {{ registry }}/acies-server:{{ tag }}-arm64
 
 # Clean up build cache and dangling images
 build-prune:
@@ -85,29 +141,36 @@ check-port port=registry_port:
         echo "port {{ port }}: free"; \
     fi
 
-# One-time per Pi: allow Docker daemon to pull from the insecure local registry.
+# One-time per host: allow Docker daemon to pull from the insecure local registry.
 
 # Usage: just registry-trust pi@192.168.1.20
-registry-trust pi:
-    ssh {{ pi }} "echo '{\"insecure-registries\":[\"{{ registry_external }}\"]}' \
+registry-trust host:
+    ssh {{ host }} "echo '{\"insecure-registries\":[\"{{ registry_external }}\"]}' \
         | sudo tee /etc/docker/daemon.json \
         && sudo systemctl restart docker"
 
 # --- deploy ---
-# Pull updated image and restart services on all Pis.
 
-# Requires PI_HOSTS set in .env or environment.
-deploy:
+# Pull updated Pi image on all Pis. Requires PI_HOSTS set in .env or environment.
+deploy-pi:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -z "{{ pi_hosts }}" ]; then
-        echo "error: PI_HOSTS not set. Add PI_HOSTS='pi@192.168.1.20 pi@192.168.1.21' to .env"
-        exit 1
-    fi
-    echo "deploying to {{ pi_hosts }}..."
-    for pi in {{ pi_hosts }}; do
-        echo "==> pushing acies-pi:{{ tag }} images to $pi"
-        ssh "$pi" "docker pull {{ registry_external }}/acies-pi:{{ tag }} \
+    [ -n "{{ pi_hosts }}" ] || { echo "error: PI_HOSTS not set"; exit 1; }
+    for host in {{ pi_hosts }}; do
+        echo "==> deploying acies-pi:{{ tag }} to $host"
+        ssh "$host" "docker pull {{ registry_external }}/acies-pi:{{ tag }} \
             && docker tag {{ registry_external }}/acies-pi:{{ tag }} acies-pi:{{ tag }} \
             && docker rmi {{ registry_external }}/acies-pi:{{ tag }}"
+    done
+
+# Pull updated server image on all servers. Requires SERVER_HOSTS set in .env or environment.
+deploy-server:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -n "{{ server_hosts }}" ] || { echo "error: SERVER_HOSTS not set"; exit 1; }
+    for host in {{ server_hosts }}; do
+        echo "==> deploying acies-server:{{ tag }} to $host"
+        ssh "$host" "docker pull {{ registry_external }}/acies-server:{{ tag }} \
+            && docker tag {{ registry_external }}/acies-server:{{ tag }} acies-server:{{ tag }} \
+            && docker rmi {{ registry_external }}/acies-server:{{ tag }}"
     done
