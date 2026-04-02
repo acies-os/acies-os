@@ -34,6 +34,7 @@ import time
 
 import click
 import numpy as np
+import numpy.typing as npt
 import polars as pl
 from acies.corev2 import AciesApp, AciesContext, OnChange, setup_logging
 from acies.corev2.msg import AciesKvChange, AciesTimeSeries
@@ -42,54 +43,83 @@ logger = logging.getLogger(__name__)
 
 app = AciesApp()
 
-# --- sampling rates by modality ---
-_SAMPLING_RATES: dict[str, int] = {
-    'geo': 200,
-    'mic': 16000,
-}
 
-# --- numpy dtypes matching the live sensors ---
-_DTYPES: dict[str, str] = {
-    'geo': 'int32',
-    'mic': 'int16',
-}
+_SAMPLING_RATE = {'geo': 200, 'mic': 16000}
+_DTYPE = {'geo': 'int32', 'mic': 'int16'}
+_CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0'}}
+_NS_PER_S = 1_000_000_000
+
+
+def _ts_to_ns(ts: float) -> int:
+    """Convert a timestamp to nanoseconds, auto-detecting the unit.
+
+    Handles fractional seconds (~1.7e9), milliseconds (~1.7e12),
+    and nanoseconds (~1.7e18).
+    """
+    if ts > 1e15:
+        return int(ts)
+    if ts > 1e12:
+        return int(ts * 1_000_000)
+    return int(ts * _NS_PER_S)
 
 
 def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list[str], int, str]]:
-    """Load a parquet file and group samples into 1-second windows.
+    """Load a parquet file and chunk samples into 1-second windows.
 
-    Returns a list of (timestamp_ns, payload_list, channel_list, sampling_rate, dtype)
-    tuples, one per window, sorted by timestamp.
+    Filters to the wanted channels, extracts per-channel sample arrays,
+    and slices them in lockstep into ``sampling_rate``-sized chunks.
+    Timestamps are assumed identical across channels at each row index.
+
+    Returns a sorted list of (timestamp_ns, payload_list, channel_list,
+    sampling_rate, dtype) tuples.
     """
-    df = pl.read_parquet(path)
-    sampling_rate = _SAMPLING_RATES[modality]
-    dtype = _DTYPES[modality]
+    sampling_rate: int = _SAMPLING_RATE[modality]
+    dtype: str = _DTYPE[modality]
+    wanted: set[str] = _CHANNEL[modality]
     np_dtype = np.dtype(dtype)
 
-    # Floor timestamp to integer seconds to group into 1-second windows
-    df = df.with_columns(pl.col('timestamp').floor().cast(pl.Int64).alias('window_ts'))
-
-    # Channel column may be str (geo) or int (mic) -- normalize to str
+    df = pl.read_parquet(path)
     df = df.with_columns(pl.col('channel').cast(pl.String).alias('channel_str'))
 
-    windows: list[tuple[int, list[bytes], list[str], int, str]] = []
-    for (window_ts,), group in df.group_by(['window_ts'], maintain_order=True):
-        ts_ns = int(window_ts) * 1_000_000_000  # type: ignore[arg-type]
-        channels: list[str] = []
-        payloads: list[bytes] = []
-        for (ch,), ch_group in group.group_by(['channel_str'], maintain_order=True):
-            channels.append(str(ch))
-            samples = ch_group['samples'].to_numpy().astype(np_dtype)
-            payloads.append(samples.tobytes())
-        windows.append((ts_ns, payloads, channels, sampling_rate, dtype))
+    # Keep only wanted channels that actually exist in the file
+    available = set(df['channel_str'].unique().to_list())
+    present = sorted(wanted & available)
+    if not present:
+        logger.error('no wanted channels %s in %s; available: %s', wanted, path, sorted(available))
+        return []
 
-    windows.sort(key=lambda w: w[0])
+    # Extract per-channel sample arrays, sorted by timestamp
+    df = df.filter(pl.col('channel_str').is_in(present)).sort('timestamp')
+    ch_arrays: dict[str, npt.NDArray[np.int_]] = {}
+    ch_timestamps: list[float] | None = None
+    for ch in present:
+        ch_df = df.filter(pl.col('channel_str') == ch)
+        ch_arrays[ch] = ch_df['samples'].to_numpy().astype(np_dtype)
+        if ch_timestamps is None:
+            ch_timestamps = ch_df['timestamp'].to_list()
+    assert ch_timestamps is not None
+
+    # All channels should have the same number of samples
+    n_samples = len(ch_timestamps)
+    for ch, arr in ch_arrays.items():
+        if len(arr) != n_samples:
+            logger.warning('channel %s has %d samples, expected %d; truncating', ch, len(arr), n_samples)
+            ch_arrays[ch] = arr[:n_samples]
+
+    # Chunk in lockstep across all channels
+    windows: list[tuple[int, list[bytes], list[str], int, str]] = []
+    for i in range(0, n_samples, sampling_rate):
+        ts_ns = _ts_to_ns(ch_timestamps[i])
+        payloads = [bytes(ch_arrays[ch][i : i + sampling_rate].tobytes()) for ch in present]
+        windows.append((ts_ns, payloads, present, sampling_rate, dtype))
+
     logger.info(
-        'loaded %s: %d windows (%.0fs), %d total samples',
+        'loaded %s: %d windows (%ds), channels=%s, %d samples/channel',
         path,
         len(windows),
         len(windows),
-        df.height,
+        present,
+        n_samples,
     )
     return windows
 
@@ -172,6 +202,7 @@ def _try_reload(ctx: AciesContext) -> bool:
     modality = ctx.cfg['modality']
     path = f'{data_dir}/{scene}/run{run}_{node}_{modality}.parquet'
     try:
+        logger.debug('loading windows from %s', path)
         windows = _load_windows(path, modality)
     except Exception:
         logger.exception('failed to reload from %s', path)
@@ -212,7 +243,7 @@ def _play_windows(
                 dtype=dtype,
             ),
         )
-        logger.debug('published window t=%d (%d channel(s))', ts_ns, len(channels))
+        logger.debug('%s: t=%.2f (%d channel(s))', topic, float(ts_ns / _NS_PER_S), len(channels))
     return True
 
 
