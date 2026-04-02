@@ -14,7 +14,7 @@ edge-zenohd *args:
         --detach-keys="ctrl-z,z" \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-pi:latest zenohd --listen {{ zenoh_connect }} {{ zenoh_bridge }} {{ args }}
+        acies-server:latest zenohd --listen {{ zenoh_connect }} {{ zenoh_bridge }} {{ args }}
 
 # Run acies-gateway in the server image. Arguments are forwarded to acies-gateway directly.
 edge-gateway *args:
@@ -28,7 +28,7 @@ edge-gateway *args:
         -e ACIES_CONNECT={{ zenoh_connect }} \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-pi:latest acies-gateway {{ args }}
+        acies-server:latest acies-gateway {{ args }}
 
 # Run acies-gateway directly (no Docker). Arguments are forwarded to acies-gateway directly.
 edge-gateway-local *args:
