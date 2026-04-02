@@ -160,7 +160,7 @@ class AciesContext:
         """Return current time in nanoseconds. Mockable in tests via now_fn injection."""
         return self._now_fn()
 
-    def publish(self, topic: str, msg: msgspec.Struct) -> None:
+    def publish(self, topic: str, msg: Any) -> None:
         """Encode msg and publish raw bytes to topic.
 
         Encoding happens here (worker thread) so the router stays byte-only.
