@@ -166,12 +166,13 @@ def run_inference(ctx: AciesContext) -> None:
     logit, _feat = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
     infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
 
-    logits: list[list[float]] = [np.array(logit).flatten().tolist()]
+    # logit shape: (num_targets, num_classes), values are probabilities
+    probs: list[list[float]] = np.array(logit).tolist()
     ensemble_buf: deque[list[list[float]]] = ctx.app['ensemble_buf']
-    ensemble_buf.append(logits)
+    ensemble_buf.append(probs)
     logger.debug(
-        'inference: logits=%s infer_ms=%.1f ensemble=%d',
-        [[f'{x:.3f}' for x in row] for row in logits],
+        'inference: probs=%s infer_ms=%.1f ensemble=%d',
+        [[f'{x:.3f}' for x in row] for row in probs],
         infer_ms,
         len(ensemble_buf),
     )
@@ -179,22 +180,20 @@ def run_inference(ctx: AciesContext) -> None:
     if len(ensemble_buf) < ctx.cfg.get('ensemble_size', 1):
         return
 
-    # --- soft-vote ensemble: average logits across the window ---
+    # --- soft-vote ensemble: average probabilities across the window ---
     # shape: (ensemble_win, num_targets, num_classes) -> mean over axis 0
-    ensemble_logits: list[list[float]] = np.array(list(ensemble_buf)).mean(axis=0).tolist()
-    raw = np.array(ensemble_logits[0])
-    probs = np.exp(raw - raw.max())
-    probs /= probs.sum()
+    ensemble_probs: npt.NDArray[np.float64] = np.array(list(ensemble_buf)).mean(axis=0)
 
     labels: list[str] = ctx.cfg.get('labels') or []
-    ctx.publish(
-        ctx.app['output_topic'],
-        AciesInference(
-            source=ctx.ns.base,
-            timestamp=ctx.now(),
-            predictions=[AciesPrediction(label=label, score=float(score)) for label, score in zip(labels, probs)],
-        ),
-    )
+    predictions: list[AciesPrediction] = []
+    for target_probs in ensemble_probs:
+        for label, score in zip(labels, target_probs):
+            if score > 0:
+                predictions.append(AciesPrediction(label=label, score=float(score)))
+
+    msg = AciesInference(source=ctx.ns.base, timestamp=ctx.now(), predictions=predictions)
+    logger.debug(f'Inference result: {msg}')
+    ctx.publish(ctx.app['output_topic'], msg)
 
 
 @app.cli()
