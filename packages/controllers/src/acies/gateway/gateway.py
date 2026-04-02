@@ -111,7 +111,7 @@ def teardown(_ctx: AciesContext) -> None:
 )
 @click.option(
     '--ensemble-win',
-    default=5,
+    default=30,
     type=int,
     show_default=True,
     help='Ensemble window size in seconds.',
