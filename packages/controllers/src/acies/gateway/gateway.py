@@ -34,13 +34,8 @@ app = AciesApp()
 
 @app.subscribe('**/vehicle')
 def on_vehicle(_ctx: AciesContext, msg: AciesInference) -> None:
-    top = msg.predictions[0] if msg.predictions else None
-    logger.info(
-        'vehicle inference from %s: %s (score=%.2f)',
-        msg.source,
-        top.label if top else 'none',
-        top.score if top else 0.0,
-    )
+    for pred in msg.predictions:
+        logger.debug('from %s: %s', msg.source, pred)
 
 
 @app.subscribe('ws://ctl')
