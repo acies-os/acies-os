@@ -20,10 +20,12 @@ Usage::
 from __future__ import annotations
 
 import logging
+import random
 from collections import defaultdict, deque
 from typing import Any
 
 import click
+import numpy as np
 import tomli as tomllib
 from acies.corev2 import AciesApp, AciesContext, setup_logging
 from acies.corev2.msg import AciesInference, AciesPrediction
@@ -48,6 +50,36 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
 @app.subscribe('ws://ctl')
 def on_ctl(_ctx: AciesContext, msg: Any) -> None:
     logger.info('ctl command received: %r', msg)
+
+
+def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Returns the north and south end of the GPS coordinates as (lat, lon) tuples."""
+    north_lat = float(max(coord[0] for coord in gps.values()))
+    south_lat = float(min(coord[0] for coord in gps.values()))
+    north_lon = float(np.mean([coord[1] for coord in gps.values()]))
+    south_lon = float(np.mean([coord[1] for coord in gps.values()]))
+    return (north_lat, north_lon), (south_lat, south_lon)
+
+
+@app.schedule(1)
+def dummy_gps(ctx: AciesContext) -> None:
+    north, south = get_north_and_south_end(ctx.app['gps'])
+    # t oscillates 0 -> 1 (south->north) -> 0 (north->south), step 0.05
+    t: float = ctx.get('t', 0.0)
+    direction: int = ctx.get('direction', 1)
+    lat = south[0] + t * (north[0] - south[0])
+    lon = south[1] + t * (north[1] - south[1])
+    noise_lat = random.gauss(0, 0.0001)
+    noise_lon = random.gauss(0, 0.0001)
+    ctx.publish('ws://gps_truth', {'suv': {'lat': lat, 'lon': lon}})
+    ctx.publish('ws://gps', {'suv': {'lat': lat + noise_lat, 'lon': lon + noise_lon}})
+    t += direction / 15.0
+    if t >= 1.0:
+        t, direction = 1.0, -1
+    elif t <= 0.0:
+        t, direction = 0.0, 1
+    ctx['t'] = t
+    ctx['direction'] = direction
 
 
 @app.schedule(1.0)
