@@ -1,6 +1,6 @@
 acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
-edge_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7447")
+edge_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
 edge_zenoh_bridge := env("ZENOH_BRIDGE", "")
 
 [private]
