@@ -26,6 +26,7 @@ dependencies = [
 scripts.acies-geo = "acies.sensors.geo:main"
 scripts.acies-idle = "acies.sensors.idle:main"
 scripts.acies-mic = "acies.sensors.mic:main"
+scripts.acies-replay = "acies.sensors.replay:main"
 
 [dependency-groups]
 dev = [
