@@ -9,7 +9,7 @@ services:
       - ACIES_LOG=${ACIES_LOG:-}
       - ACIES_HOST=${ACIES_HOST:-}
       - ACIES_NAME=geo
-      - ACIES_CONNECT=${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
+      - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     volumes:
       - /data:/data
       - ~/.acies:/root/.acies
@@ -30,7 +30,7 @@ services:
       - ACIES_LOG=${ACIES_LOG:-}
       - ACIES_HOST=${ACIES_HOST:-}
       - ACIES_NAME=mic
-      - ACIES_CONNECT=${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
+      - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     volumes:
       - /data:/data
       - ~/.acies:/root/.acies
@@ -50,7 +50,7 @@ services:
       - ACIES_LOG=${ACIES_LOG:-}
       - ACIES_HOST=${ACIES_HOST:-}
       - ACIES_NAME=vfm
-      - ACIES_CONNECT=${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
+      - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     volumes:
       - /data:/data
       - /model:/model
@@ -60,7 +60,7 @@ services:
   zenohd:
     image: acies-pi:latest
     profiles: [geo, mic, geo-classifier, mic-classifier, multimodal]
-    command: zenohd --listen ${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock} ${ZENOH_BRIDGE}
+    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} ${ZENOH_BRIDGE}
     network_mode: host
     volumes:
       - ~/.acies:/root/.acies
