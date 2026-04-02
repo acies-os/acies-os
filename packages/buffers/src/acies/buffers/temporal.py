@@ -18,18 +18,13 @@ class TemporalBuffer:
     def add(self, topic: str, timestamp: int, value: Any):
         self._data[topic][timestamp] = value
         self._timestamps[timestamp] += 1
-        self._check_size()
+        self._check_size(topic)
 
-    def _check_size(self):
-        while len(self._timestamps) > self.size:
-            # find and delete the oldest timestamp
-            t = min(self._timestamps.keys())
-
-            for v in self._data.values():
-                # v = {t1: msg1, t2: msg2}
-                _ = v.pop(t, None)
-                self._timestamps[t] -= 1
-
+    def _check_size(self, topic: str):
+        while len(self._data[topic]) > self.size:
+            t = min(self._data[topic].keys())
+            del self._data[topic][t]
+            self._timestamps[t] -= 1
             if self._timestamps[t] == 0:
                 del self._timestamps[t]
 
