@@ -1,8 +1,8 @@
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
-zenoh_connect := env("ZENOH_CONNECT", "unixsock-stream//root/.acies/run/local.sock")
-zenoh_bridge := env("ZENOH_BRIDGE", "")
+pi_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
+pi_zenoh_bridge := env("ZENOH_BRIDGE", "")
 
 [private]
 default:
@@ -40,7 +40,7 @@ pi-zenohd *args:
         --detach-keys="ctrl-z,z" \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-pi:latest zenohd --listen {{ zenoh_connect }} {{ zenoh_bridge }} {{ args }}
+        acies-pi:latest zenohd --listen {{ pi_zenoh_connect }} {{ pi_zenoh_bridge }} {{ args }}
 
 # Run acies-mic in the Pi image. Arguments are forwarded to acies-mic directly.
 pi-mic *args:
@@ -51,7 +51,7 @@ pi-mic *args:
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=mic \
-        -e ACIES_CONNECT={{ zenoh_connect }} \
+        -e ACIES_CONNECT={{ pi_zenoh_connect }} \
         --network host \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
@@ -68,7 +68,7 @@ pi-geo *args:
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=geo \
-        -e ACIES_CONNECT={{ zenoh_connect }} \
+        -e ACIES_CONNECT={{ pi_zenoh_connect }} \
         --network host \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
@@ -86,7 +86,7 @@ pi-vfm *args:
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=vfm \
-        -e ACIES_CONNECT={{ zenoh_connect }} \
+        -e ACIES_CONNECT={{ pi_zenoh_connect }} \
         --network host \
         -v /data:/data \
         -v /model:/model \
