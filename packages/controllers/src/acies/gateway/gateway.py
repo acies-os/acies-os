@@ -65,7 +65,7 @@ def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, f
 def model_metrics(ctx: AciesContext) -> None:
     ctx.publish(
         'ws://performance',
-        {'rs1': {'f1': random.gauss(0.8, 0.05), 'accuracy': random.gauss(0.7, 0.05)}},
+        {'rs1': {'f1': min(random.gauss(0.8, 0.05), 1.0), 'accuracy': min(random.gauss(0.7, 0.05), 1.0)}},
     )
 
 
