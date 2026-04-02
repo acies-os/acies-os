@@ -1,7 +1,7 @@
 acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
-zenoh_connect := env("ZENOH_CONNECT", "unixsock-stream//root/.acies/run/local.sock")
-zenoh_bridge := env("ZENOH_BRIDGE", "")
+edge_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7447")
+edge_zenoh_bridge := env("ZENOH_BRIDGE", "")
 
 [private]
 default:
@@ -10,11 +10,12 @@ default:
 # Run zenohd in the server image. Listens on UDS for local apps; bridges to Pi devices via TCP.
 edge-zenohd *args:
     @mkdir -p ~/.acies/logs
+    echo {{ edge_zenoh_connect }}
     -@docker run --rm -it --init \
         --detach-keys="ctrl-z,z" \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-server:latest zenohd --listen {{ zenoh_connect }} {{ zenoh_bridge }} {{ args }}
+        acies-server:latest zenohd --listen {{ edge_zenoh_connect }} {{ edge_zenoh_bridge }} {{ args }}
 
 # Run acies-gateway in the server image. Arguments are forwarded to acies-gateway directly.
 edge-gateway *args:
@@ -25,10 +26,9 @@ edge-gateway *args:
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=gateway \
-        -e ACIES_CONNECT={{ zenoh_connect }} \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-server:latest acies-gateway {{ args }}
+        acies-server:latest acies-gateway --connect {{ edge_zenoh_connect }} {{ args }}
 
 # Run acies-gateway directly (no Docker). Arguments are forwarded to acies-gateway directly.
 edge-gateway-local *args:
@@ -36,5 +36,4 @@ edge-gateway-local *args:
     ACIES_LOG={{ acies_log }} \
     ACIES_HOST={{ acies_host }} \
     ACIES_NAME=gateway \
-    ACIES_CONNECT={{ zenoh_connect }} \
-    uv run acies-gateway {{ args }}
+    uv run acies-gateway --connect {{ edge_zenoh_connect }} {{ args }}
