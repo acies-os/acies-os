@@ -3,6 +3,7 @@ acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
 pi_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
 pi_zenoh_bridge := env("ZENOH_BRIDGE", "")
+rawshake_debug := env("RAWSHAKE_DEBUG", "0")
 
 [private]
 default:
@@ -69,6 +70,7 @@ pi-geo *args:
         -e ACIES_HOST={{ acies_host }} \
         -e ACIES_NAME=geo \
         -e ACIES_CONNECT={{ pi_zenoh_connect }} \
+        -e RAWSHAKE_DEBUG={{ rawshake_debug }} \
         --network host \
         -v /data:/data \
         -v ~/.acies:/root/.acies \
