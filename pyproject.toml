@@ -62,7 +62,7 @@ workspace.members = [
 line-length = 120
 format = { quote-style = "single" }
 lint.extend-select = [ "C90", "I", "Q", "RUF100" ]
-lint.unfixable = [ "F401" ]
+# lint.unfixable = [ "F401" ]
 lint.flake8-quotes = { inline-quotes = "single", multiline-quotes = "double" }
 lint.mccabe = { max-complexity = 13 }
 
