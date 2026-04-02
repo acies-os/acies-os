@@ -82,8 +82,8 @@ def create_acies_cli(
         @click.option(
             '--acies-connect',
             multiple=True,
-            default=(_DEFAULT_CONNECT,),
-            show_default=True,
+            # default=(_DEFAULT_CONNECT,),
+            # show_default=True,
             envvar='ACIES_CONNECT',
             help='Endpoints to connect to. May be repeated.',
         )
