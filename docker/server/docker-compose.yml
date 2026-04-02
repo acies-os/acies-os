@@ -1,0 +1,22 @@
+services:
+  zenohd:
+    image: acies-server:latest
+    command: zenohd --listen tcp/0.0.0.0:7447 --listen ${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
+    network_mode: host
+    volumes:
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  acies-gateway:
+    image: acies-server:latest
+    command: acies-gateway
+    network_mode: host
+    environment:
+      - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_HOST=${ACIES_HOST:-}
+      - ACIES_NAME=gateway
+      - ACIES_CONNECT=${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
+    volumes:
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
