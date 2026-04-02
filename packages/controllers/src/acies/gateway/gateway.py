@@ -63,6 +63,7 @@ def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, f
 
 @app.schedule(1.0)
 def model_metrics(ctx: AciesContext) -> None:
+    # TODO: replace with real metrics tracking and calculation
     ctx.publish(
         'ws://performance',
         {'rs1': {'f1': min(random.gauss(0.8, 0.05), 1.0), 'accuracy': min(random.gauss(0.7, 0.05), 1.0)}},
@@ -71,6 +72,9 @@ def model_metrics(ctx: AciesContext) -> None:
 
 @app.schedule(1)
 def dummy_gps(ctx: AciesContext) -> None:
+    # TODO: replace with GPS data
+    # - subscribe to a GPS topic (from replay)?
+    # - Add MQTT support to obtain real-time GPS data
     north, south = get_north_and_south_end(ctx.app['gps'])
     # t oscillates 0 -> 1 (south->north) -> 0 (north->south), step 0.05
     t: float = ctx.get('t', 0.0)
@@ -92,6 +96,7 @@ def dummy_gps(ctx: AciesContext) -> None:
 
 @app.schedule(1.0)
 def dummy_health(ctx: AciesContext) -> None:
+    # TODO: replace with real health monitoring
     system_health = {
         'rs1': {
             'servicies': [
