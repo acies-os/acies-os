@@ -18,6 +18,7 @@ class TemporalBuffer:
     def add(self, topic: str, timestamp: int, value: Any):
         self._data[topic][timestamp] = value
         self._timestamps[timestamp] += 1
+        self._check_size()
 
     def _check_size(self):
         while len(self._timestamps) > self.size:
