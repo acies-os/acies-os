@@ -24,7 +24,6 @@ from collections import defaultdict, deque
 from typing import Any
 
 import click
-import msgspec
 import tomli as tomllib
 from acies.corev2 import AciesApp, AciesContext, setup_logging
 from acies.corev2.msg import AciesInference, AciesPrediction
