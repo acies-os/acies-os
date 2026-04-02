@@ -24,6 +24,7 @@ from collections import defaultdict, deque
 from typing import Any
 
 import click
+import msgspec
 import tomli as tomllib
 from acies.corev2 import AciesApp, AciesContext, setup_logging
 from acies.corev2.msg import AciesInference, AciesPrediction
@@ -42,6 +43,7 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
         logger.debug('from %s: %s', msg.source, pred)
     with ctx.app.lock:
         ctx.app['ensemble_buf'].append((msg.timestamp, msg.predictions))
+    ctx.publish('ws://predictions', msg)
 
 
 @app.subscribe('ws://ctl')
@@ -71,14 +73,14 @@ def run_ensemble(ctx: AciesContext) -> None:
         for pred in preds:
             label_scores[pred.label].append(pred.score)
 
-    logger.debug('-- ensemble t=%d, entires=%d --', now, len(entries))
+    logger.info('ensemble t=%d, entires=%d', now, len(entries))
     predictions: list[AciesPrediction] = []
     for label, scores in label_scores.items():
         avg = sum(scores) / len(scores)
         if avg > 0:
             pred = AciesPrediction(label=label, score=avg)
             predictions.append(pred)
-            logger.info('%s', pred)
+            logger.info('  - %s', pred)
 
 
 @app.on_startup
