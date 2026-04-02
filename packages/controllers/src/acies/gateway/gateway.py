@@ -63,7 +63,10 @@ def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, f
 
 @app.schedule(1.0)
 def model_metrics(ctx: AciesContext) -> None:
-    ctx.publish('ws://performance', {'rs1': {'f1': 0.99, 'accuracy': 0.88, 'latency_ms': 230}})
+    ctx.publish(
+        'ws://performance',
+        {'rs1': {'f1': random.gauss(0.8, 0.05), 'accuracy': random.gauss(0.7, 0.05)}},
+    )
 
 
 @app.schedule(1)
