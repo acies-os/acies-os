@@ -18,6 +18,12 @@ pi_hosts := env("PI_HOSTS", "")
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 server_hosts := env("SERVER_HOSTS", "")
 
+# print how to start the SSH agent.
+start-ssh-agent:
+    echo "Run:"
+    echo "eval (ssh-agent -c)"
+    echo "ssh-add ~/.ssh/id_<key>"
+
 # ----------------------------------- build -----------------------------------
 
 # One-time: install Docker Desktop and buildx plugin on Apple Silicon
