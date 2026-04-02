@@ -2,12 +2,20 @@ services:
   acies-geo:
     image: acies-pi:latest
     profiles: [geo, geo-classifier, multimodal]
-    command: .venv/bin/acies-geo
+    command: acies-geo
+    network_mode: host
+    environment:
+      - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_HOST=${ACIES_HOST:-}
+      - ACIES_NAME=geo
+      - ACIES_CONNECT=${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
     volumes:
-      - ./:/acies-os
       - /data:/data
+      - ~/.acies:/root/.acies
     devices:
       - /dev/serial0:/dev/serial0
+      - /dev/bus/usb:/dev/bus/usb
     group_add:
       - dialout
     restart: unless-stopped
@@ -15,10 +23,17 @@ services:
   acies-mic:
     image: acies-pi:latest
     profiles: [mic, mic-classifier, multimodal]
-    command: .venv/bin/acies-mic
+    command: acies-mic
+    network_mode: host
+    environment:
+      - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_HOST=${ACIES_HOST:-}
+      - ACIES_NAME=mic
+      - ACIES_CONNECT=${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
     volumes:
-      - ./:/acies-os
       - /data:/data
+      - ~/.acies:/root/.acies
     devices:
       - /dev/snd:/dev/snd
     group_add:
@@ -28,15 +43,25 @@ services:
   acies-vfm:
     image: acies-pi:latest
     profiles: [geo-classifier, mic-classifier, multimodal]
-    command: .venv/bin/acies-vfm --weight ${VFM_WEIGHT} --geo ${VFM_GEO_TOPIC} --mic ${VFM_MIC_TOPIC}
+    command: acies-vfm --weight ${VFM_WEIGHT} --geo ${VFM_GEO_TOPIC} --mic ${VFM_MIC_TOPIC}
+    network_mode: host
+    environment:
+      - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_HOST=${ACIES_HOST:-}
+      - ACIES_NAME=vfm
+      - ACIES_CONNECT=${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
     volumes:
-      - ./:/acies-os
       - /data:/data
+      - /model:/model
+      - ~/.acies:/root/.acies
     restart: unless-stopped
 
   zenohd:
     image: acies-pi:latest
     profiles: [geo, mic, geo-classifier, mic-classifier, multimodal]
-    command: zenohd
+    command: zenohd --listen ${ZENOH_CONNECT:-unixsock-stream//root/.acies/run/local.sock}
     network_mode: host
+    volumes:
+      - ~/.acies:/root/.acies
     restart: unless-stopped
