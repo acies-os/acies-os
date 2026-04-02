@@ -175,6 +175,20 @@ class AciesPrediction(msgspec.Struct, frozen=True, omit_defaults=True):
     longitude: float | None = None  # decimal degrees
     extras: dict[str, Any] = {}  # model-specific metadata
 
+    def __repr__(self) -> str:
+        parts = [f'label={self.label!r}', f'score={self.score:.3f}']
+        if self.distance is not None:
+            parts.append(f'distance={self.distance:.3f}')
+        if self.speed is not None:
+            parts.append(f'speed={self.speed:.3f}')
+        if self.latitude is not None:
+            parts.append(f'lat={self.latitude:.3f}')
+        if self.longitude is not None:
+            parts.append(f'lon={self.longitude:.3f}')
+        if self.extras:
+            parts.append(f'extras={self.extras!r}')
+        return f'Pred({", ".join(parts)})'
+
 
 class AciesInference(msgspec.Struct, frozen=True):
     """Inference result message published by a classifier.
