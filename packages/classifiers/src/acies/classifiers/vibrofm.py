@@ -189,11 +189,12 @@ def run_inference(ctx: AciesContext) -> None:
     for target_probs in ensemble_probs:
         for label, score in zip(labels, target_probs):
             if score > 0:
-                predictions.append(AciesPrediction(label=label, score=float(score)))
+                target_pred = AciesPrediction(label=label, score=float(score))
+                predictions.append(target_pred)
+                logger.debug('%s', target_pred)
 
     if len(predictions) > 0:
         msg = AciesInference(source=ctx.ns.base, timestamp=ctx.now(), predictions=predictions)
-        logger.debug(f'Inference result: {msg}')
         ctx.publish(ctx.app['output_topic'], msg)
 
 
