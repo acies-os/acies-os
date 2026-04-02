@@ -48,59 +48,13 @@ build-pi:
         .
 
 # Build server image for the host platform and load into the local Docker daemon.
-# Run on each machine, then push-server to upload to the registry,
-# then build-server-manifest on the laptop to combine into one multi-platform tag.
-
-# Run `just builder-setup` once before using this.
 build-server:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "$(uname -m)" in
-        x86_64)        arch=amd64 ;;
-        aarch64|arm64) arch=arm64 ;;
-        *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
-    esac
     docker buildx build \
         --ssh default \
-        -t acies-server:{{ tag }}-${arch} \
+        -t acies-server:{{ tag }} \
         --load \
         -f docker/server/Dockerfile \
         .
-
-# Push the locally built arch-specific server image to the registry.
-
-# Use registry= on the laptop, registry_external= from a remote server.
-push-server:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "$(uname -m)" in
-        x86_64)        arch=amd64 ;;
-        aarch64|arm64) arch=arm64 ;;
-        *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
-    esac
-    docker tag acies-server:{{ tag }}-${arch} {{ registry }}/acies-server:{{ tag }}-${arch}
-    docker push {{ registry }}/acies-server:{{ tag }}-${arch}
-
-#
-# Workflow:
-#
-#   # on laptop (arm64): build + push to local registry
-#   just build-server
-#   just push-server
-#
-#   # on amd64 server: build + push to laptop's registry
-#   just build-server
-#   just push-server registry=10.8.0.102:5100
-#
-#   # back on laptop: combine into one manifest
-#   just build-server-manifest
-
-# Merge arch-specific server images into a single multi-platform manifest.
-build-server-manifest:
-    docker buildx imagetools create \
-        -t {{ registry }}/acies-server:{{ tag }} \
-        {{ registry }}/acies-server:{{ tag }}-amd64 \
-        {{ registry }}/acies-server:{{ tag }}-arm64
 
 # Clean up build cache and dangling images
 build-prune:
@@ -161,16 +115,4 @@ deploy-pi:
         ssh "$host" "docker pull {{ registry_external }}/acies-pi:{{ tag }} \
             && docker tag {{ registry_external }}/acies-pi:{{ tag }} acies-pi:{{ tag }} \
             && docker rmi {{ registry_external }}/acies-pi:{{ tag }}"
-    done
-
-# Pull updated server image on all servers. Requires SERVER_HOSTS set in .env or environment.
-deploy-server:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    [ -n "{{ server_hosts }}" ] || { echo "error: SERVER_HOSTS not set"; exit 1; }
-    for host in {{ server_hosts }}; do
-        echo "==> deploying acies-server:{{ tag }} to $host"
-        ssh "$host" "docker pull {{ registry_external }}/acies-server:{{ tag }} \
-            && docker tag {{ registry_external }}/acies-server:{{ tag }} acies-server:{{ tag }} \
-            && docker rmi {{ registry_external }}/acies-server:{{ tag }}"
     done
