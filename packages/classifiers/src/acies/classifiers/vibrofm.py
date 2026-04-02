@@ -163,13 +163,18 @@ def run_inference(ctx: AciesContext) -> None:
             data['shake']['audio'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 1600))  # pyright: ignore[reportUnknownMemberType]
 
     t0 = time.perf_counter_ns()
-    logit = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
+    logit, _feat = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
     infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
 
-    logits: list[list[float]] = [np.array(logit[0]).flatten().tolist()]
+    logits: list[list[float]] = [np.array(logit).flatten().tolist()]
     ensemble_buf: deque[list[list[float]]] = ctx.app['ensemble_buf']
     ensemble_buf.append(logits)
-    logger.debug('inference: logits=%s infer_ms=%.1f ensemble=%d', logits, infer_ms, len(ensemble_buf))
+    logger.debug(
+        'inference: logits=%s infer_ms=%.1f ensemble=%d',
+        [[f'{x:.3f}' for x in row] for row in logits],
+        infer_ms,
+        len(ensemble_buf),
+    )
 
     if len(ensemble_buf) < ctx.cfg.get('ensemble_size', 1):
         return
