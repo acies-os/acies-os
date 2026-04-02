@@ -195,6 +195,7 @@ dependencies = [
     { name = "acies-core", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "msgspec", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "polars", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "rawshake", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "sounddevice", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
 ]
@@ -214,6 +215,7 @@ requires-dist = [
     { name = "acies-core", editable = "packages/core" },
     { name = "msgspec", specifier = ">=0.20" },
     { name = "numpy", specifier = ">=1.24" },
+    { name = "polars", specifier = ">=1.39.3" },
     { name = "rawshake", git = "https://github.com/jinyangustc/rawshake.git?tag=v0.1.15" },
     { name = "sounddevice", specifier = ">=0.5.5" },
 ]

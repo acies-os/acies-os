@@ -72,6 +72,14 @@ class AciesKvResponse(msgspec.Struct, frozen=True):
     results: list[AciesResult]
 
 
+class AciesKvChange(msgspec.Struct, frozen=True):
+    """Published to ctl/notify/<key> after a successful kv set or del."""
+
+    key: list[str]
+    op: str  # 'set' | 'del'
+    value: Any = None  # new value for 'set'; None for 'del'
+
+
 class TopicRename(msgspec.Struct, frozen=True):
     old: str | None = None  # None = add only (no unsubscribe)
     new: str | None = None  # None = remove only (no subscribe)
@@ -145,7 +153,7 @@ class AciesTimeSeries(msgspec.Struct, frozen=True):
     source: str
     timestamp: NanoSecond
     payload: list[bytes]  # payload[i] = raw samples for channels[i]
-    channels: list[str | int]
+    channels: list[int] | list[str]
     sampling_rate: int
     dtype: str  # numpy dtype string: 'int16', 'int32', etc.
 

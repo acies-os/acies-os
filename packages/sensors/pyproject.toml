@@ -19,6 +19,7 @@ dependencies = [
   "acies-core",
   "msgspec>=0.20",
   "numpy>=1.24",
+  "polars>=1.39.3",
   "rawshake",
   "sounddevice>=0.5.5",
 ]
