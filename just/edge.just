@@ -28,7 +28,7 @@ edge-gateway *args:
         -e ACIES_NAME=gateway \
         --network host \
         -v ~/.acies:/root/.acies \
-        acies-server:latest acies-gateway --connect {{ edge_zenoh_connect }} {{ args }}
+        acies-server:latest acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
 # Run acies-gateway directly (no Docker). Arguments are forwarded to acies-gateway directly.
 edge-gateway-local *args:
@@ -36,4 +36,4 @@ edge-gateway-local *args:
     ACIES_LOG={{ acies_log }} \
     ACIES_HOST={{ acies_host }} \
     ACIES_NAME=gateway \
-    uv run acies-gateway --connect {{ edge_zenoh_connect }} {{ args }}
+    uv run acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
