@@ -70,7 +70,7 @@ class Router:
         #   _prefix_routes
         self._default_transport: Transport | None = None
         # Explicit prefix routes, e.g. ('ws://', ws_transport). First match wins.
-        self._prefix_routes: list[tuple[str, Transport]] = []
+        self._prefix_routes: dict[str, Transport] = {}
 
         # Thread-safe by its own contract:
         #   _inbound
@@ -114,7 +114,7 @@ class Router:
         are checked before the default, in insertion order.
         """
         if prefix is not None:
-            self._prefix_routes.append((prefix, transport))
+            self._prefix_routes[prefix] = transport
             logger.debug('transport registered: %s prefix=%r', type(transport).__name__, prefix)
         else:
             self._default_transport = transport
@@ -302,24 +302,24 @@ class Router:
 
     def has_prefix_transport(self, prefix: str) -> bool:
         """Return True if a transport is registered for the given prefix."""
-        return any(p == prefix for p, _ in self._prefix_routes)
+        return prefix in self._prefix_routes
 
     def _on_message(self, topic: str, raw: bytes, reply_fn: ReplyCallback | None = None) -> None:
         """Transport callback — push into the inbound queue."""
         self._inbound.put((topic, raw, reply_fn))
 
     def _transport_for(self, topic: str) -> Transport:
-        for prefix, transport in self._prefix_routes:
+        if '://' not in topic and self._default_transport is not None:
+            return self._default_transport
+        for prefix, transport in self._prefix_routes.items():
             if topic.startswith(prefix):
                 return transport
-        if self._default_transport is not None:
-            return self._default_transport
         raise RuntimeError(f'No transport for topic: {topic!r}')
 
     def _all_transports(self) -> list[Transport]:
         seen: set[int] = set()
         result: list[Transport] = []
-        for _, t in self._prefix_routes:
+        for t in self._prefix_routes.values():
             if id(t) not in seen:
                 seen.add(id(t))
                 result.append(t)
