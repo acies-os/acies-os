@@ -99,13 +99,21 @@ def teardown(ctx: AciesContext) -> None:
     logger.info('database connection closed')
 
 
+_IDLE_WARN_THRESHOLD = 10  # consecutive 1-second timeouts before warning (~10s)
+
+
 @app.thread
 def publish(ctx: AciesContext, stop: threading.Event) -> None:
     db_buf: list[DbRow] = ctx.app['db_buf']
+    idle_count = 0
     while not stop.is_set():
         msg = ctx.app['reader'].get(timeout=1.0)
         if msg is None:
+            idle_count += 1
+            if idle_count == _IDLE_WARN_THRESHOLD:
+                logger.warning('no data from device for ~%ds; check serial connection', idle_count)
             continue
+        idle_count = 0
 
         ts_ns, channel_samples = get_samples(msg)
         # Pick the first preferred channel present in the message.
