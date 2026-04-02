@@ -71,7 +71,7 @@ def test_publish_delivers_to_client():
 
     raw = ws.recv(timeout=2.0)
     frame = _decode(raw)
-    assert frame.topic == 'ws://dashboard'
+    assert frame.topic == 'dashboard'
     assert frame.payload == b'hello'
 
     ws.close()
@@ -88,7 +88,7 @@ def test_publish_delivers_to_all_clients():
 
     for ws in clients:
         frame = _decode(ws.recv(timeout=2.0))
-        assert frame.topic == 'ws://dashboard'
+        assert frame.topic == 'dashboard'
         assert frame.payload == b'broadcast'
         ws.close()
 
@@ -111,7 +111,7 @@ def test_publish_preserves_topic_in_frame():
     t.publish('ws://inference', b'\x00\x01\x02')
 
     frame = _decode(ws.recv(timeout=2.0))
-    assert frame.topic == 'ws://inference'
+    assert frame.topic == 'inference'
 
     ws.close()
     t.stop()
@@ -133,7 +133,7 @@ def test_inbound_frame_delivered_to_on_message():
     ws = _connect()
     time.sleep(0.05)
 
-    ws.send(_encode('ws://control', b'payload'))
+    ws.send(_encode('control', b'payload'))
 
     assert event.wait(timeout=2.0), 'on_message not called'
     assert received == [('ws://control', b'payload')]
@@ -155,7 +155,7 @@ def test_inbound_topic_routed_correctly():
     ws = _connect()
     time.sleep(0.05)
 
-    ws.send(_encode('ws://config', b'data'))
+    ws.send(_encode('config', b'data'))
 
     assert event.wait(timeout=2.0)
     assert topics == ['ws://config']
@@ -219,7 +219,7 @@ def test_multiple_inbound_frames_from_same_client():
     time.sleep(0.05)
 
     for i in range(3):
-        ws.send(_encode(f'ws://ch{i}', f'payload{i}'.encode()))
+        ws.send(_encode(f'ch{i}', f'payload{i}'.encode()))
 
     assert done.wait(timeout=2.0)
     assert [(t, p) for t, p in received] == [

@@ -18,6 +18,7 @@ from .msg import (
     AciesHeartbeat,
     AciesIoRequest,
     AciesIoResponse,
+    AciesKvChange,
     AciesKvRequest,
     AciesKvResponse,
     AciesResult,
@@ -131,6 +132,7 @@ def _handle_del(config: dict[str, Any], k: list[str]) -> AciesResult:
 
 
 def _kv(ctx: AciesContext, msg: AciesKvRequest) -> AciesKvResponse:
+    notifications: list[AciesKvNotify] = []
     with ctx.app.lock:
         results: list[AciesResult] = []
         for entry in msg.ops:
@@ -138,9 +140,19 @@ def _kv(ctx: AciesContext, msg: AciesKvRequest) -> AciesKvResponse:
                 case AciesGet(key=k):
                     results.append(_handle_get(ctx.app.config, k))
                 case AciesSet(key=k, value=v):
-                    results.append(_handle_set(ctx.app.config, k, v))
+                    result = _handle_set(ctx.app.config, k, v)
+                    results.append(result)
+                    if isinstance(result, Ok):
+                        notifications.append(AciesKvChange(key=k, op='set', value=v))
                 case AciesDel(key=k):
-                    results.append(_handle_del(ctx.app.config, k))
+                    result = _handle_del(ctx.app.config, k)
+                    results.append(result)
+                    if isinstance(result, Ok):
+                        notifications.append(AciesKvChange(key=k, op='del'))
+    # Publish notifications outside the lock to avoid holding it during I/O.
+    for note in notifications:
+        topic = f'{ctx.ns.ctl.notify}/{note.key[0]}'
+        ctx.publish(topic, note)
     return AciesKvResponse(timestamp=ctx.now(), results=results)
 
 

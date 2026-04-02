@@ -31,7 +31,7 @@ from ._cli import create_acies_cli
 from ._control import make_heartbeat_spec, make_io_spec, make_kv_spec, make_route_spec, make_schema_spec
 from .context import AciesContext, AppState, TaskState, deep_merge
 from .executor import Executor
-from .namespace import CtlTopic, Namespace, Topic, TopicArg
+from .namespace import CtlTopic, Namespace, OnChange, Topic, TopicArg
 from .router import Router
 from .signal_handlers import temporary_signal_handlers
 from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec, ThreadSpec
@@ -346,11 +346,12 @@ class AciesApp:
     def _resolve_topic(self, topic: TopicArg) -> str:
         """Resolve a topic argument to a concrete string at run() time.
 
-        Handles four forms:
+        Handles five forms:
         - ``str`` — returned as-is, or resolved via ``format_map`` if it
           contains ``{placeholders}``.
         - ``Topic`` — resolved via ``ns.topic(*parts, prefix=...)``.
         - ``CtlTopic`` — resolved via ``ns.ctl(*parts)``.
+        - ``OnChange`` — resolved to ``<host>/<name>/ctl/notify/<key>``.
         - ``str`` with ``{key}`` — resolved via ``format_map`` from ``app.state.config``.
         """
         match topic:
@@ -370,6 +371,8 @@ class AciesApp:
                     return topic.path
             case CtlTopic():
                 return f'{self._ns.ctl.base}/{topic.path}'
+            case OnChange():
+                return f'{self._ns.ctl.notify}/{topic.key}'
 
     def run(self) -> None:  # noqa: C901
         """Start all subsystems, run lifecycle hooks, block until stop() is called.
@@ -405,12 +408,14 @@ class AciesApp:
         # -------------------------- setup transports --------------------------
 
         # --- zenoh transport (default) ---
+        # Skip if a default transport was already injected (e.g. LocalTransport in tests).
         sys_cfg = self._app_state.config['sys']
-        net_mode: str = sys_cfg.get('net_mode', 'client')
-        connect_eps: list[str] = sys_cfg.get('connect', [])
-        zenoh_listen_eps: list[str] = [ep for ep in sys_cfg.get('listen', []) if not ep.startswith(_WS_PREFIX)]
-        self._router.add_transport(ZenohTransport(mode=net_mode, connect=connect_eps, listen=zenoh_listen_eps))
-        logger.info('zenoh transport registered: mode=%r connect=%r listen=%r', net_mode, connect_eps, zenoh_listen_eps)
+        if self._router._default_transport is None:
+            net_mode: str = sys_cfg.get('net_mode', 'client')
+            connect_eps: list[str] = sys_cfg.get('connect', [])
+            zenoh_listen_eps: list[str] = [ep for ep in sys_cfg.get('listen', []) if not ep.startswith(_WS_PREFIX)]
+            self._router.add_transport(ZenohTransport(mode=net_mode, connect=connect_eps, listen=zenoh_listen_eps))
+            logger.info('zenoh transport registered: mode=%r connect=%r listen=%r', net_mode, connect_eps, zenoh_listen_eps)
 
         seen_ws: set[str] = set()
         for endpoint in self._app_state.config['sys'].get('listen', []):

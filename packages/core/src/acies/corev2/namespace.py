@@ -116,6 +116,7 @@ class CtlTopics:
         ctl.route              # "<host>/<name>/ctl/route"
         ctl.io                 # "<host>/<name>/ctl/io"
         ctl.schema             # "<host>/<name>/ctl/schema"
+        ctl.notify             # "<host>/<name>/ctl/notify"
         ctl('my', 'service')   # "<host>/<name>/ctl/my/service"
     """
 
@@ -124,6 +125,7 @@ class CtlTopics:
     route: str
     io: str
     schema: str
+    notify: str
     base: str
 
     def __call__(self, *parts: str) -> str:
@@ -151,6 +153,7 @@ class Namespace:
         ns.ctl.route                  # "edge-01/mic/ctl/route"
         ns.ctl.io                     # "edge-01/mic/ctl/io"
         ns.ctl.schema                 # "edge-01/mic/ctl/schema"
+        ns.ctl.notify                 # "edge-01/mic/ctl/notify"
         ns.ctl('custom')              # "edge-01/mic/ctl/custom"
     """
 
@@ -168,6 +171,7 @@ class Namespace:
             route=f'{base}/route',
             io=f'{base}/io',
             schema=f'{base}/schema',
+            notify=f'{base}/notify',
             base=base,
         )
 
@@ -241,4 +245,20 @@ class CtlTopic:
     path: str
 
 
-TopicArg: TypeAlias = str | Topic | CtlTopic
+@dataclass(frozen=True)
+class OnChange:
+    """Lazy notification topic resolved to ``<host>/<name>/ctl/notify/<key>`` at run() time.
+
+    Used with ``@app.subscribe`` to react to config changes via kv set/del.
+
+    Example::
+
+        OnChange('start_at')    # "edge-01/mic/ctl/notify/start_at"
+        OnChange('speed')       # "edge-01/mic/ctl/notify/speed"
+        OnChange('*')           # "edge-01/mic/ctl/notify/*"  (all keys)
+    """
+
+    key: str
+
+
+TopicArg: TypeAlias = str | Topic | CtlTopic | OnChange

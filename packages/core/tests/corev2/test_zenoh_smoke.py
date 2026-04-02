@@ -33,8 +33,8 @@ def test_publish_delivers_to_subscriber():
         delivered.append((topic, raw))
         event.set()
 
-    pub = ZenohTransport()
-    sub = ZenohTransport()
+    pub = ZenohTransport(mode='peer')
+    sub = ZenohTransport(mode='peer')
 
     pub.start(lambda t, r, f=None: None)
     sub.start(on_message)
@@ -57,8 +57,8 @@ def test_unsubscribed_topic_not_delivered():
     """Messages on an unsubscribed topic are not delivered."""
     delivered: list[str] = []
 
-    pub = ZenohTransport()
-    sub = ZenohTransport()
+    pub = ZenohTransport(mode='peer')
+    sub = ZenohTransport(mode='peer')
 
     pub.start(lambda t, r, f=None: None)
     sub.start(lambda t, r, f=None: delivered.append(t))
@@ -80,8 +80,8 @@ def test_wildcard_star_matches_one_segment():
     """Topic pattern 'smoke/*/value' matches 'smoke/unit1/value'."""
     event = threading.Event()
 
-    pub = ZenohTransport()
-    sub = ZenohTransport()
+    pub = ZenohTransport(mode='peer')
+    sub = ZenohTransport(mode='peer')
 
     pub.start(lambda t, r, f=None: None)
     sub.start(lambda t, r, f=None: event.set())
@@ -107,8 +107,8 @@ class _Pong(msgspec.Struct, frozen=True):
 @pytest.mark.zenoh
 def test_query_returns_reply():
     """query() returns the bytes sent by the advertised handler."""
-    server = ZenohTransport()
-    client = ZenohTransport()
+    server = ZenohTransport(mode='peer')
+    client = ZenohTransport(mode='peer')
 
     def on_message(topic: str, raw: bytes, reply_fn=None) -> None:
         if reply_fn is not None:
@@ -133,7 +133,7 @@ def test_query_returns_reply():
 @pytest.mark.zenoh
 def test_query_returns_none_on_timeout():
     """query() returns None when no handler is registered."""
-    client = ZenohTransport()
+    client = ZenohTransport(mode='peer')
     client.start(lambda t, r, f=None: None)
 
     result = client.query('smoke/rpc/nonexistent', b'', timeout=0.3)
