@@ -580,17 +580,20 @@ class AciesApp:
         """
         logger.debug('timer thread running: %d schedule(s)', len(schedule_specs))
         now = time.monotonic()
-        heap: list[tuple[float, ScheduleSpec]] = [(now + spec.interval, spec) for spec in schedule_specs]
+        # int tiebreaker prevents ScheduleSpec comparison when fire times are equal.
+        heap: list[tuple[float, int, ScheduleSpec]] = [
+            (now + spec.interval, i, spec) for i, spec in enumerate(schedule_specs)
+        ]
         heapq.heapify(heap)
 
         while True:
-            next_fire, spec = heap[0]
+            next_fire, idx, spec = heap[0]
             delay = next_fire - time.monotonic()
             if delay > 0 and self._stop_event.wait(timeout=delay):
                 break  # shutdown signalled during sleep
             if self._stop_event.is_set():
                 break
-            _ = heapq.heapreplace(heap, (time.monotonic() + spec.interval, spec))
+            _ = heapq.heapreplace(heap, (time.monotonic() + spec.interval, idx, spec))
             logger.debug('timer firing %r', spec.name)
             self._executor.enqueue(Job(spec=spec, raw=None))
         logger.debug('timer thread exiting')
