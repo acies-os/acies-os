@@ -61,6 +61,11 @@ def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, f
     return (north_lat, north_lon), (south_lat, south_lon)
 
 
+@app.schedule(1.0)
+def model_metrics(ctx: AciesContext) -> None:
+    ctx.publish('ws://performance', {'rs1': {'f1': 0.99, 'accuracy': 0.88, 'latency_ms': 230}})
+
+
 @app.schedule(1)
 def dummy_gps(ctx: AciesContext) -> None:
     north, south = get_north_and_south_end(ctx.app['gps'])
@@ -69,8 +74,8 @@ def dummy_gps(ctx: AciesContext) -> None:
     direction: int = ctx.get('direction', 1)
     lat = south[0] + t * (north[0] - south[0])
     lon = south[1] + t * (north[1] - south[1])
-    noise_lat = random.gauss(0, 0.0001)
-    noise_lon = random.gauss(0, 0.0001)
+    noise_lat = random.gauss(0, 0.00001)
+    noise_lon = random.gauss(0, 0.00001)
     ctx.publish('ws://gps_truth', {'suv': {'lat': lat, 'lon': lon}})
     ctx.publish('ws://gps', {'suv': {'lat': lat + noise_lat, 'lon': lon + noise_lon}})
     t += direction / 15.0
