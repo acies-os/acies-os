@@ -3,13 +3,14 @@
 Each AciesApp holds one ZenohTransport. Cross-node and cross-process
 routing is handled transparently by the zenoh network. Same-host IPC
 uses UDP multicast discovery (no daemon required); for explicit
-endpoints pass a custom zenoh.Config.
+endpoints pass connect/listen endpoint lists to the constructor.
 
 Logger: acies.corev2.transport.zenoh
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 
@@ -24,12 +25,24 @@ class ZenohTransport:
     """Zenoh-backed transport.
 
     Args:
-        config: Optional zenoh.Config. Defaults to zenoh.Config() (peer
-                mode, UDP multicast discovery).
+        mode:    Zenoh session mode: 'client' or 'peer'.
+        connect: Endpoints to connect to (e.g. ['tcp/router:7447']).
+        listen:  Endpoints to listen on in peer mode.
     """
 
-    def __init__(self, config: zenoh.Config | None = None) -> None:
-        self._config: zenoh.Config = config if config is not None else zenoh.Config()
+    def __init__(
+        self,
+        mode: str = 'client',
+        connect: list[str] | None = None,
+        listen: list[str] | None = None,
+    ) -> None:
+        cfg: zenoh.Config = zenoh.Config()
+        cfg.insert_json5('mode', f'"{mode}"')  # pyright: ignore[reportUnknownMemberType]
+        if connect:
+            cfg.insert_json5('connect/endpoints', json.dumps(connect))  # pyright: ignore[reportUnknownMemberType]
+        if listen:
+            cfg.insert_json5('listen/endpoints', json.dumps(listen))  # pyright: ignore[reportUnknownMemberType]
+        self._config: zenoh.Config = cfg
         self._session: zenoh.Session | None = None
         self._on_message: MessageHandler | None = None
         self._subscribers: dict[str, zenoh.Subscriber[None]] = {}
