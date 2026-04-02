@@ -5,6 +5,7 @@ set allow-duplicate-recipes := true
 import 'just/dev.just'
 import 'just/docker.just'
 import 'just/pi.just'
+import 'just/edge.just'
 
 [private]
 default:
