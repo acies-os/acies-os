@@ -47,7 +47,6 @@ _WS_DEFAULT_PORT = 8765
 def _parse_ws_endpoint(endpoint: str) -> tuple[str, int]:
     """Parse a WebSocket listen endpoint into (host, port)."""
     parsed = urlparse(endpoint)
-    parsed = urlparse(endpoint)
     ws_host = parsed.hostname or _WS_DEFAULT_HOST
     ws_port = parsed.port or _WS_DEFAULT_PORT
     return ws_host, ws_port
@@ -110,11 +109,9 @@ class AciesApp:
     ) -> None:
         resolved_name = name or uuid.uuid4().hex[:6]
         resolved_host = host or socket.gethostname()
-        if router is not None:
-            self._router: Router = router
-        else:
-            self._router = Router()
-            self._router.add_transport(ZenohTransport())
+        if router is None:
+            router = Router()
+        self._router: Router = router
         self._executor: Executor = Executor()
         self._tasks: list[TaskSpec] = []
         self._startup_hooks: list[Callable[..., None]] = []
@@ -378,29 +375,64 @@ class AciesApp:
         """Start all subsystems, run lifecycle hooks, block until stop() is called.
 
         Must be called from the main thread. Blocking until shutdown is the
-        intended usage — call this as the last statement in main().
+        intended usage -- call this as the last statement in main().
 
         Startup order:
-          1. Executor and Router started
-          2. Tasks registered with Router (subscribe/advertise)
-          3. Timer thread started (ScheduleSpec)
-          4. Startup hooks called
-          5. Managed threads (ThreadSpec) started — after hooks so ctx.app.data
+          1. Transports registered (ZenohTransport, WebSocketTransport)
+          2. Task contexts created
+          3. Executor and Router started (transport sessions opened)
+          4. Service schemas populated in config
+          5. Tasks registered with Router (subscribe/advertise)
+          6. Timer thread started (ScheduleSpec)
+          7. State set to 'active'; startup hooks called; startup_ok set
+          8. Managed threads (ThreadSpec) started -- after hooks so ctx.app.data
              is fully populated before any thread accesses it
-          6. Main thread blocks on _stop_event
+          9. Main thread blocks on _stop_event
 
         Shutdown order (triggered by stop()):
           1. _stop_event set -> main thread unblocks
-          2. Managed threads joined (5s shared deadline) — threads exit because
+          2. Managed threads joined (5s shared deadline) -- threads exit because
              _stop_event is already set; joined first so they can still publish
              during wind-down (router is still up)
-          3. Router stopped — no new inbound jobs enqueued after this point
-          4. Executor stopped — drains queue, then pool shuts down
-          5. Shutdown hooks called — router already down; hooks must not publish
+          3. Router stopped -- no new inbound jobs enqueued after this point
+          4. Executor stopped -- drains queue, then pool shuts down
+          5. Shutdown hooks called -- router already down; hooks must not publish
         """
 
         self._ns = Namespace(self._app_state.config['sys']['host'], self._app_state.config['sys']['name'])
         logger.info('starting: host=%r name=%r tasks=%d', self._ns.host, self._ns.name, len(self._tasks))
+
+        # -------------------------- setup transports --------------------------
+
+        # --- zenoh transport (default) ---
+        sys_cfg = self._app_state.config['sys']
+        net_mode: str = sys_cfg.get('net_mode', 'client')
+        connect_eps: list[str] = sys_cfg.get('connect', [])
+        zenoh_listen_eps: list[str] = [ep for ep in sys_cfg.get('listen', []) if not ep.startswith(_WS_PREFIX)]
+        self._router.add_transport(ZenohTransport(mode=net_mode, connect=connect_eps, listen=zenoh_listen_eps))
+        logger.info('zenoh transport registered: mode=%r connect=%r listen=%r', net_mode, connect_eps, zenoh_listen_eps)
+
+        seen_ws: set[str] = set()
+        for endpoint in self._app_state.config['sys'].get('listen', []):
+            if not endpoint.startswith(_WS_PREFIX) or endpoint in seen_ws:
+                continue
+            seen_ws.add(endpoint)
+            ws_host, ws_port = _parse_ws_endpoint(endpoint)
+            self._router.add_transport(WebSocketTransport(host=ws_host, port=ws_port), prefix=_WS_PREFIX)
+            logger.info('ws:// transport registered: %s:%d', ws_host, ws_port)
+
+        has_ws_subs = any(
+            any(isinstance(t, str) and t.startswith(_WS_PREFIX) for t in spec.topics)
+            for spec in self._tasks
+            if isinstance(spec, SubscriberSpec)
+        )
+        if has_ws_subs and not self._router.has_prefix_transport(_WS_PREFIX):
+            logger.warning(
+                'handlers subscribed to `ws://` topics, but no `ws://` listen endpoint is configured; '
+                'these handlers will never be invoked; '
+                'pass `--acies-listen=ws://<host>:<port>` to enable the `ws://` handlers, '
+                'for example `--acies-listen=ws://0.0.0.0:8765'
+            )
 
         def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
             def _publish(topic: str, raw: bytes) -> None:
@@ -423,27 +455,6 @@ class AciesApp:
             )
             for task in self._tasks
         }
-        seen_ws: set[str] = set()
-        for endpoint in self._app_state.config['sys'].get('listen', []):
-            if not endpoint.startswith(_WS_PREFIX) or endpoint in seen_ws:
-                continue
-            seen_ws.add(endpoint)
-            ws_host, ws_port = _parse_ws_endpoint(endpoint)
-            self._router.add_transport(WebSocketTransport(host=ws_host, port=ws_port), prefix=_WS_PREFIX)
-            logger.info('ws:// transport registered: %s:%d', ws_host, ws_port)
-
-        has_ws_subs = any(
-            any(isinstance(t, str) and t.startswith(_WS_PREFIX) for t in spec.topics)
-            for spec in self._tasks
-            if isinstance(spec, SubscriberSpec)
-        )
-        if has_ws_subs and not self._router.has_prefix_transport(_WS_PREFIX):
-            logger.warning(
-                'handlers subscribed to `ws://` topics, but no `ws://` listen endpoint is configured; '
-                'these handlers will never be invoked; '
-                'pass `--acies-listen=ws://<host>:<port>` to enable the `ws://` handlers, '
-                'for example `--acies-listen=ws://0.0.0.0:8765'
-            )
 
         self._executor.start(self.dispatch, n_workers=self._app_state.config['sys'].get('workers', 4))
         self._router.start(self._executor)
