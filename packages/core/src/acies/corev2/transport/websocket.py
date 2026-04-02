@@ -1,11 +1,9 @@
 """WebSocketTransport -- browser/UI transport over WebSocket.
 
-Asymmetric wire protocol:
-  Inbound  (browser -> server): msgpack [topic: str, payload: bytes]
-           The transport extracts the topic and calls on_message(topic, payload, None),
-           enabling normal @app.subscribe('ws://...') routing.
-  Outbound (server -> browser): msgpack [topic: str, payload: bytes]
-           The browser can filter by topic on its end.
+Wire protocol (symmetric msgpack [topic: str, payload: bytes]):
+  The browser uses clean topic names without the 'ws://' prefix.
+  Outbound (server -> browser): strips 'ws://' before sending.
+  Inbound  (browser -> server): prepends 'ws://' for internal routing.
 
 Usage::
 
@@ -22,13 +20,13 @@ Usage::
 
 Browser (inbound)::
 
-    ws.send(msgpack.encode(['ws://control', payload_bytes]));
+    ws.send(msgpack.encode(['control', payload_bytes]));
 
 Browser (outbound)::
 
     ws.onmessage = async e => {
         const [topic, payload] = decode(new Uint8Array(await e.data.arrayBuffer()));
-        ...
+        // topic is 'dashboard', 'predictions', etc. (no 'ws://' prefix)
     };
 
 query() and advertise() are no-ops -- WebSocket does not support RPC.
@@ -48,6 +46,8 @@ from websockets.sync.server import ServerConnection
 from ._base import MessageHandler
 
 logger = logging.getLogger(__name__)
+
+_PREFIX = 'ws://'
 
 
 class WsFrame(msgspec.Struct, array_like=True):
@@ -127,7 +127,11 @@ class WebSocketTransport:
         return None
 
     def publish(self, topic: str, raw: bytes) -> None:
-        """Broadcast msgpack [topic, payload] frame to all connected clients."""
+        """Broadcast msgpack [topic, payload] frame to all connected clients.
+
+        Strips the internal 'ws://' prefix so the browser sees clean topics.
+        """
+        topic = topic.removeprefix(_PREFIX)
         with self._clients_lock:
             clients = list(self._clients)
         if not clients:
@@ -162,7 +166,8 @@ class WebSocketTransport:
                 try:
                     frame = msgspec.msgpack.decode(raw_msg, type=WsFrame)
                     logger.debug('inbound %r from %s (%d bytes)', frame.topic, addr, len(frame.payload))
-                    self._on_message(frame.topic, frame.payload, None)
+                    topic = frame.topic if frame.topic.startswith(_PREFIX) else _PREFIX + frame.topic
+                    self._on_message(topic, frame.payload, None)
                 except (msgspec.DecodeError, ValueError):
                     logger.warning('client %s sent malformed frame (%d bytes); dropping', addr, len(raw_msg))
         except Exception:

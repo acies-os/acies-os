@@ -51,6 +51,22 @@ def on_ctl(_ctx: AciesContext, msg: Any) -> None:
 
 
 @app.schedule(1.0)
+def dummy_health(ctx: AciesContext) -> None:
+    system_health = {
+        'rs1': {
+            'servicies': [
+                'rs1/geo',
+                'rs1/mic',
+                'rs1/vfm',
+            ],
+            'lat': 40.2887754,
+            'lon': -88.1261283,
+        }
+    }
+    ctx.publish('ws://health', system_health)
+
+
+@app.schedule(1.0)
 def run_ensemble(ctx: AciesContext) -> None:
     window_ns: int = ctx.cfg.get('ensemble_win', _DEFAULT_ENSEMBLE_WIN_S) * _NS_PER_S
     now = ctx.now()
