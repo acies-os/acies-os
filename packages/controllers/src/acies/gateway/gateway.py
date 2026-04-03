@@ -30,6 +30,7 @@ import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, setup_logging
 from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction
+from acies.corev2.namespace import matches
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
 
 @app.subscribe('**/heartbeat')
 def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
-    if msg.source == ctx.ns.base:
+    if msg.source == ctx.ns.base or matches(msg.source, '**replay**'):
         return
 
     # --- validate source format (must be host/name) ---
