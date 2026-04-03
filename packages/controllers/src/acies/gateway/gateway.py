@@ -29,7 +29,7 @@ import numpy as np
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, setup_logging
-from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction
+from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesKvRequest, AciesKvResponse, AciesPrediction, AciesSet
 from acies.corev2.namespace import matches
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,38 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         }
 
     logger.debug('new replay config: %s', new_node_states)
-    logger.info('TODO: dispatch reconfig to the corresponding nodes')
+
+    start_at: float = float(ctx.now() / _NS_PER_S) + 30
+
+    for node_id, state in new_node_states.items():
+        if state['modality'] in ['mic', 'both']:
+            req = AciesKvRequest(
+                f'{node_id}/mic',
+                ctx.now(),
+                [
+                    AciesSet(['scene'], state['scene']),
+                    AciesSet(['run'], state['run_id']),
+                    AciesSet(['node'], state['replayed_node_id']),
+                    AciesSet(['start_at'], start_at),
+                ],
+            )
+            resp = ctx.query(f'{node_id}/mic/ctl/kv', req, timeout=1.0)
+            assert isinstance(resp, AciesKvResponse)
+            logger.debug('reconfig response from %s/mic: %s', node_id, resp)
+        if state['modality'] in ['geo', 'both']:
+            req = AciesKvRequest(
+                f'{node_id}/geo',
+                ctx.now(),
+                [
+                    AciesSet(['scene'], state['scene']),
+                    AciesSet(['run'], state['run_id']),
+                    AciesSet(['node'], state['replayed_node_id']),
+                ],
+            )
+            resp = ctx.query(f'{node_id}/geo/ctl/kv', req, timeout=1.0)
+            assert isinstance(resp, AciesKvResponse)
+            logger.debug('reconfig response from %s/geo: %s', node_id, resp)
+
     logger.info('TODO: send acknowledgement to the UI')
 
 
