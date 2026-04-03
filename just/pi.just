@@ -95,6 +95,13 @@ pi-vfm *args:
         -v ~/.acies:/root/.acies \
         acies-pi:latest acies-vfm {{ args }}
 
+# Replay sensor data locally. Pass --data-dir, --scene, --node, --run, --modality, etc.
+pi-replay-local *args:
+    @mkdir -p ~/.acies/logs ~/.acies/run
+    ACIES_LOG={{ acies_log }} \
+    uv run acies-replay --acies-host {{ acies_host }} \
+        --acies-connect {{ pi_zenoh_connect }} {{ args }}
+
 # Record 40 seconds of audio from the USB microphone array and save it to /data/alsa-test.wav
 record output="/data/alsa-test.wav":
     arecord -D hw:ArrayUAC10,0 -f S16_LE -r 16000 -c 6 -d 40 {{ output }}
