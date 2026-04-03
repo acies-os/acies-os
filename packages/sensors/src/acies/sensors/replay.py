@@ -145,6 +145,9 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['start_at'] = ctx.cfg.get('start_at')
     ctx.app['restart'] = threading.Event()
     ctx.app['reload'] = threading.Event()
+    # Track the start_at value that was last consumed by the replay thread.
+    # When a new start_at arrives, it differs from this -> triggers playback.
+    ctx.app['last_start_at'] = None
 
 
 # --- kv change notifications ---
@@ -247,6 +250,50 @@ def _play_windows(
     return True
 
 
+def _sleep_until(start_at: float, cancel: list[threading.Event]) -> bool:
+    """Sleep until the given wallclock epoch. Returns True if ready, False if interrupted."""
+    delay = start_at - time.time()
+    if delay > 0:
+        logger.info('waiting %.1fs until start_at=%.3f', delay, start_at)
+        if _wait_for_any(cancel, timeout=delay):
+            return False
+    else:
+        logger.warning('start_at is %.1fs in the past; starting immediately', -delay)
+    return True
+
+
+def _wait_for_start_at(
+    ctx: AciesContext,
+    cancel: list[threading.Event],
+) -> bool:
+    """Wait until a new start_at is available, then sleep until that wallclock.
+
+    Returns True if ready to play, False if interrupted by stop/restart.
+    """
+    # --- wait for a new start_at value ---
+    while not any(e.is_set() for e in cancel):
+        start_at: float | None = ctx.cfg.get('start_at')
+        if start_at is not None and start_at != ctx.app['last_start_at']:
+            ctx.app['last_start_at'] = start_at
+            break
+        # No start_at yet (or same as last consumed) -- wait for notification
+        logger.debug('waiting for start_at...')
+        if _wait_for_any(cancel, timeout=1.0):
+            return False
+    else:
+        return False
+
+    # --- sleep until the start_at wallclock ---
+    delay = start_at - time.time()
+    if delay > 0:
+        logger.info('waiting %.1fs until start_at=%.3f', delay, start_at)
+        if _wait_for_any(cancel, timeout=delay):
+            return not any(e.is_set() for e in cancel if e is not cancel[0])
+    else:
+        logger.warning('start_at is %.1fs in the past; starting immediately', -delay)
+    return True
+
+
 @app.thread
 def replay(ctx: AciesContext, stop: threading.Event) -> None:
     restart: threading.Event = ctx.app['restart']
@@ -256,6 +303,7 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
     while not stop.is_set():
         restart.clear()
 
+        # --- reload data if requested ---
         if reload_ev.is_set():
             reload_ev.clear()
             if not _try_reload(ctx):
@@ -268,18 +316,24 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
         loop: bool = ctx.cfg.get('loop', False)
         start_at: float | None = ctx.cfg.get('start_at')
 
-        # --- wait for start_at if specified ---
-        if start_at is not None:
-            delay = start_at - time.time()
-            if delay > 0:
-                logger.info('waiting %.1fs until start_at=%.3f', delay, start_at)
-                if _wait_for_any(cancel, timeout=delay):
-                    if stop.is_set():
-                        return
-                    continue
-            else:
-                logger.warning('start_at is %.1fs in the past; starting immediately', -delay)
+        # --- determine when to start playback ---
+        first_run = ctx.app['last_start_at'] is None
+        if first_run and start_at is not None:
+            # CLI start_at: use once on first run
+            ctx.app['last_start_at'] = start_at
+            if not _sleep_until(start_at, cancel):
+                if stop.is_set():
+                    return
+                continue
+        elif not first_run:
+            # After reload or restart: wait for a new start_at from control plane
+            logger.info('data loaded, waiting for start_at to begin playback')
+            if not _wait_for_start_at(ctx, cancel):
+                if stop.is_set():
+                    return
+                continue
 
+        # --- play ---
         completed = _play_windows(ctx, cancel, windows, topic, speed)
         if stop.is_set():
             return
