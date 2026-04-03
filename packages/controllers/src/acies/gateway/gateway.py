@@ -29,7 +29,7 @@ import numpy as np
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, setup_logging
-from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesKvRequest, AciesKvResponse, AciesPrediction, AciesSet
+from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesKvRequest, AciesPrediction, AciesSet
 from acies.corev2.namespace import matches
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,6 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
             if resp is None:
                 logger.error('no response from %s/mic reconfig request', node_id)
             else:
-                assert isinstance(resp, AciesKvResponse)
                 logger.debug('reconfig response from %s/mic: %s', node_id, resp)
         if state['modality'] in ['geo', 'both']:
             req = AciesKvRequest(
@@ -157,7 +156,6 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
             if resp is None:
                 logger.error('no response from %s/geo reconfig request', node_id)
             else:
-                assert isinstance(resp, AciesKvResponse)
                 logger.debug('reconfig response from %s/geo: %s', node_id, resp)
 
     logger.info('TODO: send acknowledgement to the UI')
