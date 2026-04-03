@@ -27,8 +27,9 @@ from typing import Any
 import click
 import numpy as np
 import tomli as tomllib
+from acies.buffers.temporal import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, setup_logging
-from acies.corev2.msg import AciesInference, AciesPrediction
+from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ app = AciesApp()
 
 _NS_PER_S = 1_000_000_000
 _DEFAULT_ENSEMBLE_WIN_S = 30
+_DEFAULT_HEARTBEAT_INTERVAL_S = 5
+_DEFAULT_ALIVE_MULTIPLIER = 3  # service is alive if last heartbeat < interval * multiplier
 
 
 @app.subscribe('**/vehicle')
@@ -45,6 +48,21 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
     with ctx.app.lock:
         ctx.app['ensemble_buf'].append((msg.timestamp, msg.predictions))
     ctx.publish('ws://predictions', msg)
+
+
+@app.subscribe('**/heartbeat')
+def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
+    if msg.source == ctx.ns.base:
+        return
+
+    # --- validate source format (must be host/name) ---
+    if '/' not in msg.source:
+        logger.warning('heartbeat source %r missing host/name separator; dropping', msg.source)
+        return
+
+    buff: TimeWindow = ctx.app['heartbeat']
+    buff.add(msg.source, msg.timestamp, msg.state)
+    logger.debug('heartbeat from %s: state=%s ts=%d', msg.source, msg.state, msg.timestamp)
 
 
 @app.subscribe('ws://ctl')
@@ -95,20 +113,42 @@ def dummy_gps(ctx: AciesContext) -> None:
 
 
 @app.schedule(1.0)
-def dummy_health(ctx: AciesContext) -> None:
-    # TODO: replace with real health monitoring
-    system_health = {
-        'rs1': {
-            'servicies': [
-                'rs1/geo',
-                'rs1/mic',
-                'rs1/vfm',
-            ],
-            'lat': 40.2887754,
-            'lon': -88.1261283,
-        }
-    }
-    ctx.publish('ws://health', system_health)
+def system_health(ctx: AciesContext) -> None:
+    heartbeat_buf: TimeWindow = ctx.app['heartbeat']
+    gps_table: dict[str, list[float]] = ctx.app['gps']
+    now = ctx.now()
+
+    heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
+    alive_timeout_ns = ctx.cfg.get('alive_timeout', heartbeat_interval * _DEFAULT_ALIVE_MULTIPLIER) * _NS_PER_S
+
+    hosts: dict[str, dict[str, Any]] = {}
+    for source in heartbeat_buf.keys():
+        entry = heartbeat_buf.latest(source)
+        if entry is None:
+            continue
+        ts, state = entry
+        alive = (now - ts) < alive_timeout_ns
+
+        # source is "host/name" -> group by host
+        parts = source.split('/', 1)
+        host = parts[0]
+        if host not in hosts:
+            coords = gps_table.get(host, [])
+            hosts[host] = {
+                'services': [],
+                'lat': coords[0] if len(coords) > 0 else None,
+                'lon': coords[1] if len(coords) > 1 else None,
+            }
+        hosts[host]['services'].append(
+            {
+                'name': source,
+                'state': state if alive else 'down',
+                'alive': alive,
+                'last_heartbeat': ts,
+            }
+        )
+
+    ctx.publish('ws://health', hosts)
 
 
 @app.schedule(1.0)
@@ -152,10 +192,15 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['gps'] = gps
     ctx.app['confidence_threshold'] = confidence_threshold
     ctx.app['ensemble_buf'] = deque()
+    heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
+    alive_timeout = ctx.cfg.get('alive_timeout', heartbeat_interval * _DEFAULT_ALIVE_MULTIPLIER)
+    # Keep heartbeat history for at least 2x the alive timeout
+    ctx.app['heartbeat'] = TimeWindow(int(alive_timeout * 2) * _NS_PER_S)
     logger.info(
-        'gateway ready: %d node(s) in gps table, ensemble_win=%ds',
+        'gateway ready: %d node(s) in gps table, ensemble_win=%ds, alive_timeout=%ds',
         len(gps),
         ctx.cfg.get('ensemble_win', 5),
+        alive_timeout,
     )
 
 
