@@ -256,7 +256,7 @@ def gps_replay(ctx: AciesContext, stop: threading.Event) -> None:
 
         positions = ctx.app['positions']
         label: str = ctx.cfg['label']
-        topic: str = ctx.cfg.get('topic') or ctx.ns.base
+        topic: str = ctx.cfg['topic']
         speed: float = ctx.cfg.get('speed', 1.0)
         loop: bool = ctx.cfg.get('loop', False)
         start_at: float | None = ctx.cfg.get('start_at')
