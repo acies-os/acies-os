@@ -54,7 +54,7 @@ def setup_logging(name: str) -> None:
     )
 
     file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / f'{name}.log', maxBytes=50 * 1024 * 1024, backupCount=20
+        log_dir / f'{name}.log'.replace('/', '_'), maxBytes=50 * 1024 * 1024, backupCount=20
     )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(fmt)
