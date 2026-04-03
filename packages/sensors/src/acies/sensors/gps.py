@@ -114,7 +114,7 @@ def _infer_mode(cfg: dict[str, Any]) -> str:
 def setup(ctx: AciesContext) -> None:
     mode = _infer_mode(ctx.cfg)
     ctx.app['mode'] = mode
-    ctx.app['topic'] = ctx.cfg.get('topic') or ctx.ns.topic('gps')
+    ctx.app['topic'] = ctx.cfg.get('topic') or ctx.ns.topic('gps_gt')
 
     if mode == 'replay':
         path: str = ctx.cfg['file']
@@ -174,8 +174,9 @@ def gps_replay(ctx: AciesContext, stop: threading.Event) -> None:
             if sleep_s > 0:
                 if _wait_for_any(cancel, timeout=sleep_s):
                     return
-            ctx.publish(topic, {label: pos})
-            logger.debug('gps %s: lat=%.6f lon=%.6f', label, pos['lat'], pos['lon'])
+            msg = {label: pos}
+            ctx.publish(topic, msg)
+            logger.debug('%s <- %s', topic, msg)
 
         total_s = (positions[-1][0] - data_start_ns) / _NS_PER_S
         logger.info('gps replay complete: %d positions, %.0fs at %.1fx', len(positions), total_s, speed)

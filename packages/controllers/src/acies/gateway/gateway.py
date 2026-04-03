@@ -93,7 +93,7 @@ def model_metrics(ctx: AciesContext) -> None:
     )
 
 
-@app.schedule(1)
+# @app.schedule(1)
 def dummy_gps(ctx: AciesContext) -> None:
     # TODO: replace with GPS data
     # - subscribe to a GPS topic (from replay)?
@@ -115,6 +115,12 @@ def dummy_gps(ctx: AciesContext) -> None:
         t, direction = 0.0, 1
     ctx['t'] = t
     ctx['direction'] = direction
+
+
+@app.subscribe('**/gps_gt')
+def on_gps(ctx: AciesContext, msg: Any) -> None:
+    ctx.publish('ws://gps_truth', msg)
+    logger.debug('gps update: %r', msg)
 
 
 @app.schedule(1.0)
