@@ -137,8 +137,11 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
                 ],
             )
             resp = ctx.query(f'{node_id}/mic/ctl/kv', req, timeout=1.0)
-            assert isinstance(resp, AciesKvResponse)
-            logger.debug('reconfig response from %s/mic: %s', node_id, resp)
+            if resp is None:
+                logger.error('no response from %s/mic reconfig request', node_id)
+            else:
+                assert isinstance(resp, AciesKvResponse)
+                logger.debug('reconfig response from %s/mic: %s', node_id, resp)
         if state['modality'] in ['geo', 'both']:
             req = AciesKvRequest(
                 f'{node_id}/geo',
@@ -150,8 +153,11 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
                 ],
             )
             resp = ctx.query(f'{node_id}/geo/ctl/kv', req, timeout=1.0)
-            assert isinstance(resp, AciesKvResponse)
-            logger.debug('reconfig response from %s/geo: %s', node_id, resp)
+            if resp is None:
+                logger.error('no response from %s/geo reconfig request', node_id)
+            else:
+                assert isinstance(resp, AciesKvResponse)
+                logger.debug('reconfig response from %s/geo: %s', node_id, resp)
 
     logger.info('TODO: send acknowledgement to the UI')
 
