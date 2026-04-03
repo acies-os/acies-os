@@ -59,7 +59,14 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
         logger.debug('from %s: %s', msg.source, pred)
     with ctx.app.lock:
         ctx.app['ensemble_buf'].append((msg.timestamp, msg.predictions))
-    ctx.publish('ws://predictions', msg)
+    # Filter by per-model confidence thresholds before forwarding to UI
+    model = msg.source.rsplit('/', 1)[-1]
+    thresholds: dict[str, dict[str, float]] = ctx.app['confidence_threshold']
+    model_thresh = thresholds.get(model, {})
+    filtered = [p for p in msg.predictions if p.score >= model_thresh.get(p.label, 0.0)]
+    if filtered:
+        msg_filtered = AciesInference(source=msg.source, timestamp=msg.timestamp, predictions=filtered)
+        ctx.publish('ws://predictions', msg_filtered)
 
 
 @app.subscribe('**/heartbeat')
@@ -323,6 +330,7 @@ def setup(ctx: AciesContext) -> None:
     confidence_threshold: dict[str, dict[str, float]] = ctx.cfg.get('confidence_threshold', {})
     ctx.app['gps'] = gps
     ctx.app['confidence_threshold'] = confidence_threshold
+    logger.info('confidence thresholds: %d model(s)', len(confidence_threshold))
     ctx.app['ensemble_buf'] = deque()
     heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
     alive_timeout = ctx.cfg.get('alive_timeout', heartbeat_interval * _DEFAULT_ALIVE_MULTIPLIER)
