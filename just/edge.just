@@ -2,6 +2,7 @@ acies_log := env("ACIES_LOG", "")
 acies_host := env("ACIES_HOST", `hostname -s`)
 edge_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
 edge_zenoh_bridge := env("ZENOH_BRIDGE", "")
+pi_hosts := env("PI_HOSTS", "")
 
 [private]
 default:
@@ -44,3 +45,16 @@ edge-replay-gps-local *args:
     ACIES_LOG={{ acies_log }} \
     uv run acies-gps --acies-host {{ acies_host }} --acies-name replay_gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
+
+# Upload a file to /model/ on all PI_HOSTS. Set PI_HOSTS="rs1 rs2 rs3" (space-separated).
+[no-cd]
+upload-model file:
+    #!/usr/bin/env bash
+    if [ -z "{{ pi_hosts }}" ]; then
+        echo "error: PI_HOSTS is not set. Export PI_HOSTS='host1 host2 ...' first."
+        exit 1
+    fi
+    for host in {{ pi_hosts }}; do
+        echo "uploading {{ file }} -> ${host}:/model/"
+        rsync -avz --progress "{{ file }}" "${host}:/model/"
+    done

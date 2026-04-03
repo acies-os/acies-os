@@ -116,6 +116,7 @@ deploy-pi:
     #!/usr/bin/env bash
     set -euo pipefail
     [ -n "{{ pi_hosts }}" ] || { echo "error: PI_HOSTS not set"; exit 1; }
+    echo "deploying acies-pi:{{ tag }} to {{ pi_hosts }}"
     for host in {{ pi_hosts }}; do
         echo "==> deploying acies-pi:{{ tag }} to $host"
         ssh "$host" "docker pull {{ registry_external }}/acies-pi:{{ tag }} \
