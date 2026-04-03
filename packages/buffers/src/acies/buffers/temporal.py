@@ -53,6 +53,11 @@ class TemporalBuffer:
                 return dict(data)
         raise ValueError('not enough data')
 
+    def clear(self) -> None:
+        """Remove all entries."""
+        self._data.clear()
+        self._timestamps.clear()
+
 
 @dataclass
 class TimeWindow:

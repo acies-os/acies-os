@@ -125,6 +125,18 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     start_at: float = float(ctx.now() / _NS_PER_S) + 30
 
     for node_id, state in new_node_states.items():
+        # reconfigure model
+        req = AciesKvRequest(
+            f'{node_id}/vfm',
+            ctx.now(),
+            [AciesSet(['start_at'], start_at)],
+        )
+        resp = ctx.query(f'{node_id}/vfm/ctl/kv', req, timeout=1.0)
+        if resp is None:
+            logger.error('no response from %s/vfm reconfig request', node_id)
+        else:
+            logger.debug('reconfig response from %s/geo: %s', node_id, resp)
+        # reconfigure mic
         if state['modality'] in ['mic', 'both']:
             req = AciesKvRequest(
                 f'{node_id}/mic',
@@ -141,6 +153,8 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
                 logger.error('no response from %s/mic reconfig request', node_id)
             else:
                 logger.debug('reconfig response from %s/mic: %s', node_id, resp)
+
+        # reconfigure geo
         if state['modality'] in ['geo', 'both']:
             req = AciesKvRequest(
                 f'{node_id}/geo',

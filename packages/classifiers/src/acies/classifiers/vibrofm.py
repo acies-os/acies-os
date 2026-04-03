@@ -35,8 +35,8 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from acies.buffers import TemporalBuffer
-from acies.corev2 import AciesApp, AciesContext, setup_logging
-from acies.corev2.msg import AciesInference, AciesPrediction, AciesTimeSeries
+from acies.corev2 import AciesApp, AciesContext, OnChange, setup_logging
+from acies.corev2.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
 from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,8 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['ensemble_buf'] = deque(maxlen=ensemble_win)
     ctx.app['buffer'] = TemporalBuffer(size=INPUT_LEN + 2)
 
+    ctx.cfg['start_at'] = time.time()
+
     logger.info(
         'publishing to %s; ensemble_win=%d ensemble_size=%d geo_thresh=%.1f mic_thresh=%.1f',
         output_topic,
@@ -102,6 +104,15 @@ def setup(ctx: AciesContext) -> None:
 @app.on_shutdown
 def teardown(_ctx: AciesContext) -> None:
     logger.info('vibrofm stopped')
+
+
+@app.subscribe(OnChange('start_at'))
+def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    """Clear buffers when a new replay starts so stale data doesn't pollute inference."""
+    logger.info('start_at changed to %s; clearing buffers', msg.value)
+    with ctx.app.lock:
+        ctx.app['buffer'].clear()
+        ctx.app['ensemble_buf'].clear()
 
 
 @app.subscribe('{geo_topic}')
