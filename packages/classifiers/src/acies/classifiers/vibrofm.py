@@ -29,6 +29,7 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 import click
 import numpy as np
@@ -163,9 +164,11 @@ def run_inference(ctx: AciesContext) -> None:
     # --- build FoundationSense model input ---
     # expected format: {'shake': {'seismic': tensor, 'audio': tensor}}
     data: dict[str, dict[str, torch.Tensor]] = {'shake': {}}
+    energy: dict[str, float] = {}
     for mod in modalities:
         topic = _mod_to_topic[mod]
         arr: npt.NDArray[np.float32] = np.concatenate([v for _, v in sorted(samples[topic].items())]).astype(np.float32)
+        energy[mod] = float(np.std(arr))
         if mod == 'geo':
             # 2s x 200 Hz = 400 -> downsample x2 -> 200 -> (1, 1, 10, 20)
             data['shake']['seismic'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 20))  # pyright: ignore[reportUnknownMemberType]
@@ -200,7 +203,12 @@ def run_inference(ctx: AciesContext) -> None:
     for target_probs in ensemble_probs:
         for label, score in zip(labels, target_probs):
             if score > 0:
-                target_pred = AciesPrediction(label=label, score=float(score))
+                extras: dict[str, Any] = {'infer_ms': infer_ms}
+                if 'geo' in energy:
+                    extras['geo_energy'] = energy['geo']
+                if 'mic' in energy:
+                    extras['mic_energy'] = energy['mic']
+                target_pred = AciesPrediction(label=label, score=float(score), extras=extras)
                 predictions.append(target_pred)
                 logger.debug('%s', target_pred)
 
