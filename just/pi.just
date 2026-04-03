@@ -101,7 +101,7 @@ pi-vfm-local *args:
     ACIES_LOG={{ acies_log }} \
     uv run acies-vfm --acies-host {{ acies_host }} --acies-name vfm \
         --acies-connect {{ pi_zenoh_connect }} \
-        --weight Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt \
+        --weight /model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt \
         --geo {{ acies_host }}/geo --mic {{ acies_host }}/mic \
         --labels "gle350,miata,cx30,mustang" \
         {{ args }}
