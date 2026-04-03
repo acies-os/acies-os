@@ -188,7 +188,7 @@ def _play_positions(
 def setup(ctx: AciesContext) -> None:
     mode = 'replay' if ctx.cfg.get('data_dir') else 'mqtt'
     ctx.app['mode'] = mode
-    ctx.app['topic'] = ctx.cfg.get('topic') or ctx.ns.base
+    ctx.app['topic'] = ctx.cfg.get('topic') or ctx.ns.topic('gps_gt')
 
     if mode == 'replay':
         path = _build_path(ctx)
