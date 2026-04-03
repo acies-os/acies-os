@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 import random
 from collections import defaultdict, deque
 from typing import Any
@@ -322,15 +323,19 @@ def run_ensemble(ctx: AciesContext) -> None:
             logger.info('  - %s', pred)
 
 
-@app.on_startup
-def setup(ctx: AciesContext) -> None:
+def _reload_config(ctx: AciesContext) -> None:
+    """Read the toml config and update app state derived from it."""
     with open(ctx.cfg['config_path'], 'rb') as f:
         ctx.cfg.update(tomllib.load(f))
-    gps: dict[str, list[float]] = ctx.cfg.get('gps', {})
-    confidence_threshold: dict[str, dict[str, float]] = ctx.cfg.get('confidence_threshold', {})
-    ctx.app['gps'] = gps
-    ctx.app['confidence_threshold'] = confidence_threshold
-    logger.info('confidence thresholds: %d model(s)', len(confidence_threshold))
+    ctx.app['gps'] = ctx.cfg.get('gps', {})
+    ctx.app['confidence_threshold'] = ctx.cfg.get('confidence_threshold', {})
+    ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
+
+
+@app.on_startup
+def setup(ctx: AciesContext) -> None:
+    _reload_config(ctx)
+    logger.info('confidence thresholds: %d model(s)', len(ctx.app['confidence_threshold']))
     ctx.app['ensemble_buf'] = deque()
     heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
     alive_timeout = ctx.cfg.get('alive_timeout', heartbeat_interval * _DEFAULT_ALIVE_MULTIPLIER)
@@ -338,10 +343,22 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['heartbeat'] = TimeWindow(int(alive_timeout * 2) * _NS_PER_S)
     logger.info(
         'gateway ready: %d node(s) in gps table, ensemble_win=%ds, alive_timeout=%ds',
-        len(gps),
+        len(ctx.app['gps']),
         ctx.cfg.get('ensemble_win', 5),
         alive_timeout,
     )
+
+
+@app.schedule(5.0)
+def check_config(ctx: AciesContext) -> None:
+    """Reload the toml config file if it has been modified on disk."""
+    try:
+        mtime = os.path.getmtime(ctx.cfg['config_path'])
+    except OSError:
+        return
+    if mtime != ctx.app['config_mtime']:
+        logger.info('config file changed on disk; reloading %s', ctx.cfg['config_path'])
+        _reload_config(ctx)
 
 
 @app.on_shutdown
