@@ -170,7 +170,7 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
             AciesSet(['start_at'], start_at),
         ],
     )
-    resp = ctx.query('edge/gps/ctl/kv', req, timeout=1.0)
+    resp = ctx.query(f'{gps_host}/ctl/kv', req, timeout=1.0)
     if resp is None:
         logger.error('no response from %s reconfig request', gps_host)
     else:
