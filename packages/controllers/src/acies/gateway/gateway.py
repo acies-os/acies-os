@@ -33,6 +33,11 @@ from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction
 
 logger = logging.getLogger(__name__)
 
+# suppress verbose logs from websockets library used by the WebSocketTransport
+ws_logger = logging.getLogger('websockets')
+ws_logger.setLevel(logging.CRITICAL)
+ws_logger.propagate = False
+
 app = AciesApp()
 
 _NS_PER_S = 1_000_000_000
@@ -148,6 +153,7 @@ def system_health(ctx: AciesContext) -> None:
             }
         )
 
+    logger.debug('system health: %s ', hosts)
     ctx.publish('ws://health', hosts)
 
 
