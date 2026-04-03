@@ -79,25 +79,34 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
     np_dtype = np.dtype(dtype)
 
     df = pl.read_parquet(path)
-    df = df.with_columns(pl.col('channel').cast(pl.String).alias('channel_str'))
 
-    # Keep only wanted channels that actually exist in the file
-    available = set(df['channel_str'].unique().to_list())
-    present = sorted(wanted & available)
-    if not present:
-        logger.error('no wanted channels %s in %s; available: %s', wanted, path, sorted(available))
-        return []
+    if 'channel' not in df.columns:
+        # No channel column — treat all samples as a single channel
+        default_ch = sorted(wanted)[0]
+        logger.info('no channel column in %s; assuming single channel %r', path, default_ch)
+        present = [default_ch]
+        df = df.sort('timestamp')
+        ch_arrays: dict[str, npt.NDArray[np.int_]] = {
+            default_ch: df['samples'].to_numpy().astype(np_dtype),
+        }
+        ch_timestamps: list[float] = df['timestamp'].to_list()
+    else:
+        df = df.with_columns(pl.col('channel').cast(pl.String).alias('channel_str'))
+        available = set(df['channel_str'].unique().to_list())
+        present = sorted(wanted & available)
+        if not present:
+            logger.error('no wanted channels %s in %s; available: %s', wanted, path, sorted(available))
+            return []
 
-    # Extract per-channel sample arrays, sorted by timestamp
-    df = df.filter(pl.col('channel_str').is_in(present)).sort('timestamp')
-    ch_arrays: dict[str, npt.NDArray[np.int_]] = {}
-    ch_timestamps: list[float] | None = None
-    for ch in present:
-        ch_df = df.filter(pl.col('channel_str') == ch)
-        ch_arrays[ch] = ch_df['samples'].to_numpy().astype(np_dtype)
-        if ch_timestamps is None:
-            ch_timestamps = ch_df['timestamp'].to_list()
-    assert ch_timestamps is not None
+        df = df.filter(pl.col('channel_str').is_in(present)).sort('timestamp')
+        ch_arrays = {}
+        ch_timestamps: list[float] | None = None  # type: ignore[assignment]
+        for ch in present:
+            ch_df = df.filter(pl.col('channel_str') == ch)
+            ch_arrays[ch] = ch_df['samples'].to_numpy().astype(np_dtype)
+            if ch_timestamps is None:
+                ch_timestamps = ch_df['timestamp'].to_list()
+        assert ch_timestamps is not None
 
     # All channels should have the same number of samples
     n_samples = len(ch_timestamps)
