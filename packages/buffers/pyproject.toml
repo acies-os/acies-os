@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "acies-buffers"
-version = "0.1.1"
+version = "0.2.0"
 description = "Buffer utilities for Acies"
 authors = [
   { name = "Jinyang Li", email = "jinyang7@illinois.edu" },
