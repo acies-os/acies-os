@@ -209,7 +209,7 @@ def setup(ctx: AciesContext) -> None:
 # --- kv change notifications ---
 
 
-@app.subscribe(OnChange('scene'), OnChange('run'), OnChange('label'), OnChange('data_dir'))
+@app.subscribe(OnChange('scene'), OnChange('run'), OnChange('label'))
 def on_data_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     logger.info('gps data config changed: %s %s', msg.op, msg.key)
     ctx.app['reload'].set()
