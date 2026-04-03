@@ -95,6 +95,17 @@ pi-vfm *args:
         -v ~/.acies:/root/.acies \
         acies-pi:latest acies-vfm {{ args }}
 
+# Run acies-vfm locally (no Docker). Arguments are forwarded to acies-vfm directly.
+pi-vfm-local *args:
+    @mkdir -p ~/.acies/logs ~/.acies/run
+    ACIES_LOG={{ acies_log }} \
+    uv run acies-vfm --acies-host {{ acies_host }} --acies-name vfm \
+        --acies-connect {{ pi_zenoh_connect }} \
+        --weight Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt \
+        --geo {{ acies_host }}/geo --mic {{ acies_host }}/mic \
+        --labels "gle350,miata,cx30,mustang" \
+        {{ args }}
+
 # Replay sensor data locally. Pass --data-dir, --scene, --node, --run, --modality, etc.
 pi-replay-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
