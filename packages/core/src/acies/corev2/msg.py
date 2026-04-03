@@ -153,7 +153,7 @@ class AciesTimeSeries(msgspec.Struct, frozen=True):
     source: str
     timestamp: NanoSecond
     payload: list[bytes]  # payload[i] = raw samples for channels[i]
-    channels: list[int] | list[str]
+    channels: list[int | str]
     sampling_rate: int
     dtype: str  # numpy dtype string: 'int16', 'int32', etc.
 
