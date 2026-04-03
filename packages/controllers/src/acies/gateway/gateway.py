@@ -158,6 +158,23 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
             else:
                 logger.debug('reconfig response from %s/geo: %s', node_id, resp)
 
+    # reconfig gps replay
+    req = AciesKvRequest(
+        'edge/gps',
+        ctx.now(),
+        [
+            AciesSet(['scene'], scene),
+            AciesSet(['run'], run_id),
+            AciesSet(['label'], reconfig_target),
+            AciesSet(['start_at'], start_at),
+        ],
+    )
+    resp = ctx.query('edge/gps/ctl/kv', req, timeout=1.0)
+    if resp is None:
+        logger.error('no response from %s reconfig request', 'edge/gps')
+    else:
+        logger.debug('reconfig response from %s: %s', 'edge/gps', resp)
+
     logger.info('TODO: send acknowledgement to the UI')
 
 
