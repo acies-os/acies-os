@@ -12,6 +12,7 @@ Wire encoding:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, TypeAlias
 
 import msgspec
@@ -37,16 +38,16 @@ AciesResult: TypeAlias = Ok | Err
 
 
 class AciesGet(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
-    key: list[str]  # path to the value: ['k1', 'k2'] -> config['k1']['k2']
+    key: Sequence[str]  # path to the value: ['k1', 'k2'] -> config['k1']['k2']
 
 
 class AciesSet(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
-    key: list[str]
+    key: Sequence[str]
     value: Any
 
 
 class AciesDel(msgspec.Struct, frozen=True, tag=True, tag_field='type'):
-    key: list[str]
+    key: Sequence[str]
 
 
 KvEntry: TypeAlias = AciesGet | AciesSet | AciesDel
@@ -64,18 +65,18 @@ class AciesHeartbeat(msgspec.Struct, frozen=True):
 class AciesKvRequest(msgspec.Struct, frozen=True):
     source: str
     timestamp: NanoSecond
-    ops: list[KvEntry]
+    ops: Sequence[KvEntry]
 
 
 class AciesKvResponse(msgspec.Struct, frozen=True):
     timestamp: NanoSecond
-    results: list[AciesResult]
+    results: Sequence[AciesResult]
 
 
 class AciesKvChange(msgspec.Struct, frozen=True):
     """Published to ctl/notify/<key> after a successful kv set or del."""
 
-    key: list[str]
+    key: Sequence[str]
     op: str  # 'set' | 'del'
     value: Any = None  # new value for 'set'; None for 'del'
 
@@ -94,8 +95,8 @@ class AciesRouteRequest(msgspec.Struct, frozen=True):
     timestamp: NanoSecond
     spec_id: str | None = None  # preferred: UUID from spec.id
     spec_name: str | None = None  # fallback: match by name
-    inputs: list[TopicRename] = []
-    outputs: list[TopicRename] = []
+    inputs: list[TopicRename] = msgspec.field(default_factory=list)
+    outputs: list[TopicRename] = msgspec.field(default_factory=list)
 
     def __post_init__(self):
         if self.spec_id is None and self.spec_name is None:
@@ -181,7 +182,7 @@ class AciesPrediction(msgspec.Struct, frozen=True, omit_defaults=True):
     speed: float | None = None  # estimated speed in m/s
     latitude: float | None = None  # decimal degrees
     longitude: float | None = None  # decimal degrees
-    extras: dict[str, Any] = {}  # model-specific metadata
+    extras: dict[str, Any] = msgspec.field(default_factory=dict)  # model-specific metadata
 
     def __repr__(self) -> str:
         parts = [f'label={self.label!r}', f'score={self.score:.3f}']
@@ -215,4 +216,4 @@ class AciesInference(msgspec.Struct, frozen=True):
 
     source: str
     timestamp: NanoSecond
-    predictions: list[AciesPrediction]
+    predictions: Sequence[AciesPrediction]
