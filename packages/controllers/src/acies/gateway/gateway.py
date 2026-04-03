@@ -150,6 +150,7 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
                     AciesSet(['scene'], state['scene']),
                     AciesSet(['run'], state['run_id']),
                     AciesSet(['node'], state['replayed_node_id']),
+                    AciesSet(['start_at'], start_at),
                 ],
             )
             resp = ctx.query(f'{node_id}/geo/ctl/kv', req, timeout=1.0)
