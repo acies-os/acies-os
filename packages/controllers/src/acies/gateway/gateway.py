@@ -85,6 +85,16 @@ def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
     logger.debug('heartbeat from %s: state=%s ts=%d', msg.source, msg.state, msg.timestamp)
 
 
+def _kv_set(ctx: AciesContext, target: str, ops: list[AciesSet], timeout: float = 1.0) -> None:
+    """Send kv set operations to a target node. Logs errors but does not raise."""
+    req = AciesKvRequest(target, ctx.now(), ops)
+    resp = ctx.query(f'{target}/ctl/kv', req, timeout=timeout)
+    if resp is None:
+        logger.error('no response from %s kv request', target)
+    else:
+        logger.debug('kv response from %s: %s', target, resp)
+
+
 @app.subscribe('ws://ctl')
 def on_ctl(ctx: AciesContext, msg: Any) -> None:
     logger.debug('ctl command received: %r', msg.get('appType', 'unknown'))
@@ -130,77 +140,54 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     logger.debug('new replay config: %s', new_node_states)
 
-    start_at: float = float(ctx.now() / _NS_PER_S) + 30
-
-    for node_id, state in new_node_states.items():
-        # reconfigure model
-        req = AciesKvRequest(
-            f'{node_id}/vfm',
-            ctx.now(),
-            [AciesSet(['start_at'], start_at)],
-        )
-        resp = ctx.query(f'{node_id}/vfm/ctl/kv', req, timeout=1.0)
-        if resp is None:
-            logger.error('no response from %s/vfm reconfig request', node_id)
-        else:
-            logger.debug('reconfig response from %s/geo: %s', node_id, resp)
-        # reconfigure mic
-        if state['modality'] in ['mic', 'both']:
-            req = AciesKvRequest(
-                f'{node_id}/mic',
-                ctx.now(),
-                [
-                    AciesSet(['scene'], state['scene']),
-                    AciesSet(['run'], state['run_id']),
-                    AciesSet(['node'], state['replayed_node_id']),
-                    AciesSet(['start_at'], start_at),
-                ],
-            )
-            resp = ctx.query(f'{node_id}/mic/ctl/kv', req, timeout=1.0)
-            if resp is None:
-                logger.error('no response from %s/mic reconfig request', node_id)
-            else:
-                logger.debug('reconfig response from %s/mic: %s', node_id, resp)
-
-        # reconfigure geo
-        if state['modality'] in ['geo', 'both']:
-            req = AciesKvRequest(
-                f'{node_id}/geo',
-                ctx.now(),
-                [
-                    AciesSet(['scene'], state['scene']),
-                    AciesSet(['run'], state['run_id']),
-                    AciesSet(['node'], state['replayed_node_id']),
-                    AciesSet(['start_at'], start_at),
-                ],
-            )
-            resp = ctx.query(f'{node_id}/geo/ctl/kv', req, timeout=1.0)
-            if resp is None:
-                logger.error('no response from %s/geo reconfig request', node_id)
-            else:
-                logger.debug('reconfig response from %s/geo: %s', node_id, resp)
-
-    # reconfig gps replay
-    # TODO: change on_heartbeat to listen and record all. Filter at system_health.
-    # Look up gps host from heartbeat records.
+    # TODO: look up gps host from heartbeat records instead of hardcoding
     gps_host = 'edge-replay/replay_gps'
-    req = AciesKvRequest(
+
+    # pass 1: send data params (nodes will reload and wait for start_at)
+    for node_id, state in new_node_states.items():
+        if state['modality'] in ['mic', 'both']:
+            _kv_set(
+                ctx,
+                f'{node_id}/mic',
+                [
+                    AciesSet(['scene'], state['scene']),
+                    AciesSet(['run'], state['run_id']),
+                    AciesSet(['node'], state['replayed_node_id']),
+                ],
+            )
+        if state['modality'] in ['geo', 'both']:
+            _kv_set(
+                ctx,
+                f'{node_id}/geo',
+                [
+                    AciesSet(['scene'], state['scene']),
+                    AciesSet(['run'], state['run_id']),
+                    AciesSet(['node'], state['replayed_node_id']),
+                ],
+            )
+    _kv_set(
+        ctx,
         gps_host,
-        ctx.now(),
         [
             AciesSet(['scene'], scene),
             AciesSet(['run'], run_id),
             AciesSet(['label'], reconfig_target),
-            AciesSet(['start_at'], start_at),
         ],
     )
-    resp = ctx.query(f'{gps_host}/ctl/kv', req, timeout=1.0)
-    if resp is None:
-        logger.error('no response from %s reconfig request', gps_host)
-    else:
-        logger.debug('reconfig response from %s: %s', gps_host, resp)
+    logger.info('Pass 1: new configuration sent to %d node(s) and gps', len(new_node_states))
 
-    logger.info('TODO: send acknowledgement to the UI')
+    # pass 2: send start_at to all nodes (they are loaded and waiting)
+    start_at: float = float(ctx.now() / _NS_PER_S) + 30
+    all_targets = [gps_host]
+    for node_id, state in new_node_states.items():
+        all_targets.append(f'{node_id}/vfm')
+        if state['modality'] in ['mic', 'both']:
+            all_targets.append(f'{node_id}/mic')
+        if state['modality'] in ['geo', 'both']:
+            all_targets.append(f'{node_id}/geo')
+    for target in all_targets:
+        _kv_set(ctx, target, [AciesSet(['start_at'], start_at)])
+    logger.info('Pass 2: start_at=%.3f sent to %d target(s)', start_at, len(all_targets))
 
 
 def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, float], tuple[float, float]]:
