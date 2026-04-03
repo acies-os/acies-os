@@ -132,7 +132,7 @@ def _handle_del(config: dict[str, Any], k: list[str]) -> AciesResult:
 
 
 def _kv(ctx: AciesContext, msg: AciesKvRequest) -> AciesKvResponse:
-    notifications: list[AciesKvNotify] = []
+    notifications: list[AciesKvChange] = []
     with ctx.app.lock:
         results: list[AciesResult] = []
         for entry in msg.ops:
