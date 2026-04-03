@@ -23,6 +23,7 @@ import logging
 import os
 import random
 from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import click
@@ -46,7 +47,7 @@ _NS_PER_S = 1_000_000_000
 _DEFAULT_ENSEMBLE_WIN_S = 30
 _DEFAULT_HEARTBEAT_INTERVAL_S = 5
 _DEFAULT_ALIVE_MULTIPLIER = 3  # service is alive if last heartbeat < interval * multiplier
-
+_REPLAY_AHEAD_TIME_S = 30
 _MODALITY_MAP = {
     'seismic': 'geo',
     'acoustic': 'mic',
@@ -83,6 +84,16 @@ def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
     buff: TimeWindow = ctx.app['heartbeat']
     buff.add(msg.source, msg.timestamp, msg.state)
     logger.debug('heartbeat from %s: state=%s ts=%d', msg.source, msg.state, msg.timestamp)
+
+
+def _wait_futures(futures: list[Any], label: str) -> None:
+    """Wait for all futures to complete, logging errors."""
+    for f in futures:
+        try:
+            f.result()
+        except Exception:
+            logger.exception('%s: kv request failed', label)
+    logger.info('%s complete: %d target(s)', label, len(futures))
 
 
 def _kv_set(ctx: AciesContext, target: str, ops: list[AciesSet], timeout: float = 1.0) -> None:
@@ -143,51 +154,43 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     # TODO: look up gps host from heartbeat records instead of hardcoding
     gps_host = 'edge-replay/replay_gps'
 
-    # pass 1: send data params (nodes will reload and wait for start_at)
+    # pass 1: data params (nodes reload and wait for start_at)
+    data_reconfig_pass: list[tuple[str, list[AciesSet]]] = []
+    all_targets: list[str] = [gps_host]
     for node_id, state in new_node_states.items():
-        if state['modality'] in ['mic', 'both']:
-            _kv_set(
-                ctx,
-                f'{node_id}/mic',
-                [
-                    AciesSet(['scene'], state['scene']),
-                    AciesSet(['run'], state['run_id']),
-                    AciesSet(['node'], state['replayed_node_id']),
-                ],
-            )
-        if state['modality'] in ['geo', 'both']:
-            _kv_set(
-                ctx,
-                f'{node_id}/geo',
-                [
-                    AciesSet(['scene'], state['scene']),
-                    AciesSet(['run'], state['run_id']),
-                    AciesSet(['node'], state['replayed_node_id']),
-                ],
-            )
-    _kv_set(
-        ctx,
-        gps_host,
-        [
-            AciesSet(['scene'], scene),
-            AciesSet(['run'], run_id),
-            AciesSet(['label'], reconfig_target),
-        ],
-    )
-    logger.info('Pass 1: new configuration sent to %d node(s) and gps', len(new_node_states))
-
-    # pass 2: send start_at to all nodes (they are loaded and waiting)
-    start_at: float = float(ctx.now() / _NS_PER_S) + 30
-    all_targets = [gps_host]
-    for node_id, state in new_node_states.items():
+        data_ops = [
+            AciesSet(['scene'], state['scene']),
+            AciesSet(['run'], state['run_id']),
+            AciesSet(['node'], state['replayed_node_id']),
+        ]
         all_targets.append(f'{node_id}/vfm')
         if state['modality'] in ['mic', 'both']:
+            data_reconfig_pass.append((f'{node_id}/mic', data_ops))
             all_targets.append(f'{node_id}/mic')
         if state['modality'] in ['geo', 'both']:
+            data_reconfig_pass.append((f'{node_id}/geo', data_ops))
             all_targets.append(f'{node_id}/geo')
-    for target in all_targets:
-        _kv_set(ctx, target, [AciesSet(['start_at'], start_at)])
-    logger.info('Pass 2: start_at=%.3f sent to %d target(s)', start_at, len(all_targets))
+    data_reconfig_pass.append(
+        (
+            gps_host,
+            [
+                AciesSet(['scene'], scene),
+                AciesSet(['run'], run_id),
+                AciesSet(['label'], reconfig_target),
+            ],
+        )
+    )
+
+    with ThreadPoolExecutor() as pool:
+        # pass 1: send data params in parallel
+        futures = [pool.submit(_kv_set, ctx, target, ops) for target, ops in data_reconfig_pass]
+        _wait_futures(futures, 'pass 1 (data params)')
+
+        # pass 2: send start_at to all nodes in parallel
+        start_at: float = float(ctx.now() / _NS_PER_S) + _REPLAY_AHEAD_TIME_S
+        start_ops = [AciesSet(['start_at'], start_at)]
+        futures = [pool.submit(_kv_set, ctx, target, start_ops) for target in all_targets]
+        _wait_futures(futures, 'pass 2 (start_at)')
 
 
 def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, float], tuple[float, float]]:
