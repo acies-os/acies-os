@@ -46,6 +46,12 @@ _DEFAULT_ENSEMBLE_WIN_S = 30
 _DEFAULT_HEARTBEAT_INTERVAL_S = 5
 _DEFAULT_ALIVE_MULTIPLIER = 3  # service is alive if last heartbeat < interval * multiplier
 
+_MODALITY_MAP = {
+    'seismic': 'geo',
+    'acoustic': 'mic',
+    'both': 'both',
+}
+
 
 @app.subscribe('**/vehicle')
 def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
@@ -72,8 +78,51 @@ def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
 
 
 @app.subscribe('ws://ctl')
-def on_ctl(_ctx: AciesContext, msg: Any) -> None:
-    logger.info('ctl command received: %r', msg)
+def on_ctl(ctx: AciesContext, msg: Any) -> None:
+    logger.debug('ctl command received: %r', msg.get('appType', 'unknown'))
+    reconfig_map = msg['map']
+    reconfig_target_list: list[str] = sorted([t.lower() for t in msg['target']])
+
+    # map selected map and target to the corresponding runID path
+    reconfig_target = '_'.join(reconfig_target_list)
+    if reconfig_map not in ctx.cfg['routes']:
+        logger.error('reconfig map %s not found in routes', reconfig_map)
+        return
+
+    if reconfig_target not in ctx.cfg['routes'][reconfig_map]:
+        logger.error('reconfig target %s not found in routes', reconfig_target)
+        return
+
+    # 2024-08-06-GQ/run29
+    reconfig_route = ctx.cfg['routes'][reconfig_map][reconfig_target]
+    scene, run_id = tuple(reconfig_route.split('/'))
+    run_id = int(run_id.removeprefix('run'))
+    scene = str(scene)
+
+    # reconfig node states
+    reconfig_node_states: list[dict[str, str]] = msg['nodes']
+    new_node_states: dict[str, dict[str, str | int]] = {}
+    map_node_mapping = ctx.cfg['map_node_mapping']
+    for node_state in reconfig_node_states:
+        node_id = node_state['nodeId'].lower()
+        mapped_node_id: str = map_node_mapping.get(node_id, node_id)
+        # TODO: support changing model
+        model = node_state['model'].replace('VibroFM', 'vfm')
+        modality = node_state['modality'].lower()
+        modality = _MODALITY_MAP.get(modality, modality)
+
+        new_node_states[mapped_node_id] = {
+            'node_id': mapped_node_id,  # mapped node id, same for ICT, gq-X mapped to rsY for GCQ
+            'replayed_node_id': node_id,  # original node id, used for path routing
+            'model': model,  # model name
+            'modality': modality,  # modality name [both, seismic, acoustic]
+            'scene': scene,  # scene name, e.g. 2024-08-06-GQ
+            'run_id': run_id,  # run id, e.g. 29
+        }
+
+    logger.debug('new replay config: %s', new_node_states)
+    logger.info('TODO: dispatch reconfig to the corresponding nodes')
+    logger.info('TODO: send acknowledgement to the UI')
 
 
 def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, float], tuple[float, float]]:
