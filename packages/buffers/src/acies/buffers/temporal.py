@@ -3,7 +3,7 @@ import logging
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger()
 
@@ -70,7 +70,7 @@ class TimeWindow:
 
     window_ns: int
     _data: dict[str, list[tuple[int, Any]]] = field(default_factory=dict, repr=False)
-    _now_fn: Any = field(default=None, repr=False)  # injectable clock for testing
+    _now_fn: Callable[[], int] | None = field(default=None, repr=False)  # injectable clock for testing
 
     def _now(self) -> int:
         if self._now_fn is not None:
@@ -84,16 +84,16 @@ class TimeWindow:
         if not entries:
             return
         cutoff = self._now() - self.window_ns
-        # bisect to find the first entry within the window
+        # Entries with timestamp >= cutoff are kept (inclusive boundary).
         i = bisect.bisect_left(entries, (cutoff,))
         if i > 0:
             del entries[:i]
 
     def add(self, key: str, timestamp: int, value: Any) -> None:
-        """Append an entry. Assumes timestamps are roughly monotonic per key."""
+        """Insert an entry in sorted order. Safe with out-of-order timestamps."""
         if key not in self._data:
             self._data[key] = []
-        self._data[key].append((timestamp, value))
+        bisect.insort(self._data[key], (timestamp, value))
         self._prune(key)
 
     def get(self, key: str) -> list[tuple[int, Any]]:
@@ -130,12 +130,19 @@ class TimeWindow:
         if not entries:
             return []
         lo = bisect.bisect_left(entries, (t_start,))
-        hi = bisect.bisect_right(entries, (t_end + 1,))
+        # t_end + 1 as a tuple-first-element finds the insertion point after
+        # all entries at t_end, regardless of the value component.
+        hi = bisect.bisect_left(entries, (t_end + 1,))
         return entries[lo:hi]
 
     def keys(self) -> list[str]:
         """Return keys that have at least one entry within the window."""
-        return [k for k in self._data if self._data[k]]
+        result: list[str] = []
+        for k in self._data:
+            self._prune(k)
+            if self._data[k]:
+                result.append(k)
+        return result
 
     def __len__(self) -> int:
         """Total number of entries across all keys."""
