@@ -285,12 +285,12 @@ def gps_replay(ctx: AciesContext, stop: threading.Event) -> None:
         logger.info('looping gps replay')
 
 
-# --- CLI ---
-
-
 @app.cli()
 @click.option(
-    '--data-dir', default=None, type=click.Path(exists=True, file_okay=False), help='Root data directory (replay mode).'
+    '--data-dir',
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help='Root data directory (replay mode).',
 )
 @click.option('--scene', default=None, help='Scene subdirectory (e.g. 2024-03-29-ICT).')
 @click.option('--run', default=None, type=int, help='Run ID (e.g. 2).')
