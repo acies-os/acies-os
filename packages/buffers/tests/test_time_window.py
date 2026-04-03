@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from acies.buffers.temporal import TimeWindow
 
 NS = 1_000_000_000  # 1 second in nanoseconds
@@ -335,3 +337,101 @@ def test_keys_prunes_expired():
     buf.add('live', 99 * NS, 'new')
     # Don't call get() on 'stale' — keys() should still exclude it
     assert buf.keys() == ['live']
+
+
+# --- pop_aligned ---
+
+
+def test_pop_aligned_basic():
+    """Pop 3 consecutive seconds from two keys."""
+    buf, _ = _make(20, 110 * NS)
+    for t in range(100, 110):
+        buf.add('geo', t * NS, f'geo_{t}')
+        buf.add('mic', t * NS, f'mic_{t}')
+    result = buf.pop_aligned(['geo', 'mic'], n=3)
+    assert sorted(result.keys()) == ['geo', 'mic']
+    # Should start from the oldest common timestamp (100s)
+    assert len(result['geo']) == 3
+    assert len(result['mic']) == 3
+    assert result['geo'][0] == (100 * NS, 'geo_100')
+    assert result['geo'][2] == (102 * NS, 'geo_102')
+
+
+def test_pop_aligned_removes_entries():
+    """Popped entries are removed from the buffer."""
+    buf, _ = _make(20, 110 * NS)
+    for t in range(100, 105):
+        buf.add('a', t * NS, t)
+    before = len(buf.get('a'))
+    _ = buf.pop_aligned(['a'], n=3)
+    after = len(buf.get('a'))
+    assert before == 5
+    assert after == 2  # 103, 104 remain
+
+
+def test_pop_aligned_gap_in_one_key():
+    """Skips timestamps where not all keys have data."""
+    buf, _ = _make(20, 110 * NS)
+    # 'a' has 100..104, 'b' is missing 100 and 101
+    for t in range(100, 105):
+        buf.add('a', t * NS, f'a_{t}')
+    for t in range(102, 107):
+        buf.add('b', t * NS, f'b_{t}')
+    result = buf.pop_aligned(['a', 'b'], n=3)
+    # Aligned window starts at 102 (first common run of 3)
+    assert result['a'][0] == (102 * NS, 'a_102')
+    assert result['b'][0] == (102 * NS, 'b_102')
+    assert len(result['a']) == 3
+    assert len(result['b']) == 3
+
+
+def test_pop_aligned_not_enough_data():
+    """Raises ValueError when no aligned run of n steps exists."""
+    buf, _ = _make(20, 110 * NS)
+    # Both keys have data at 100 and 102, but not 101 — no run of 3
+    buf.add('a', 100 * NS, 'v')
+    buf.add('a', 102 * NS, 'v')
+    buf.add('b', 100 * NS, 'v')
+    buf.add('b', 102 * NS, 'v')
+    with pytest.raises(ValueError, match='no aligned window'):
+        buf.pop_aligned(['a', 'b'], n=3)
+
+
+def test_pop_aligned_no_common_timestamps():
+    """Raises ValueError when keys have no overlapping timestamps."""
+    buf, _ = _make(20, 110 * NS)
+    buf.add('a', 100 * NS, 'v')
+    buf.add('b', 200 * NS, 'v')
+    with pytest.raises(ValueError, match='no common timestamps'):
+        buf.pop_aligned(['a', 'b'], n=1)
+
+
+def test_pop_aligned_missing_key():
+    """Raises ValueError when a requested key has no data."""
+    buf, _ = _make(20, 110 * NS)
+    buf.add('a', 100 * NS, 'v')
+    with pytest.raises(ValueError):
+        buf.pop_aligned(['a', 'missing'], n=1)
+
+
+def test_pop_aligned_multiple_entries_per_step():
+    """Multiple entries within the same second are all included."""
+    buf, _ = _make(20, 110 * NS)
+    # Two entries within second 100
+    buf.add('a', 100 * NS, 'first')
+    buf.add('a', 100 * NS + 500_000_000, 'second')  # 100.5s
+    buf.add('a', 101 * NS, 'third')
+    result = buf.pop_aligned(['a'], n=2)
+    assert len(result['a']) == 3  # both entries at 100s + one at 101s
+
+
+def test_pop_aligned_custom_step():
+    """Works with a custom step size (e.g. 500ms)."""
+    half = NS // 2  # 500ms
+    buf, _ = _make(20, 110 * NS)
+    for i in range(10):
+        buf.add('a', 100 * NS + i * half, f'v_{i}')
+    result = buf.pop_aligned(['a'], n=4, step_ns=half)
+    assert len(result['a']) == 4
+    assert result['a'][0] == (100 * NS, 'v_0')
+    assert result['a'][3] == (100 * NS + 3 * half, 'v_3')
