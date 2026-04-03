@@ -58,7 +58,7 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
 
 @app.subscribe('**/heartbeat')
 def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
-    if msg.source == ctx.ns.base or matches(msg.source, '**replay**'):
+    if msg.source == ctx.ns.base or matches('**replay**', msg.source):
         return
 
     # --- validate source format (must be host/name) ---
