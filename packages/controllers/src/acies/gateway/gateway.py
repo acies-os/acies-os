@@ -159,6 +159,8 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
                 logger.debug('reconfig response from %s/geo: %s', node_id, resp)
 
     # reconfig gps replay
+    # TODO: change on_heartbeat to listen and record all. Filter at system_health.
+    # Look up gps host from heartbeat records.
     gps_host = 'edge-replay/replay_gps'
     req = AciesKvRequest(
         gps_host,
