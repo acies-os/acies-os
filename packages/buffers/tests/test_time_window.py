@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from acies.buffers.temporal import TimeWindow
 
 NS = 1_000_000_000  # 1 second in nanoseconds
