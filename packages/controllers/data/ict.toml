@@ -10,6 +10,31 @@ rs7 = [40.2890667, -88.1264864]
 rs8 = [40.2891961, -88.1261333]
 rs10 = [40.2891928, -88.1264877]
 
+
+# map selected map and target to the corresponding runID path
+[routes.ict]
+mustang = "2024-03-29-ICT/run0"
+miata = "2024-03-29-ICT/run2"
+gle350 = "2024-03-29-ICT/run4"
+cx30 = "2024-03-29-ICT/run6"
+cx30_mustang = "2024-06-22-ICT/run1"
+miata_mustang = "2024-06-22-ICT/run3"
+cx30_miata = "2024-06-22-ICT/run5"
+
+# map selected map and target to the corresponding runID path
+[routes.gcq]
+polaris = "2024-08-06-GQ/run2"
+warthog = "2024-08-06-GQ/run29"
+polaris_warthog = "2024-08-06-GQ/run75"
+
+# map gq-X to rsY for GCQ
+[map_node_mapping]
+gq-1 = "rs1"
+gq-2 = "rs3"
+gq-3 = "rs8"
+gq-4 = "rs10"
+
+
 # Confidence threshold to filter multi-label output
 [confidence_threshold]
 miata = 1.1
@@ -66,137 +91,137 @@ vfm_geo = ["geo"]
 
 # active services when in `healthy` state
 ok_states = [
-    [
-        "mic",
-        "geo",
-        "vfm",
-    ],
-    [
-        "mic",
-        "geo",
-        "mae",
-    ],
-    [
-        "mic",
-        "geo",
-        "ds",
-    ],
-    [
-        "mic",
-        "vfm_mic",
-    ],
-    [
-        "mic",
-        "mae_mic",
-    ],
-    [
-        "mic",
-        "ds_mic",
-    ],
-    [
-        "geo",
-        "vfm_geo",
-    ],
-    [
-        "geo",
-        "mae_geo",
-    ],
-    [
-        "geo",
-        "ds_geo",
-    ],
+  [
+    "mic",
+    "geo",
+    "vfm",
+  ],
+  [
+    "mic",
+    "geo",
+    "mae",
+  ],
+  [
+    "mic",
+    "geo",
+    "ds",
+  ],
+  [
+    "mic",
+    "vfm_mic",
+  ],
+  [
+    "mic",
+    "mae_mic",
+  ],
+  [
+    "mic",
+    "ds_mic",
+  ],
+  [
+    "geo",
+    "vfm_geo",
+  ],
+  [
+    "geo",
+    "mae_geo",
+  ],
+  [
+    "geo",
+    "ds_geo",
+  ],
 ]
 
 # active services when in `service failure` state
 service_failures = [
-    [
-        "mic",
-        "geo",
-        "vfm_geo",
-    ],
-    [
-        "mic",
-        "geo",
-        "mae_geo",
-    ],
-    [
-        "mic",
-        "geo",
-        "ds_geo",
-    ],
-    [
-        "mic",
-        "geo",
-        "vfm_mic",
-    ],
-    [
-        "mic",
-        "geo",
-        "mae_mic",
-    ],
-    [
-        "mic",
-        "geo",
-        "ds_mic",
-    ],
-    [
-        "mic",
-        "geo",
-    ],
-    [
-        "mic",
-        "vfm",
-    ],
-    [
-        "mic",
-        "mae",
-    ],
-    [
-        "mic",
-        "ds",
-    ],
-    [
-        "mic",
-        "vfm_geo",
-    ],
-    [
-        "mic",
-        "mae_geo",
-    ],
-    [
-        "mic",
-        "ds_geo",
-    ],
-    [
-        "mic",
-    ],
-    [
-        "geo",
-        "vfm",
-    ],
-    [
-        "geo",
-        "mae",
-    ],
-    [
-        "geo",
-        "ds",
-    ],
-    [
-        "geo",
-        "vfm_mic",
-    ],
-    [
-        "geo",
-        "mae_mic",
-    ],
-    [
-        "geo",
-        "ds_mic",
-    ],
-    [
-        "geo",
-    ],
+  [
+    "mic",
+    "geo",
+    "vfm_geo",
+  ],
+  [
+    "mic",
+    "geo",
+    "mae_geo",
+  ],
+  [
+    "mic",
+    "geo",
+    "ds_geo",
+  ],
+  [
+    "mic",
+    "geo",
+    "vfm_mic",
+  ],
+  [
+    "mic",
+    "geo",
+    "mae_mic",
+  ],
+  [
+    "mic",
+    "geo",
+    "ds_mic",
+  ],
+  [
+    "mic",
+    "geo",
+  ],
+  [
+    "mic",
+    "vfm",
+  ],
+  [
+    "mic",
+    "mae",
+  ],
+  [
+    "mic",
+    "ds",
+  ],
+  [
+    "mic",
+    "vfm_geo",
+  ],
+  [
+    "mic",
+    "mae_geo",
+  ],
+  [
+    "mic",
+    "ds_geo",
+  ],
+  [
+    "mic",
+  ],
+  [
+    "geo",
+    "vfm",
+  ],
+  [
+    "geo",
+    "mae",
+  ],
+  [
+    "geo",
+    "ds",
+  ],
+  [
+    "geo",
+    "vfm_mic",
+  ],
+  [
+    "geo",
+    "mae_mic",
+  ],
+  [
+    "geo",
+    "ds_mic",
+  ],
+  [
+    "geo",
+  ],
 ]
 
 # failover target service
@@ -204,35 +229,35 @@ service_failover = "infer"
 
 # active services when in `node failure` state
 node_failures = [
-    [
-    ],
-    [
-        "vfm",
-    ],
-    [
-        "mae",
-    ],
-    [
-        "ds",
-    ],
-    [
-        "vfm_geo",
-    ],
-    [
-        "mae_geo",
-    ],
-    [
-        "ds_geo",
-    ],
-    [
-        "vfm_mic",
-    ],
-    [
-        "mae_mic",
-    ],
-    [
-        "ds_mic",
-    ],
+  [
+  ],
+  [
+    "vfm",
+  ],
+  [
+    "mae",
+  ],
+  [
+    "ds",
+  ],
+  [
+    "vfm_geo",
+  ],
+  [
+    "mae_geo",
+  ],
+  [
+    "ds_geo",
+  ],
+  [
+    "vfm_mic",
+  ],
+  [
+    "mae_mic",
+  ],
+  [
+    "ds_mic",
+  ],
 ]
 
 # # node failover target
