@@ -37,3 +37,10 @@ edge-gateway-local *args:
     ACIES_HOST={{ acies_host }} \
     ACIES_NAME=gateway \
     uv run acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
+
+# Replay GPS data locally. Pass --file and other args from the command line.
+replay-gps-local *args:
+    @mkdir -p ~/.acies/logs ~/.acies/run
+    ACIES_LOG={{ acies_log }} \
+    uv run acies-gps --acies-host {{ acies_host }} --acies-name gps \
+        --acies-connect {{ edge_zenoh_connect }} {{ args }}
