@@ -223,7 +223,7 @@ def dummy_gps(ctx: AciesContext) -> None:
     ctx['direction'] = direction
 
 
-@app.subscribe('**/gps_gt')
+@app.subscribe('**/gps/truth')
 def on_gps(ctx: AciesContext, msg: Any) -> None:
     ctx.publish('ws://gps_truth', msg)
     logger.debug('gps update: %r', msg)

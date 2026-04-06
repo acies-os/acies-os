@@ -43,7 +43,7 @@ edge-gateway-local *args:
 edge-replay-gps-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
-    uv run acies-gps --acies-namespace {{ acies_namespace }}/infra --acies-name replay_gps \
+    uv run acies-gps --acies-namespace {{ acies_namespace }}/infra --acies-name gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
 # Upload a file to /model/ on all PI_HOSTS. Set PI_HOSTS="rs1 rs2 rs3" (space-separated).
