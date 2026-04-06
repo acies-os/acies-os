@@ -31,7 +31,8 @@ import numpy as np
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, setup_logging
-from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesKvRequest, AciesPrediction, AciesSet
+from acies.corev2.ctl import kv_call, kv_set
+from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction, AciesSet
 from acies.corev2.namespace import matches
 
 logger = logging.getLogger(__name__)
@@ -96,16 +97,6 @@ def _wait_futures(futures: list[Any], label: str) -> None:
     logger.info('%s complete: %d target(s)', label, len(futures))
 
 
-def _kv_set(ctx: AciesContext, target: str, ops: list[AciesSet], timeout: float = 1.0) -> None:
-    """Send kv set operations to a target node. Logs errors but does not raise."""
-    req = AciesKvRequest(target, ctx.now(), ops)
-    resp = ctx.query(f'{target}/ctl/kv', req, timeout=timeout)
-    if resp is None:
-        logger.error('no response from %s kv request', target)
-    else:
-        logger.debug('kv response from %s: %s', target, resp)
-
-
 @app.subscribe('ws://ctl')
 def on_ctl(ctx: AciesContext, msg: Any) -> None:
     logger.debug('ctl command received: %r', msg.get('appType', 'unknown'))
@@ -159,9 +150,9 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     all_targets: list[str] = [gps_host]
     for node_id, state in new_node_states.items():
         data_ops = [
-            AciesSet(['scene'], state['scene']),
-            AciesSet(['run'], state['run_id']),
-            AciesSet(['node'], state['replayed_node_id']),
+            kv_set('scene', value=state['scene']),
+            kv_set('run', value=state['run_id']),
+            kv_set('node', value=state['replayed_node_id']),
         ]
         all_targets.append(f'{node_id}/vfm')
         if state['modality'] in ['mic', 'both']:
@@ -174,22 +165,21 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         (
             gps_host,
             [
-                AciesSet(['scene'], scene),
-                AciesSet(['run'], run_id),
-                AciesSet(['label'], reconfig_target),
+                kv_set('scene', value=scene),
+                kv_set('run', value=run_id),
+                kv_set('label', value=reconfig_target),
             ],
         )
     )
 
     with ThreadPoolExecutor() as pool:
         # pass 1: send data params in parallel
-        futures = [pool.submit(_kv_set, ctx, target, ops) for target, ops in data_reconfig_pass]
+        futures = [pool.submit(kv_call, ctx, target, ops) for target, ops in data_reconfig_pass]
         _wait_futures(futures, 'pass 1 (data params)')
 
         # pass 2: send start_at to all nodes in parallel
         start_at: float = float(ctx.now() / _NS_PER_S) + _REPLAY_AHEAD_TIME_S
-        start_ops = [AciesSet(['start_at'], start_at)]
-        futures = [pool.submit(_kv_set, ctx, target, start_ops) for target in all_targets]
+        futures = [pool.submit(kv_call, ctx, target, [kv_set('start_at', value=start_at)]) for target in all_targets]
         _wait_futures(futures, 'pass 2 (start_at)')
 
 
