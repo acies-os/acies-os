@@ -310,7 +310,7 @@ def main(**kwargs: Any) -> None:
         raise click.UsageError('--data-dir and --broker are mutually exclusive')
     if has_replay:
         for key in ('scene', 'run', 'label'):
-            if not kwargs.get(key):
+            if kwargs.get(key) is None:
                 raise click.UsageError(f'--{key} is required for replay mode')
     app.state.config.update(kwargs)
     setup_logging(app.name, app.namespace)
