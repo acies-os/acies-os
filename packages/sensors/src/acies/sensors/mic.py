@@ -1,13 +1,13 @@
 """Microphone sensor node for AciesOS.
 
 Captures audio from a sounddevice input, accumulates 1-second windows
-(channel 0 only), publishes AciesTimeSeries messages on ``<host>/<name>``,
+(channel 0 only), publishes AciesTimeSeries messages on ``<namespace>/<name>``,
 and writes to SQLite.
 
 Usage::
 
     acies-mic [--device default] [--output /data/host-mic.db]
-              [--acies-host HOST] [--acies-name NAME]
+              [--acies-namespace NS] [--acies-name NAME]
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ app = AciesApp()
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
     device = ctx.cfg['device']
-    output = ctx.cfg.get('output') or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
+    output = ctx.cfg.get('output') or f'/data/{ctx.ns.namespace}-{ctx.ns.name}.db'
     device_key: str | int | None = None if device == 'default' else device
 
     try:
@@ -260,7 +260,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
 @click.option(
     '--output',
     default=None,
-    help='SQLite database output path. Defaults to /data/<acies-host>-<acies-name>.db.',
+    help='SQLite database output path. Defaults to /data/<acies-namespace>-<acies-name>.db.',
 )
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
 def main(device: str, output: str | None, topic: str | None) -> None:

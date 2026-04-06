@@ -20,7 +20,7 @@ from acies.corev2.transport import LocalTransport
 def _make_app() -> AciesApp:
     router = Router()
     router.add_transport(LocalTransport())
-    return AciesApp('test', 'host', router=router)
+    return AciesApp('test', namespace='host', router=router)
 
 
 # --------------------------------- on_startup ---------------------------------

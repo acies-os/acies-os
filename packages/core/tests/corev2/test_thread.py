@@ -14,12 +14,12 @@ from acies.corev2.transport import LocalTransport
 def _make_app() -> tuple[AciesApp, threading.Event]:
     router = Router()
     router.add_transport(LocalTransport())
-    app = AciesApp('test-app', 'test-host', router=router)
+    app = AciesApp('test-app', namespace='test-host', router=router)
 
     ready = threading.Event()
 
     @app.on_startup
-    def _set_ready(ctx: AciesContext) -> None:
+    def _set_ready(_ctx: AciesContext) -> None:
         ready.set()
 
     return app, ready
@@ -87,16 +87,16 @@ def test_thread_crash_triggers_shutdown():
     """An unhandled exception in a thread calls stop(), shutting down the app."""
     router = Router()
     router.add_transport(LocalTransport())
-    app = AciesApp('test-app', 'test-host', router=router)
+    app = AciesApp('test-app', namespace='test-host', router=router)
 
     ready = threading.Event()
 
     @app.on_startup
-    def _set_ready(ctx: AciesContext) -> None:
+    def _set_ready(_ctx: AciesContext) -> None:
         ready.set()
 
     @app.thread
-    def crasher(ctx: AciesContext, stop: threading.Event) -> None:
+    def crasher(_ctx: AciesContext, _stop: threading.Event) -> None:
         raise RuntimeError('intentional crash')
 
     t = threading.Thread(target=app.run, daemon=True)

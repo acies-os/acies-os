@@ -35,11 +35,11 @@ from acies.corev2.transport import LocalTransport
 def _make_app() -> tuple[AciesApp, Router, threading.Event]:
     router = Router()
     router.add_transport(LocalTransport())
-    app = AciesApp('test-app', 'test-host', router=router)
+    app = AciesApp('test-app', namespace='test-host', router=router)
     ready = threading.Event()
 
     @app.on_startup
-    def _set_ready(ctx: AciesContext) -> None:
+    def _set_ready(_ctx: AciesContext) -> None:
         ready.set()
 
     return app, router, ready
@@ -195,7 +195,7 @@ class TestKvGet:
     def test_sys_key_readable(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [AciesGet(key=['sys', 'host'])])
+            resp = _kv_query(router, [AciesGet(key=['sys', 'namespace'])])
         assert resp.results == [Ok(value='test-host')]
 
 
@@ -230,10 +230,10 @@ class TestKvSet:
             assert resp.results == [Ok()]
         assert app.state.config['sys']['state'] == 'paused'
 
-    def test_sys_host_protected(self):
+    def test_sys_namespace_protected(self):
         app, router, ready = _make_app()
         with running(app, ready):
-            resp = _kv_query(router, [AciesSet(key=['sys', 'host'], value='other')])
+            resp = _kv_query(router, [AciesSet(key=['sys', 'namespace'], value='other')])
         assert isinstance(resp.results[0], Err)
         assert resp.results[0].reason == 'key_protected'
 
@@ -339,7 +339,7 @@ class TestDecoratorEnforcement:
         with pytest.raises(TypeError, match="must have a 'msg' parameter"):
 
             @app.subscribe('topic/x')
-            def no_msg(ctx: AciesContext) -> None:
+            def no_msg(_ctx: AciesContext) -> None:
                 pass
 
     def test_service_missing_msg_raises(self):
@@ -348,7 +348,7 @@ class TestDecoratorEnforcement:
         with pytest.raises(TypeError, match="must have a 'msg' parameter"):
 
             @app.service('svc/bad')
-            def no_msg(ctx: AciesContext) -> _Msg:
+            def no_msg(_ctx: AciesContext) -> _Msg:
                 return _Msg()
 
     def test_service_untyped_msg_raises(self):
@@ -357,7 +357,7 @@ class TestDecoratorEnforcement:
         with pytest.raises(TypeError, match='specific type annotation'):
 
             @app.service('svc/bad')
-            def base_msg(ctx: AciesContext, msg: msgspec.Struct) -> _Msg:
+            def base_msg(_ctx: AciesContext, _msg: msgspec.Struct) -> _Msg:
                 return _Msg()
 
     def test_service_missing_return_type_raises(self):
@@ -366,7 +366,7 @@ class TestDecoratorEnforcement:
         with pytest.raises(TypeError, match='return type annotation'):
 
             @app.service('svc/bad')
-            def no_return(ctx: AciesContext, msg: _Msg):  # type: ignore[return]
+            def no_return(_ctx: AciesContext, _msg: _Msg):  # type: ignore[return]
                 pass
 
 
@@ -419,7 +419,7 @@ class TestRoute:
         app, router, ready = _make_app()
 
         @app.subscribe('sensor/a')
-        def handler(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def handler(ctx: AciesContext, _msg: msgspec.Struct) -> None:
             received.append(ctx.app.config.get('_last', ''))
 
         with running(app, ready):
@@ -445,7 +445,7 @@ class TestRoute:
         app, router, ready = _make_app()
 
         @app.subscribe('topic/old')
-        def handler2(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def handler2(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
             pass
 
         with running(app, ready):
@@ -466,7 +466,7 @@ class TestRoute:
         app, router, ready = _make_app()
 
         @app.subscribe('topic/a')
-        def handler3(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def handler3(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
             pass
 
         with running(app, ready):
@@ -486,7 +486,7 @@ class TestRoute:
         app, router, ready = _make_app()
 
         @app.subscribe('topic/a')
-        def handler4(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def handler4(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
             pass
 
         with running(app, ready):
@@ -517,11 +517,11 @@ class TestRouteOutput:
         app, router, ready = _make_app()
 
         @app.subscribe('trigger')
-        def producer(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def producer(ctx: AciesContext, _msg: msgspec.Struct) -> None:
             ctx.publish('result/a', _Msg(v=1))
 
         @app.subscribe('result/b')
-        def consumer(ctx: AciesContext, msg: _Msg) -> None:
+        def consumer(_ctx: AciesContext, msg: _Msg) -> None:
             received_on_b.append(msg)
             done.set()
 
@@ -546,12 +546,12 @@ class TestRouteOutput:
         app, router, ready = _make_app()
 
         @app.subscribe('trigger')
-        def producer2(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def producer2(ctx: AciesContext, _msg: msgspec.Struct) -> None:
             ctx.publish('result/c', _Msg(v=99))
             done.set()
 
         @app.subscribe('result/c')
-        def sink(ctx: AciesContext, msg: _Msg) -> None:
+        def sink(_ctx: AciesContext, msg: _Msg) -> None:
             received.append(msg)
 
         with running(app, ready):
@@ -576,11 +576,11 @@ class TestRouteOutput:
         app, router, ready = _make_app()
 
         @app.subscribe('trigger')
-        def producer3(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def producer3(ctx: AciesContext, _msg: msgspec.Struct) -> None:
             ctx.publish('out/t1', _Msg(v=7))
 
         @app.subscribe('out/t3')
-        def sink3(ctx: AciesContext, msg: _Msg) -> None:
+        def sink3(_ctx: AciesContext, msg: _Msg) -> None:
             received_on_t3.append(msg)
             done.set()
 
@@ -613,7 +613,7 @@ class TestIo:
         app, router, ready = _make_app()
 
         @app.subscribe('sensor/data')
-        def handler(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def handler(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
             pass
 
         with running(app, ready):
@@ -629,7 +629,7 @@ class TestIo:
         app, router, ready = _make_app()
 
         @app.subscribe('trigger')
-        def publisher(ctx: AciesContext, msg: msgspec.Struct) -> None:
+        def publisher(ctx: AciesContext, _msg: msgspec.Struct) -> None:
             ctx.publish('result/y', _Msg(v=1))
             done.set()
 
@@ -653,7 +653,7 @@ class TestIo:
         app, router, ready = _make_app()
 
         @app.service('svc/ping')
-        def pinger(ctx: AciesContext, msg: _Msg) -> _Msg:
+        def pinger(_ctx: AciesContext, _msg: _Msg) -> _Msg:
             return _Msg(v=42)
 
         with running(app, ready):
@@ -690,7 +690,7 @@ class TestSchema:
         app, router, ready = _make_app()
 
         @app.service('svc/compute')
-        def compute(ctx: AciesContext, msg: _Req) -> _Resp:
+        def compute(_ctx: AciesContext, msg: _Req) -> _Resp:
             return _Resp(y=str(msg.x))
 
         with running(app, ready):
@@ -705,7 +705,7 @@ class TestSchema:
         app, router, ready = _make_app()
 
         @app.service('svc/typed')
-        def typed_svc(ctx: AciesContext, msg: _Req) -> _Resp:
+        def typed_svc(_ctx: AciesContext, msg: _Req) -> _Resp:
             return _Resp(y=str(msg.x))
 
         with running(app, ready):
@@ -725,7 +725,7 @@ class TestSchema:
         app, router, ready = _make_app()
 
         @app.subscribe('data/in')
-        def listener(ctx: AciesContext, msg: _Req) -> None:
+        def listener(_ctx: AciesContext, _msg: _Req) -> None:
             pass
 
         with running(app, ready):
@@ -739,7 +739,7 @@ class TestSchema:
         app, router, ready = _make_app()
 
         @app.service('svc/kv_check')
-        def kv_svc(ctx: AciesContext, msg: _Req) -> _Resp:
+        def kv_svc(_ctx: AciesContext, _msg: _Req) -> _Resp:
             return _Resp()
 
         with running(app, ready):

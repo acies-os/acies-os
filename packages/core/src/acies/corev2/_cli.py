@@ -26,7 +26,7 @@ def _load_defaults(config_path: str) -> dict[str, Any]:
     """Load CLI defaults from a JSON config file.
 
     Returns empty dict if file does not exist. Keys must match Click parameter
-    names (underscores, e.g. 'acies_host').
+    names (underscores, e.g. 'acies_namespace').
     """
     path = os.path.expanduser(config_path)
     if not os.path.exists(path):
@@ -45,17 +45,17 @@ def create_acies_cli(
     receives a dict that is deep-merged into app_state.config.
 
     Config file precedence: CLI args > config file > built-in defaults.
-    Config file keys use Click parameter names (e.g. 'acies_host').
+    Config file keys use Click parameter names (e.g. 'acies_namespace').
     """
     defaults = _load_defaults(_find_config_path())
 
     def decorator(user_fn: Callable[..., None]) -> Callable[..., None]:
         @click.command(context_settings={'default_map': defaults}, **kwargs)
         @click.option(
-            '--acies-host',
+            '--acies-namespace',
             required=True,
-            envvar='ACIES_HOST',
-            help='Logical device name for this node (e.g. edge-01).',
+            envvar='ACIES_NAMESPACE',
+            help='Hierarchical namespace for this node (e.g. edge-01, edge-01/sensor).',
         )
         @click.option(
             '--acies-name',
@@ -110,7 +110,7 @@ def create_acies_cli(
         )
         @functools.wraps(user_fn)
         def wrapper(
-            acies_host: str,
+            acies_namespace: str,
             acies_name: str,
             acies_state: str,
             acies_net_mode: str,
@@ -123,7 +123,7 @@ def create_acies_cli(
             configure(
                 {
                     'sys': {
-                        'host': acies_host,
+                        'namespace': acies_namespace,
                         'name': acies_name,
                         'state': acies_state,
                         'net_mode': acies_net_mode,

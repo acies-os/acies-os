@@ -19,7 +19,7 @@ Usage::
               [--ensemble-win N] [--ensemble-size N]
               [--modality seismic|audio]
               [--freq-mae]
-              [--acies-host HOST] [--acies-name NAME]
+              [--acies-namespace NS] [--acies-name NAME]
 """
 
 from __future__ import annotations

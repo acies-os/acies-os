@@ -1,5 +1,5 @@
 acies_log := env("ACIES_LOG", "")
-acies_host := env("ACIES_HOST", `hostname -s`)
+acies_namespace := env("ACIES_NAMESPACE", `hostname -s`)
 edge_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
 edge_zenoh_bridge := env("ZENOH_BRIDGE", "")
 pi_hosts := env("PI_HOSTS", "")
@@ -25,7 +25,7 @@ edge-gateway *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
-        -e ACIES_HOST={{ acies_host }} \
+        -e ACIES_NAMESPACE={{ acies_namespace }} \
         -e ACIES_NAME=gateway \
         --network host \
         -v ~/.acies:/root/.acies \
@@ -35,7 +35,7 @@ edge-gateway *args:
 edge-gateway-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
-    ACIES_HOST={{ acies_host }} \
+    ACIES_NAMESPACE={{ acies_namespace }} \
     ACIES_NAME=gateway \
     uv run acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
@@ -43,7 +43,7 @@ edge-gateway-local *args:
 edge-replay-gps-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
-    uv run acies-gps --acies-host {{ acies_host }} --acies-name replay_gps \
+    uv run acies-gps --acies-namespace {{ acies_namespace }} --acies-name replay_gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
 # Upload a file to /model/ on all PI_HOSTS. Set PI_HOSTS="rs1 rs2 rs3" (space-separated).
