@@ -85,6 +85,21 @@ def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
     logger.debug('heartbeat from %s: state=%s ts=%d', msg.source, msg.state, msg.timestamp)
 
 
+def _find_services(heartbeat_buf: TimeWindow, host: str) -> dict[str, str]:
+    """Find all services on a host from heartbeat records.
+
+    Returns {name: full_source_path}, e.g. {'mic': 'rs1/mic', 'geo': 'rs1/geo'}.
+    The host is matched against the first segment of each source path.
+    """
+    result: dict[str, str] = {}
+    for source in heartbeat_buf.keys():
+        first_seg = source.split('/', 1)[0]
+        if first_seg == host:
+            name = source.rsplit('/', 1)[1]
+            result[name] = source
+    return result
+
+
 def _wait_futures(futures: list[Any], label: str) -> None:
     """Wait for all futures to complete, logging errors."""
     for f in futures:
@@ -140,28 +155,36 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     logger.debug('new replay config: %s', new_node_states)
 
-    # TODO: look up gps host from heartbeat records instead of hardcoding
-    gps_host = 'edge-replay/replay_gps'
+    heartbeat_buf: TimeWindow = ctx.app['heartbeat']
 
-    # pass 1: data params (nodes reload and wait for start_at)
+    # --- look up GPS service from heartbeat records ---
+    edge_host = ctx.ns.namespace.split('/')[0]
+    gps_base = _find_services(heartbeat_buf, edge_host).get('gps')
+    if gps_base is None:
+        logger.error('gps service not found in heartbeat records')
+        return
+
+    # --- build kv ops for each target using service discovery ---
     data_reconfig_pass: list[tuple[str, Sequence[KvEntry]]] = []
-    all_targets: list[str] = [gps_host]
+    all_targets: list[str] = [gps_base]
     for node_id, state in new_node_states.items():
+        services = _find_services(heartbeat_buf, node_id)
         data_ops = [
             kv_set('scene', value=state['scene']),
             kv_set('run', value=state['run_id']),
             kv_set('node', value=state['replayed_node_id']),
         ]
-        all_targets.append(f'{node_id}/vfm')
-        if state['modality'] in ['mic', 'both']:
-            data_reconfig_pass.append((f'{node_id}/mic', data_ops))
-            all_targets.append(f'{node_id}/mic')
-        if state['modality'] in ['geo', 'both']:
-            data_reconfig_pass.append((f'{node_id}/geo', data_ops))
-            all_targets.append(f'{node_id}/geo')
+        if 'vfm' in services:
+            all_targets.append(services['vfm'])
+        if state['modality'] in ['mic', 'both'] and 'mic' in services:
+            data_reconfig_pass.append((services['mic'], data_ops))
+            all_targets.append(services['mic'])
+        if state['modality'] in ['geo', 'both'] and 'geo' in services:
+            data_reconfig_pass.append((services['geo'], data_ops))
+            all_targets.append(services['geo'])
     data_reconfig_pass.append(
         (
-            gps_host,
+            gps_base,
             [
                 kv_set('scene', value=scene),
                 kv_set('run', value=run_id),
