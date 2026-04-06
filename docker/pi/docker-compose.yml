@@ -7,7 +7,7 @@ services:
     environment:
       - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
       - ACIES_LOG=${ACIES_LOG:-}
-      - ACIES_HOST=${ACIES_HOST:-}
+      - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}
       - ACIES_NAME=geo
       - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     volumes:
@@ -28,7 +28,7 @@ services:
     environment:
       - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
       - ACIES_LOG=${ACIES_LOG:-}
-      - ACIES_HOST=${ACIES_HOST:-}
+      - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}
       - ACIES_NAME=mic
       - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     volumes:
@@ -43,12 +43,12 @@ services:
   acies-vfm:
     image: acies-pi:latest
     profiles: [geo-classifier, mic-classifier, multimodal]
-    command: acies-vfm --weight ${VFM_WEIGHT} --geo ${ACIES_HOST:-}/geo --mic ${ACIES_HOST:-}/mic
+    command: acies-vfm --weight ${VFM_WEIGHT} --geo ${ACIES_NAMESPACE:-}/geo --mic ${ACIES_NAMESPACE:-}/mic
     network_mode: host
     environment:
       - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
       - ACIES_LOG=${ACIES_LOG:-}
-      - ACIES_HOST=${ACIES_HOST:-}
+      - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}
       - ACIES_NAME=vfm
       - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     volumes:
