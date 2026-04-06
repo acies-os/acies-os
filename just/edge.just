@@ -25,7 +25,7 @@ edge-gateway *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
-        -e ACIES_NAMESPACE={{ acies_namespace }} \
+        -e ACIES_NAMESPACE={{ acies_namespace }}/infra \
         -e ACIES_NAME=gateway \
         --network host \
         -v ~/.acies:/root/.acies \
@@ -35,7 +35,7 @@ edge-gateway *args:
 edge-gateway-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
-    ACIES_NAMESPACE={{ acies_namespace }} \
+    ACIES_NAMESPACE={{ acies_namespace }}/infra \
     ACIES_NAME=gateway \
     uv run acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
@@ -43,7 +43,7 @@ edge-gateway-local *args:
 edge-replay-gps-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
-    uv run acies-gps --acies-namespace {{ acies_namespace }} --acies-name replay_gps \
+    uv run acies-gps --acies-namespace {{ acies_namespace }}/infra --acies-name replay_gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
 # Upload a file to /model/ on all PI_HOSTS. Set PI_HOSTS="rs1 rs2 rs3" (space-separated).

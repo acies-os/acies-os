@@ -23,6 +23,7 @@ import logging
 import os
 import random
 from collections import defaultdict, deque
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -32,7 +33,7 @@ import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, setup_logging
 from acies.corev2.ctl import kv_call, kv_set
-from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction, AciesSet
+from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction, KvEntry
 from acies.corev2.namespace import matches
 
 logger = logging.getLogger(__name__)
@@ -72,14 +73,11 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
         ctx.publish('ws://predictions', msg_filtered)
 
 
-@app.subscribe('**/heartbeat')
+@app.subscribe('**/ctl/heartbeat')
 def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
-    if msg.source == ctx.ns.base or matches('**replay**', msg.source):
-        return
-
-    # --- validate source format (must be host/name) ---
+    # --- validate source format (must contain namespace/name) ---
     if '/' not in msg.source:
-        logger.warning('heartbeat source %r missing host/name separator; dropping', msg.source)
+        logger.warning('heartbeat source %r missing namespace/name separator; dropping', msg.source)
         return
 
     buff: TimeWindow = ctx.app['heartbeat']
@@ -146,7 +144,7 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     gps_host = 'edge-replay/replay_gps'
 
     # pass 1: data params (nodes reload and wait for start_at)
-    data_reconfig_pass: list[tuple[str, list[AciesSet]]] = []
+    data_reconfig_pass: list[tuple[str, Sequence[KvEntry]]] = []
     all_targets: list[str] = [gps_host]
     for node_id, state in new_node_states.items():
         data_ops = [
@@ -242,13 +240,16 @@ def system_health(ctx: AciesContext) -> None:
 
     hosts: dict[str, dict[str, Any]] = {}
     for source in heartbeat_buf.keys():
+        # skip infrastructure services (e.g. edge/infra/gateway)
+        if matches(source, '**/infra/**'):
+            continue
         entry = heartbeat_buf.latest(source)
         if entry is None:
             continue
         ts, state = entry
         alive = (now - ts) < alive_timeout_ns
 
-        # source is "host/name" -> group by host
+        # source is "namespace/name" -> group by first segment (host)
         parts = source.split('/', 1)
         host = parts[0]
         if host not in hosts:
