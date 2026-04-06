@@ -85,6 +85,7 @@ class Job:
 
     spec: TaskSpec
     raw: bytes | None  # raw msgpack bytes from transport; None for ScheduleSpec jobs
+    topic: str | None = None  # topic the message arrived on; None for ScheduleSpec jobs
     deadline: float = 0.0  # seconds (monotonic); 0.0 = no deadline, FIFO ordering
     created_at: float = field(default_factory=time.monotonic)
     reply_fn: Callable[[bytes], None] | None = None  # only set for ServiceSpec jobs

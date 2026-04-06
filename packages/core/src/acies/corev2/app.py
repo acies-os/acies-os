@@ -97,7 +97,8 @@ def _call_handler(fn: Callable[..., Any], **kwargs: Any) -> Any:
         return fn(**kwargs)
     params = inspect.signature(fn).parameters
     mapped = {(f'_{k}' if f'_{k}' in params else k): v for k, v in kwargs.items()}
-    return fn(**mapped)
+    filtered = {k: v for k, v in mapped.items() if k in params}
+    return fn(**filtered)
 
 
 class AciesApp:
@@ -331,7 +332,7 @@ class AciesApp:
                         if spec.msg_type is not None
                         else msgspec.msgpack.decode(job.raw)
                     )
-                    result = _call_handler(spec.fn, ctx=ctx, msg=msg)
+                    result = _call_handler(spec.fn, ctx=ctx, msg=msg, topic=job.topic)
                     if job.reply_fn is not None:
                         job.reply_fn(msgspec.msgpack.encode(result))
                 case ThreadSpec():
