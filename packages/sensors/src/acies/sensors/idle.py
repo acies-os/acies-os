@@ -17,7 +17,7 @@ app = AciesApp()
 
 @app.cli()
 def main() -> None:
-    setup_logging(app.name)
+    setup_logging(app.name, app.namespace)
     app.run()
 
 

@@ -373,7 +373,7 @@ def teardown(_ctx: AciesContext) -> None:
 )
 def main(**kwargs: dict[str, Any]) -> None:
     app.state.config.update(kwargs)
-    setup_logging(app.name)
+    setup_logging(app.name, app.namespace)
     app.run()
 
 
