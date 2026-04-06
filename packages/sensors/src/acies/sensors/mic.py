@@ -265,7 +265,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
 def main(device: str, output: str | None, topic: str | None) -> None:
     app.state.config.update({'device': device, 'output': output, 'topic': topic})
-    setup_logging(app.name)
+    setup_logging(app.name, app.namespace)
     app.run()
 
 

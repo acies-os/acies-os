@@ -2,7 +2,8 @@
 
 Configures a root logger with two handlers:
   - Console (StreamHandler): INFO and above
-  - File (RotatingFileHandler): DEBUG and above, saved to ~/.acies/logs/<name>.log
+  - File (RotatingFileHandler): DEBUG and above, saved to
+    ~/.acies/logs/<namespace>/<name>.log
 
 Per-logger level overrides can be set via the ``ACIES_LOG`` environment variable::
 
@@ -12,7 +13,8 @@ Usage::
 
     from acies.corev2 import setup_logging
 
-    setup_logging('geo')
+    setup_logging('geo')                          # -> ~/.acies/logs/geo.log
+    setup_logging('geo', namespace='edge-01')     # -> ~/.acies/logs/edge-01/geo.log
 """
 
 from __future__ import annotations
@@ -23,13 +25,19 @@ import os
 import pathlib
 
 
-def setup_logging(name: str) -> None:
+def setup_logging(name: str, namespace: str | None = None) -> None:
     """Configure root logger with console and rotating file handlers.
 
     Handlers:
       - Console (stderr): INFO and above.
-      - File (~/.acies/logs/<name>.log): DEBUG and above. Rotates at 50 MB,
-        keeps 20 backups (~1 GB total). Directory is created if it does not exist.
+      - File: DEBUG and above. Rotates at 50 MB, keeps 20 backups (~1 GB total).
+
+    Log file path:
+      - ``setup_logging('geo')`` -> ``~/.acies/logs/geo.log``
+      - ``setup_logging('geo', namespace='edge-01/sensor')``
+        -> ``~/.acies/logs/edge-01/sensor/geo.log``
+
+    Parent directories are created automatically.
 
     Format::
 
@@ -43,18 +51,23 @@ def setup_logging(name: str) -> None:
     configured, so they take precedence over the defaults.
 
     Args:
-        name: Log file base name (e.g. 'geo' -> ~/.acies/logs/geo.log).
+        name: Log file base name (e.g. 'geo').
+        namespace: Optional hierarchical namespace (e.g. 'edge-01/sensor').
+            When provided, logs are written under a matching directory hierarchy.
     """
     log_dir = pathlib.Path.home() / '.acies' / 'logs'
-    log_dir.mkdir(parents=True, exist_ok=True)
+    if namespace:
+        log_dir = log_dir / namespace
 
     fmt = logging.Formatter(
         '%(levelname)-.1s%(asctime)s.%(msecs)06d %(thread)d %(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y%m%d %H:%M:%S',
     )
 
+    log_path = log_dir / f'{name}.log'
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / f'{name}.log'.replace('/', '_'), maxBytes=50 * 1024 * 1024, backupCount=20
+        log_path, maxBytes=50 * 1024 * 1024, backupCount=20
     )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(fmt)

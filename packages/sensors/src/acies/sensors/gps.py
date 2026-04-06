@@ -313,7 +313,7 @@ def main(**kwargs: Any) -> None:
             if not kwargs.get(key):
                 raise click.UsageError(f'--{key} is required for replay mode')
     app.state.config.update(kwargs)
-    setup_logging(app.name)
+    setup_logging(app.name, app.namespace)
     app.run()
 
 

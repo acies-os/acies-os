@@ -231,7 +231,7 @@ def main(
             'condition_seconds': condition_seconds,
         }
     )
-    setup_logging(app.name)
+    setup_logging(app.name, app.namespace)
     app.run()
 
 
