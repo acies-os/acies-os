@@ -9,6 +9,7 @@ Provides:
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from .context import AciesContext
@@ -65,7 +66,7 @@ def make_heartbeat_spec(interval: float = _DEFAULT_HEARTBEAT_INTERVAL) -> Schedu
 # ---------------------------- KV helper functions ----------------------------
 
 
-def _get_path(config: dict[str, Any], path: list[str]) -> Any:
+def _get_path(config: dict[str, Any], path: Sequence[str]) -> Any:
     node: Any = config
     for key in path:
         if not isinstance(node, dict):
@@ -74,7 +75,7 @@ def _get_path(config: dict[str, Any], path: list[str]) -> Any:
     return node  # pyright: ignore[reportUnknownVariableType]
 
 
-def _set_path(config: dict[str, Any], path: list[str], value: Any) -> None:
+def _set_path(config: dict[str, Any], path: Sequence[str], value: Any) -> None:
     node = config
     for key in path[:-1]:
         if key not in node or not isinstance(node[key], dict):
@@ -85,7 +86,7 @@ def _set_path(config: dict[str, Any], path: list[str], value: Any) -> None:
     node[path[-1]] = value
 
 
-def _del_path(config: dict[str, Any], path: list[str]) -> None:
+def _del_path(config: dict[str, Any], path: Sequence[str]) -> None:
     node: Any = config
     for key in path[:-1]:
         if not isinstance(node, dict):
@@ -98,7 +99,7 @@ def _del_path(config: dict[str, Any], path: list[str]) -> None:
 _SYS_MUTABLE: frozenset[str] = frozenset({'state'})
 
 
-def _handle_get(config: dict[str, Any], k: list[str]) -> AciesResult:
+def _handle_get(config: dict[str, Any], k: Sequence[str]) -> AciesResult:
     if not k:
         return Err(reason='empty key path')
     try:
@@ -107,7 +108,7 @@ def _handle_get(config: dict[str, Any], k: list[str]) -> AciesResult:
         return Err(reason=f'key not found: {e.args[0]!r}')
 
 
-def _handle_set(config: dict[str, Any], k: list[str], v: Any) -> AciesResult:
+def _handle_set(config: dict[str, Any], k: Sequence[str], v: Any) -> AciesResult:
     if not k:
         return Err(reason='empty key path')
     if k[0] == 'sys' and not (len(k) == 2 and k[1] in _SYS_MUTABLE):
@@ -119,7 +120,7 @@ def _handle_set(config: dict[str, Any], k: list[str], v: Any) -> AciesResult:
         return Err(reason=f'key not found: {e.args[0]!r}')
 
 
-def _handle_del(config: dict[str, Any], k: list[str]) -> AciesResult:
+def _handle_del(config: dict[str, Any], k: Sequence[str]) -> AciesResult:
     if not k:
         return Err(reason='empty key path')
     if k[0] == 'sys':
@@ -214,6 +215,7 @@ def make_io_spec(router: Router) -> ServiceSpec:
     """
 
     def _io(ctx: AciesContext, msg: AciesIoRequest) -> AciesIoResponse:
+        logger.debug('I/O routing table requested by %s', msg.source)
         return AciesIoResponse(timestamp=ctx.now(), io=router.io_map)
 
     return ServiceSpec(name='_io', fn=_io, topic=CtlTopic('io'), msg_type=AciesIoRequest, return_type=AciesIoResponse)
@@ -233,6 +235,7 @@ def make_schema_spec() -> ServiceSpec:
     def _schema(ctx: AciesContext, msg: AciesSchemaRequest) -> AciesSchemaResponse:
         with ctx.app.lock:
             schemas = dict(ctx.app.config.get('sys', {}).get('schemas', {}))
+        logger.debug('service schema requested by %s', msg.source)
         return AciesSchemaResponse(timestamp=ctx.now(), schemas=schemas)
 
     return ServiceSpec(
