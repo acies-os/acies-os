@@ -253,7 +253,7 @@ class AciesApp:
             _check_param(fn, 'subscriber', 'ctx', 'AciesContext')
             _check_param(fn, 'subscriber', 'msg')
             hints = get_type_hints(fn)
-            msg_type = hints.get('msg')
+            msg_type = hints.get('msg') or hints.get('_msg')
             self._tasks.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
             logger.debug('subscribe %r registered on %d topic(s)', fn.__name__, len(topics))
             return fn
@@ -292,7 +292,7 @@ class AciesApp:
             _check_param(fn, 'service', 'ctx', 'AciesContext')
             _check_param(fn, 'service', 'msg')
             hints = get_type_hints(fn)
-            msg_type = hints.get('msg')
+            msg_type = hints.get('msg') or hints.get('_msg')
             return_type = hints.get('return')
             if not _has_var_keyword(fn) and (msg_type is None or msg_type is msgspec.Struct):
                 raise TypeError(
