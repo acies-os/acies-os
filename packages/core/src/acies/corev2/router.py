@@ -342,7 +342,7 @@ class Router:
                     matched = False
                     for pattern, spec in self._services.items():
                         if matches(pattern, topic):
-                            executor.enqueue(Job(spec=spec, raw=raw, reply_fn=reply_fn))
+                            executor.enqueue(Job(spec=spec, raw=raw, topic=topic, reply_fn=reply_fn))
                             logger.debug('query %r -> %r (%d bytes)', topic, spec.name, len(raw))
                             matched = True
                             break
@@ -354,7 +354,7 @@ class Router:
                     for pattern, specs in self._subscriptions.items():
                         if matches(pattern, topic):
                             for spec in specs:
-                                executor.enqueue(Job(spec=spec, raw=raw))
+                                executor.enqueue(Job(spec=spec, raw=raw, topic=topic))
                                 n_matched += 1
                     if n_matched:
                         logger.debug('pub %r -> %d handler(s) (%d bytes)', topic, n_matched, len(raw))
