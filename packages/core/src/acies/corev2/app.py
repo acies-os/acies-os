@@ -105,11 +105,11 @@ class AciesApp:
     def __init__(
         self,
         name: str | None = None,
-        host: str | None = None,
+        namespace: str | None = None,
         router: Router | None = None,
     ) -> None:
         resolved_name = name or uuid.uuid4().hex[:6]
-        resolved_host = host or socket.gethostname()
+        resolved_namespace = namespace or socket.gethostname()
         if router is None:
             router = Router()
         self._router: Router = router
@@ -123,7 +123,7 @@ class AciesApp:
         self._task_ctxs: dict[TaskSpec, AciesContext] = {}
         self._app_state: AppState = AppState()
         self._app_state.config['sys'] = {
-            'host': resolved_host,
+            'namespace': resolved_namespace,
             'name': resolved_name,
             'state': 'initializing',
         }
@@ -146,8 +146,8 @@ class AciesApp:
         return self._app_state.config['sys']['name']  # type: ignore[no-any-return]
 
     @property
-    def host(self) -> str:
-        return self._app_state.config['sys']['host']  # type: ignore[no-any-return]
+    def namespace(self) -> str:
+        return self._app_state.config['sys']['namespace']  # type: ignore[no-any-return]
 
     @property
     def state(self) -> AppState:
@@ -158,7 +158,7 @@ class AciesApp:
     def cli(self, **kwargs: Any) -> Callable[[Callable[..., None]], Callable[..., None]]:
         """Decorator that turns a function into a Click command with middleware options.
 
-        Middleware options (--acies-host, --acies-name) are injected and consumed
+        Middleware options (--acies-namespace, --acies-name) are injected and consumed
         before the user's function runs; they never appear in the user's kwargs.
         Parsed values are stored in app_state.config['sys'] and are accessible
         to handlers via ctx.app.config['sys'].
@@ -365,7 +365,7 @@ class AciesApp:
                     raise ValueError(f'topic template {topic!r} references unknown config key {e}') from e
             case Topic():
                 if topic.prefix is True:
-                    return f'{self._ns.host}/{self._ns.name}/{topic.path}'
+                    return f'{self._ns.base}/{topic.path}'
                 elif topic.prefix:
                     return f'{topic.prefix}/{topic.path}'
                 else:
@@ -403,8 +403,8 @@ class AciesApp:
           5. Shutdown hooks called -- router already down; hooks must not publish
         """
 
-        self._ns = Namespace(self._app_state.config['sys']['host'], self._app_state.config['sys']['name'])
-        logger.info('starting: host=%r name=%r tasks=%d', self._ns.host, self._ns.name, len(self._tasks))
+        self._ns = Namespace(self._app_state.config['sys']['namespace'], self._app_state.config['sys']['name'])
+        logger.info('starting: namespace=%r name=%r tasks=%d', self._ns.namespace, self._ns.name, len(self._tasks))
 
         # -------------------------- setup transports --------------------------
 

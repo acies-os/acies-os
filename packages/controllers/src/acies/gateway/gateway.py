@@ -14,7 +14,7 @@ Usage::
 
     acies-gateway --config gq.toml
                   [--acies-listen=ws://0.0.0.0:8765]
-                  [--acies-host HOST] [--acies-name NAME]
+                  [--acies-namespace NS] [--acies-name NAME]
 """
 
 from __future__ import annotations

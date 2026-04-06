@@ -1,6 +1,6 @@
 pi_app_dir := env("PI_APP_DIR", "/ws/acies/acies-os")
 acies_log := env("ACIES_LOG", "")
-acies_host := env("ACIES_HOST", `hostname -s`)
+acies_namespace := env("ACIES_NAMESPACE", `hostname -s`)
 pi_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
 pi_zenoh_bridge := env("ZENOH_BRIDGE", "")
 rawshake_debug := env("RAWSHAKE_DEBUG", "0")
@@ -50,7 +50,7 @@ pi-mic *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
-        -e ACIES_HOST={{ acies_host }} \
+        -e ACIES_NAMESPACE={{ acies_namespace }} \
         -e ACIES_NAME=mic \
         -e ACIES_CONNECT={{ pi_zenoh_connect }} \
         --network host \
@@ -67,7 +67,7 @@ pi-geo *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
-        -e ACIES_HOST={{ acies_host }} \
+        -e ACIES_NAMESPACE={{ acies_namespace }} \
         -e ACIES_NAME=geo \
         -e ACIES_CONNECT={{ pi_zenoh_connect }} \
         -e RAWSHAKE_DEBUG={{ rawshake_debug }} \
@@ -86,7 +86,7 @@ pi-vfm *args:
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
-        -e ACIES_HOST={{ acies_host }} \
+        -e ACIES_NAMESPACE={{ acies_namespace }} \
         -e ACIES_NAME=vfm \
         -e ACIES_CONNECT={{ pi_zenoh_connect }} \
         --network host \
@@ -99,10 +99,10 @@ pi-vfm *args:
 pi-vfm-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
-    uv run acies-vfm --acies-host {{ acies_host }} --acies-name vfm \
+    uv run acies-vfm --acies-namespace {{ acies_namespace }} --acies-name vfm \
         --acies-connect {{ pi_zenoh_connect }} \
         --weight /model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt \
-        --geo {{ acies_host }}/geo --mic {{ acies_host }}/mic \
+        --geo {{ acies_namespace }}/geo --mic {{ acies_namespace }}/mic \
         --labels "gle350,miata,cx30,mustang" \
         {{ args }}
 
@@ -110,7 +110,7 @@ pi-vfm-local *args:
 pi-replay-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
-    uv run acies-replay --acies-host {{ acies_host }} \
+    uv run acies-replay --acies-namespace {{ acies_namespace }} \
         --acies-connect {{ pi_zenoh_connect }} {{ args }}
 
 # Record 40 seconds of audio from the USB microphone array and save it to /data/alsa-test.wav

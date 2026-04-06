@@ -9,7 +9,7 @@ Usage::
     acies-noise-detector --geo <topic> --mic <topic>
                          [--win-size N]
                          [--output TOPIC]
-                         [--acies-host HOST] [--acies-name NAME]
+                         [--acies-namespace NS] [--acies-name NAME]
 """
 
 from __future__ import annotations

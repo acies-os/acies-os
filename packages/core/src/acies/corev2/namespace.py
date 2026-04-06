@@ -1,20 +1,24 @@
 """Topic namespace utilities for AciesOS.
 
-Namespace convention: <host>/<name>/<user-defined>
-Control subspace:     <host>/<name>/ctl/<service>
+Namespace convention: <namespace>/<name>/<user-defined>
+Control subspace:     <namespace>/<name>/ctl/<service>
+
+The namespace is hierarchical (may contain '/') and is set by the deployment.
+The name is a flat identifier (no '/') for the service instance.
 
 Usage::
 
     ns = Namespace('edge-01', 'mic')
-    ns.topic('building', 'a', 'temperature')   # "building/a/temperature"
-    ns.topic('audio', prefix=True)             # "edge-01/mic/audio"
-    ns.topic('audio', prefix='org/site-a')     # "org/site-a/audio"
-    ns.ctl.kv                                  # "edge-01/mic/ctl/kv"
-    ns.ctl.heartbeat                           # "edge-01/mic/ctl/heartbeat"
-    ns.ctl.route                               # "edge-01/mic/ctl/route"
-    ns.ctl.io                                  # "edge-01/mic/ctl/io"
-    ns.ctl.schema                              # "edge-01/mic/ctl/schema"
-    ns.ctl('custom')                           # "edge-01/mic/ctl/custom"
+    ns = Namespace('edge-01/sensor', 'mic')      # hierarchical namespace
+    ns.topic('building', 'a', 'temperature')      # "building/a/temperature"
+    ns.topic('audio', prefix=True)                # "<namespace>/mic/audio"
+    ns.topic('audio', prefix='org/site-a')        # "org/site-a/audio"
+    ns.ctl.kv                                     # "<namespace>/mic/ctl/kv"
+    ns.ctl.heartbeat                              # "<namespace>/mic/ctl/heartbeat"
+    ns.ctl.route                                  # "<namespace>/mic/ctl/route"
+    ns.ctl.io                                     # "<namespace>/mic/ctl/io"
+    ns.ctl.schema                                 # "<namespace>/mic/ctl/schema"
+    ns.ctl('custom')                              # "<namespace>/mic/ctl/custom"
 
 See::
 
@@ -31,13 +35,13 @@ from typing import TypeAlias
 # Selector characters — never valid in a key expression.
 _FORBIDDEN_SEG: frozenset[str] = frozenset('?#')
 
-# Additional characters forbidden in concrete identifiers (host, name).
+# Additional characters forbidden in concrete identifiers (namespace, name).
 # Wildcards are not meaningful in identifiers and would cause silent bugs.
 _FORBIDDEN_ID: frozenset[str] = _FORBIDDEN_SEG | frozenset('*$')
 
 
-def _validate_id(value: str, label: str) -> None:
-    """Validate a concrete identifier (host or name) — wildcards not allowed."""
+def _validate_name(value: str, label: str) -> None:
+    """Validate a flat identifier (name) -- no '/' allowed."""
     if not value:
         raise ValueError(f'{label} must not be empty')
     if '/' in value:
@@ -45,6 +49,22 @@ def _validate_id(value: str, label: str) -> None:
     invalid = _FORBIDDEN_ID & set(value)
     if invalid:
         raise ValueError(f'{label} contains forbidden characters {sorted(invalid)}: {value!r}')
+
+
+def _validate_namespace(value: str) -> None:
+    """Validate a hierarchical namespace -- '/' is allowed as separator.
+
+    Each segment between '/' separators is validated individually: must be
+    non-empty and free of wildcard/selector characters.
+    """
+    if not value:
+        raise ValueError('namespace must not be empty')
+    for seg in value.split('/'):
+        if not seg:
+            raise ValueError(f'namespace contains empty segment: {value!r}')
+        invalid = _FORBIDDEN_ID & set(seg)
+        if invalid:
+            raise ValueError(f'namespace contains forbidden characters {sorted(invalid)}: {value!r}')
 
 
 def _validate_part(part: str) -> None:
@@ -111,13 +131,13 @@ class CtlTopics:
 
     Attribute access for known control topics; callable for custom ones::
 
-        ctl.kv                 # "<host>/<name>/ctl/kv"
-        ctl.heartbeat          # "<host>/<name>/ctl/heartbeat"
-        ctl.route              # "<host>/<name>/ctl/route"
-        ctl.io                 # "<host>/<name>/ctl/io"
-        ctl.schema             # "<host>/<name>/ctl/schema"
-        ctl.notify             # "<host>/<name>/ctl/notify"
-        ctl('my', 'service')   # "<host>/<name>/ctl/my/service"
+        ctl.kv                 # "<namespace>/<name>/ctl/kv"
+        ctl.heartbeat          # "<namespace>/<name>/ctl/heartbeat"
+        ctl.route              # "<namespace>/<name>/ctl/route"
+        ctl.io                 # "<namespace>/<name>/ctl/io"
+        ctl.schema             # "<namespace>/<name>/ctl/schema"
+        ctl.notify             # "<namespace>/<name>/ctl/notify"
+        ctl('my', 'service')   # "<namespace>/<name>/ctl/my/service"
     """
 
     kv: str
@@ -138,33 +158,35 @@ class CtlTopics:
 class Namespace:
     """Topic namespace for an AciesApp instance.
 
-    Constructed once at startup from host and name; reused across all handlers.
+    Constructed once at startup from namespace and name; reused across all
+    handlers.  The namespace is hierarchical (may contain '/'); the name is
+    a flat identifier (no '/').
 
     Data topics::
 
         ns.topic('building', 'a', 'temperature')   # "building/a/temperature"
-        ns.topic('audio', prefix=True)             # "edge-01/mic/audio"
+        ns.topic('audio', prefix=True)             # "<ns>/mic/audio"
         ns.topic('audio', prefix='org/site-a')     # "org/site-a/audio"
 
     Control topics::
 
-        ns.ctl.kv                     # "edge-01/mic/ctl/kv"
-        ns.ctl.heartbeat              # "edge-01/mic/ctl/heartbeat"
-        ns.ctl.route                  # "edge-01/mic/ctl/route"
-        ns.ctl.io                     # "edge-01/mic/ctl/io"
-        ns.ctl.schema                 # "edge-01/mic/ctl/schema"
-        ns.ctl.notify                 # "edge-01/mic/ctl/notify"
-        ns.ctl('custom')              # "edge-01/mic/ctl/custom"
+        ns.ctl.kv                     # "<ns>/mic/ctl/kv"
+        ns.ctl.heartbeat              # "<ns>/mic/ctl/heartbeat"
+        ns.ctl.route                  # "<ns>/mic/ctl/route"
+        ns.ctl.io                     # "<ns>/mic/ctl/io"
+        ns.ctl.schema                 # "<ns>/mic/ctl/schema"
+        ns.ctl.notify                 # "<ns>/mic/ctl/notify"
+        ns.ctl('custom')              # "<ns>/mic/ctl/custom"
     """
 
-    host: str
+    namespace: str
     name: str
     ctl: CtlTopics = field(init=False)
 
     def __post_init__(self) -> None:
-        _validate_id(self.host, 'host')
-        _validate_id(self.name, 'name')
-        base = f'{self.host}/{self.name}/ctl'
+        _validate_namespace(self.namespace)
+        _validate_name(self.name, 'name')
+        base = f'{self.namespace}/{self.name}/ctl'
         self.ctl = CtlTopics(
             kv=f'{base}/kv',
             heartbeat=f'{base}/heartbeat',
@@ -177,18 +199,18 @@ class Namespace:
 
     @property
     def base(self) -> str:
-        """Return ``<host>/<name>`` — the app's base path in the topic tree."""
-        return f'{self.host}/{self.name}'
+        """Return ``<namespace>/<name>`` -- the app's base path in the topic tree."""
+        return f'{self.namespace}/{self.name}'
 
     def topic(self, *parts: str, prefix: bool | str = True) -> str:
         """Construct a topic, optionally prefixed.
 
-        ``prefix=True`` (default) — prepend ``<host>/<name>``.
+        ``prefix=True`` (default) -- prepend ``<namespace>/<name>``.
 
-        ``prefix=''`` or ``prefix=False`` — no prefix; parts are joined
+        ``prefix=''`` or ``prefix=False`` -- no prefix; parts are joined
         as-is for domain-centric topic organisation.
 
-        ``prefix='org/building-a'`` — prepend a custom path string; the
+        ``prefix='org/building-a'`` -- prepend a custom path string; the
         string is used verbatim without validation.
 
         Wildcards ``*``, ``**``, and ``$*`` are allowed in parts.
@@ -196,7 +218,7 @@ class Namespace:
         for part in parts:
             _validate_part(part)
         if prefix is True:
-            return '/'.join([self.host, self.name, *parts])
+            return '/'.join([self.base, *parts])
         if prefix:
             return '/'.join([prefix, *parts])
         # no prefix if prefix=False or prefix=''
@@ -208,16 +230,16 @@ class Namespace:
 
 @dataclass(frozen=True)
 class Topic:
-    """Lazy topic resolved at run() time, optionally prefixed with host/name.
+    """Lazy topic resolved at run() time, optionally prefixed with namespace/name.
 
-    ``prefix=True`` (default) prepends ``<host>/<name>`` from the app's
+    ``prefix=True`` (default) prepends ``<namespace>/<name>`` from the app's
     namespace.  Pass ``prefix=''`` or ``False`` for domain-centric topics,
     or a custom string prefix.  The path may contain ``/`` for convenience.
 
     Example::
 
-        Topic('audio/raw')                      # "edge-01/mic/audio/raw"
-        Topic('**')                             # "edge-01/mic/**"
+        Topic('audio/raw')                      # "<ns>/mic/audio/raw"
+        Topic('**')                             # "<ns>/mic/**"
         Topic('room/5/temperature', prefix='')  # "room/5/temperature"
         Topic('audio', prefix='org/site-a')     # "org/site-a/audio"
     """
@@ -228,18 +250,18 @@ class Topic:
 
 @dataclass(frozen=True)
 class CtlTopic:
-    """Lazy control-plane topic resolved to ``<host>/<name>/ctl/<path>`` at run() time.
+    """Lazy control-plane topic resolved to ``<namespace>/<name>/ctl/<path>`` at run() time.
 
     The path may contain ``/`` for nested control topics.
 
     Example::
 
-        CtlTopic('kv')          # "edge-01/mic/ctl/kv"
-        CtlTopic('heartbeat')   # "edge-01/mic/ctl/heartbeat"
-        CtlTopic('route')       # "edge-01/mic/ctl/route"
-        CtlTopic('io')          # "edge-01/mic/ctl/io"
-        CtlTopic('schema')      # "edge-01/mic/ctl/schema"
-        CtlTopic('my/service')  # "edge-01/mic/ctl/my/service"
+        CtlTopic('kv')          # "<ns>/mic/ctl/kv"
+        CtlTopic('heartbeat')   # "<ns>/mic/ctl/heartbeat"
+        CtlTopic('route')       # "<ns>/mic/ctl/route"
+        CtlTopic('io')          # "<ns>/mic/ctl/io"
+        CtlTopic('schema')      # "<ns>/mic/ctl/schema"
+        CtlTopic('my/service')  # "<ns>/mic/ctl/my/service"
     """
 
     path: str
@@ -247,7 +269,7 @@ class CtlTopic:
 
 @dataclass(frozen=True)
 class OnChange:
-    """Lazy notification topic resolved to ``<host>/<name>/ctl/notify/<key>`` at run() time.
+    """Lazy notification topic resolved to ``<namespace>/<name>/ctl/notify/<key>`` at run() time.
 
     Used with ``@app.subscribe`` to react to config changes via kv set/del.
 

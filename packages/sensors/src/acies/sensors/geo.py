@@ -1,7 +1,7 @@
 """Geophone sensor node for AciesOS.
 
 Reads 1-second windows from a Raspberry Shake (RS1D or RS4D) over serial,
-publishes AciesTimeSeries messages on ``<host>/<name>``, and writes to SQLite.
+publishes AciesTimeSeries messages on ``<namespace>/<name>``, and writes to SQLite.
 
 Device channel mapping:
   RS1D -> SH3 (single geophone)
@@ -12,7 +12,7 @@ Sampling rate is fixed at 200 Hz for all RaspberryShake devices.
 Usage::
 
     acies-geo [--port /dev/serial0] [--baud 230400] [--output /data/host-geo.db]
-              [--acies-host HOST] [--acies-name NAME]
+              [--acies-namespace NS] [--acies-name NAME]
               [--condition] [--hp HZ] [--lp HZ] [--condition-seconds N]
 """
 
@@ -50,7 +50,7 @@ app = AciesApp()
 def setup(ctx: AciesContext) -> None:
     port: str = ctx.cfg['port']
     baud: int = ctx.cfg['baud']
-    output: str = ctx.cfg.get('output') or f'/data/{ctx.ns.host}-{ctx.ns.name}.db'
+    output: str = ctx.cfg.get('output') or f'/data/{ctx.ns.namespace}-{ctx.ns.name}.db'
     reader = GeoReader(port=port, baudrate=baud)
     reader.start()
     logger.info('geo reader started on %s @ %d baud', port, baud)
@@ -191,7 +191,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
 @click.option(
     '--output',
     default=None,
-    help='SQLite database output path. Defaults to /data/<acies-host>-<acies-name>.db.',
+    help='SQLite database output path. Defaults to /data/<acies-namespace>-<acies-name>.db.',
 )
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
 @click.option(

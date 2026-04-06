@@ -5,7 +5,7 @@ in isolation.
 
 Usage::
 
-    acies-idle [--acies-host HOST] [--acies-name NAME]
+    acies-idle [--acies-namespace NS] [--acies-name NAME]
 """
 
 from __future__ import annotations

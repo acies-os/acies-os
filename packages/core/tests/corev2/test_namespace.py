@@ -16,7 +16,7 @@ def ns() -> Namespace:
 
 
 def test_namespace_attributes(ns: Namespace) -> None:
-    assert ns.host == 'edge-01'
+    assert ns.namespace == 'edge-01'
     assert ns.name == 'mic'
 
 
@@ -100,10 +100,10 @@ def test_ctl_dollar_star(ns: Namespace) -> None:
     assert ns.ctl('svc$*') == 'edge-01/mic/ctl/svc$*'
 
 
-# ------------------------- validation: host and name -------------------------
+# ----------------------- validation: namespace and name -----------------------
 
 
-def test_empty_host_raises() -> None:
+def test_empty_namespace_raises() -> None:
     with pytest.raises(ValueError, match='must not be empty'):
         _ = Namespace('', 'mic')
 
@@ -113,9 +113,23 @@ def test_empty_name_raises() -> None:
         _ = Namespace('edge-01', '')
 
 
-def test_slash_in_host_raises() -> None:
-    with pytest.raises(ValueError, match="must not contain '/'"):
-        _ = Namespace('edge/01', 'mic')
+def test_hierarchical_namespace_allowed() -> None:
+    ns = Namespace('edge-01/sensor', 'mic')
+    assert ns.namespace == 'edge-01/sensor'
+    assert ns.name == 'mic'
+    assert ns.base == 'edge-01/sensor/mic'
+    assert ns.ctl.heartbeat == 'edge-01/sensor/mic/ctl/heartbeat'
+    assert ns.topic('audio') == 'edge-01/sensor/mic/audio'
+
+
+def test_deep_hierarchical_namespace_allowed() -> None:
+    ns = Namespace('org/site-a/edge-01/sensor', 'mic')
+    assert ns.base == 'org/site-a/edge-01/sensor/mic'
+
+
+def test_namespace_empty_segment_raises() -> None:
+    with pytest.raises(ValueError, match='empty segment'):
+        _ = Namespace('edge-01//sensor', 'mic')
 
 
 def test_slash_in_name_raises() -> None:
@@ -124,7 +138,7 @@ def test_slash_in_name_raises() -> None:
 
 
 @pytest.mark.parametrize('char', ['*', '$', '?', '#'])
-def test_forbidden_char_in_host_raises(char: str) -> None:
+def test_forbidden_char_in_namespace_raises(char: str) -> None:
     with pytest.raises(ValueError, match='forbidden characters'):
         _ = Namespace(f'edge{char}01', 'mic')
 

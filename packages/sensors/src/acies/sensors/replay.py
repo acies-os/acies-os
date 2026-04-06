@@ -23,7 +23,7 @@ Usage::
                  --scene 2024-08-gq \
                  --node gq-1 --run 50 --modality geo \
                  [--speed 1.0] [--start-at EPOCH] [--loop] \
-                 [--acies-host HOST] [--acies-name NAME]
+                 [--acies-namespace NS] [--acies-name NAME]
 """
 
 from __future__ import annotations

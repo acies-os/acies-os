@@ -14,10 +14,10 @@ Usage::
     acies-gps --data-dir packages/sensors/data --scene 2024-03-29-ICT \
               --run 2 --label miata \
               [--speed 1.0] [--start-at EPOCH] [--loop] \
-              [--acies-host HOST] [--acies-name NAME]
+              [--acies-namespace NS] [--acies-name NAME]
 
     acies-gps --broker 192.168.70.51 --mqtt-topic '/+/gps' \
-              [--acies-host HOST] [--acies-name NAME]
+              [--acies-namespace NS] [--acies-name NAME]
 """
 
 from __future__ import annotations

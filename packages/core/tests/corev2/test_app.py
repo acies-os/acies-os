@@ -27,12 +27,12 @@ def _make_app() -> tuple[AciesApp, Router, threading.Event]:
     """
     router = Router()
     router.add_transport(LocalTransport())
-    app = AciesApp('test-app', 'test-host', router=router)
+    app = AciesApp('test-app', namespace='test-host', router=router)
 
     ready = threading.Event()
 
     @app.on_startup
-    def _set_ready(ctx: AciesContext) -> None:
+    def _set_ready(_ctx: AciesContext) -> None:
         ready.set()
 
     return app, router, ready
@@ -63,7 +63,7 @@ def test_on_startup_hook_runs():
     called: list[bool] = []
 
     @app.on_startup
-    def setup(ctx: AciesContext):
+    def setup(_ctx: AciesContext):
         called.append(True)
 
     with running(app, ready=ready):
@@ -82,7 +82,7 @@ def test_on_startup_ctx_publish_works():
     delivered = threading.Event()
 
     @app.subscribe('out/topic')
-    def handler(ctx: AciesContext, msg: Msg):
+    def handler(_ctx: AciesContext, _msg: Msg):
         delivered.set()
 
     @app.on_startup
@@ -103,7 +103,7 @@ def test_subscribe_handler_receives_message():
     done = threading.Event()
 
     @app.subscribe('sensors/temp')
-    def handler(ctx: AciesContext, msg: Msg):
+    def handler(_ctx: AciesContext, msg: Msg):
         received.append(msg.value)
         done.set()
 
@@ -120,7 +120,7 @@ def test_schedule_fires_repeatedly():
     interval = 0.05
 
     @app.schedule(interval=interval)
-    def tick(ctx: AciesContext):
+    def tick(_ctx: AciesContext):
         count[0] += 1
 
     with running(app, ready=ready):
@@ -139,7 +139,7 @@ def test_service_returns_value():
         y: int
 
     @app.service('rpc/double')
-    def double(ctx: AciesContext, msg: Req) -> Resp:
+    def double(_ctx: AciesContext, msg: Req) -> Resp:
         return Resp(y=msg.x * 2)
 
     with running(app, ready=ready):
@@ -220,7 +220,7 @@ def test_subscribe_topic_template_resolved_from_config():
     done = threading.Event()
 
     @app.subscribe('{input_topic}')
-    def handler(ctx: AciesContext, msg: Msg):
+    def handler(_ctx: AciesContext, msg: Msg):
         received.append(msg.value)
         done.set()
 
@@ -244,7 +244,7 @@ def test_subscribe_topic():
     done = threading.Event()
 
     @app.subscribe(Topic('audio/raw'))
-    def handler(ctx: AciesContext, msg: Msg):
+    def handler(_ctx: AciesContext, msg: Msg):
         received.append(msg.value)
         done.set()
 
@@ -266,7 +266,7 @@ def test_service_ctl_topic():
         y: int
 
     @app.service(CtlTopic('double'))
-    def double(ctx: AciesContext, msg: Req) -> Resp:
+    def double(_ctx: AciesContext, msg: Req) -> Resp:
         return Resp(y=msg.x * 2)
 
     with running(app, ready=ready):
@@ -291,7 +291,7 @@ def test_subscribe_format_string():
     done = threading.Event()
 
     @app.subscribe('{input_topic}')
-    def handler(ctx: AciesContext, msg: Msg):
+    def handler(_ctx: AciesContext, msg: Msg):
         received.append(msg.value)
         done.set()
 
@@ -308,10 +308,10 @@ def test_subscribe_unresolved_template_raises():
     """run() raises ValueError if a topic template key is missing from config."""
     router = Router()
     router.add_transport(LocalTransport())
-    app = AciesApp('test', 'host', router=router)
+    app = AciesApp('test', namespace='host', router=router)
 
     @app.subscribe('{missing_key}')
-    def handler(ctx: AciesContext, msg: object) -> None:
+    def handler(_ctx: AciesContext, _msg: object) -> None:
         pass
 
     with pytest.raises(ValueError, match='missing_key'):
@@ -323,7 +323,7 @@ def test_stop_unblocks_run_and_shutdown_hook_runs():
     shutdown_called: list[bool] = []
 
     @app.on_shutdown
-    def teardown(ctx: AciesContext):
+    def teardown(_ctx: AciesContext):
         shutdown_called.append(True)
 
     with running(app, ready=ready):
