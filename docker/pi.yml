@@ -1,0 +1,90 @@
+# Pi field deployment: zenohd (client) + real sensors + classifier.
+# Scenario 1 (field).
+#
+# Usage:
+#   ACIES_NAMESPACE=rs1 ZENOH_BRIDGE="--connect tcp/LAPTOP_IP:7447" \
+#     docker compose -f pi.yml --profile multimodal up
+#
+# Profiles:
+#   geo              geo sensor only
+#   mic              mic sensor only
+#   geo-classifier   geo + classifier
+#   mic-classifier   mic + classifier
+#   multimodal       geo + mic + classifier
+#
+# Env vars:
+#   ACIES_NAMESPACE   Node name (e.g. rs1)
+#   MODEL_DIR         Host path to model directory (default: /model)
+#   VFM_WEIGHT        Weight filename inside MODEL_DIR
+#   ZENOH_CONNECT     Local zenoh endpoint (default: tcp/127.0.0.1:7501)
+#   ZENOH_BRIDGE      Connect to edge zenohd (e.g. --connect tcp/192.168.1.10:7447)
+#   ACIES_LOG         Per-logger level overrides
+
+x-env: &env
+  PATH: /acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+  ACIES_LOG: ${ACIES_LOG:-}
+  ACIES_NAMESPACE: ${ACIES_NAMESPACE:-}
+  ACIES_CONNECT: ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+
+services:
+  zenohd:
+    image: acies-pi:latest
+    profiles: [geo, mic, geo-classifier, mic-classifier, multimodal]
+    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} ${ZENOH_BRIDGE:-}
+    network_mode: host
+    volumes:
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  geo:
+    image: acies-pi:latest
+    profiles: [geo, geo-classifier, multimodal]
+    command: acies-geo
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: geo
+    volumes:
+      - /data:/data
+      - ~/.acies:/root/.acies
+    devices:
+      - /dev/serial0:/dev/serial0
+      - /dev/bus/usb:/dev/bus/usb
+    group_add:
+      - dialout
+    restart: unless-stopped
+
+  mic:
+    image: acies-pi:latest
+    profiles: [mic, mic-classifier, multimodal]
+    command: acies-mic
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: mic
+    volumes:
+      - /data:/data
+      - ~/.acies:/root/.acies
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    restart: unless-stopped
+
+  vfm:
+    image: acies-pi:latest
+    profiles: [geo-classifier, mic-classifier, multimodal]
+    command: >-
+      acies-vfm
+      --weight /model/${VFM_WEIGHT}
+      --geo ${ACIES_NAMESPACE:-}/geo
+      --mic ${ACIES_NAMESPACE:-}/mic
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm
+    volumes:
+      - /data:/data
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
