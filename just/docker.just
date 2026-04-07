@@ -26,13 +26,13 @@ start-ssh-agent:
 
 # ----------------------------------- build -----------------------------------
 
-# One-time: install Docker Desktop and buildx plugin on Apple Silicon
+# One-time setup on Apple Silicon
 setup-docker-apple-silicon:
     brew install docker docker-buildx colima
     mkdir -p ~/.docker/cli-plugins
     ln -sf $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
 
-# One-time: install buildx plugin (macOS) and create a builder that supports --platform.
+# One-time builder setup on Apple Silicon
 builder-setup:
     colima start
     docker buildx rm acies-builder 2>/dev/null || true
@@ -53,7 +53,7 @@ build-pi:
         -f docker/pi/Dockerfile \
         .
 
-# Build server image for the host platform and load into the local Docker daemon.
+# Build server image for the host platform.
 build-server:
     docker buildx build \
         --ssh default \
@@ -68,13 +68,15 @@ build-prune:
 
 # ------------------------------- local registry -------------------------------
 
-# Start docker daemon with Colima if not already running. (macOS only)
+# Start docker daemon (Colima). (macOS only)
 docker-up:
     -colima stop --force
     colima start --runtime docker
     colima status
 
-# Start a local Docker registry on port 5100. (on macOS 5000 is used by AirTunes)
+# (on macOS 5000 is used by AirTunes)
+
+# Start a local Docker registry on port 5100.
 registry-up:
     docker start acies-registry 2>/dev/null || docker run -d \
         --name acies-registry \
@@ -92,7 +94,7 @@ registry-list:
     @echo "images in registry {{ registry }}:"
     @curl -s http://{{ registry }}/v2/_catalog | jq -r '.repositories[]'
 
-# check if a port is in use (e.g. check registry port before starting registry-up).
+# check if a port is in use.
 check-port port=registry_port:
     @if lsof -nP -iTCP:{{ port }} -sTCP:LISTEN >/dev/null; then \
         echo "port {{ port }}: in use"; \
@@ -111,7 +113,7 @@ registry-trust host:
 
 # --- deploy ---
 
-# Pull updated Pi image on all Pis. Requires PI_HOSTS set in .env or environment.
+# Pull updated Pi image on all Pis.
 deploy-pi:
     #!/usr/bin/env bash
     set -euo pipefail

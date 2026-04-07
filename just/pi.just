@@ -13,7 +13,7 @@ default:
 own-data:
     sudo chown -R $(id -u):$(id -g) /data
 
-# Run an interactive shell in the Pi image. Pass dev=true to mount source code.
+# Run an interactive shell in the Pi image.
 pi-shell dev="false":
     @touch ~/.docker_bash_history
     @mkdir -p ~/.acies/logs
@@ -34,7 +34,7 @@ pi-shell dev="false":
         --device /dev/bus/usb:/dev/bus/usb \
         acies-pi:latest bash
 
-# Run zenohd in the Pi image. All pi-* services connect to it via TCP loopback.
+# Run zenohd in the Pi image.
 pi-zenohd *args:
     @mkdir -p ~/.acies/logs
     -@docker run --rm -it --init \
@@ -43,7 +43,7 @@ pi-zenohd *args:
         -v ~/.acies:/root/.acies \
         acies-pi:latest zenohd --listen {{ pi_zenoh_connect }} {{ pi_zenoh_bridge }} {{ args }}
 
-# Run acies-mic in the Pi image. Arguments are forwarded to acies-mic directly.
+# Run acies-mic in the Pi image.
 pi-mic *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     -@docker run --rm -it \
@@ -60,7 +60,7 @@ pi-mic *args:
         --device /dev/snd:/dev/snd \
         acies-pi:latest acies-mic {{ args }}
 
-# Run acies-geo in the Pi image. Arguments are forwarded to acies-geo directly.
+# Run acies-geo in the Pi image.
 pi-geo *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     -@docker run --rm -it \
@@ -79,7 +79,7 @@ pi-geo *args:
         --device /dev/bus/usb:/dev/bus/usb \
         acies-pi:latest acies-geo {{ args }}
 
-# Run acies-vfm in the Pi image. Arguments are forwarded to acies-vfm directly.
+# Run acies-vfm in the Pi image.
 pi-vfm *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     -@docker run --rm -it \
@@ -95,7 +95,7 @@ pi-vfm *args:
         -v ~/.acies:/root/.acies \
         acies-pi:latest acies-vfm {{ args }}
 
-# Run acies-vfm locally (no Docker). Arguments are forwarded to acies-vfm directly.
+# Run acies-vfm locally (no Docker).
 pi-vfm-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
@@ -106,13 +106,13 @@ pi-vfm-local *args:
         --labels "gle350,miata,cx30,mustang" \
         {{ args }}
 
-# Replay sensor data locally. Pass --data-dir, --scene, --node, --run, --modality, etc.
+# Replay sensor data locally.
 pi-replay-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
     uv run acies-replay --acies-namespace {{ acies_namespace }} \
         --acies-connect {{ pi_zenoh_connect }} {{ args }}
 
-# Record 40 seconds of audio from the USB microphone array and save it to /data/alsa-test.wav
+# Record audio using arecord.
 record output="/data/alsa-test.wav":
     arecord -D hw:ArrayUAC10,0 -f S16_LE -r 16000 -c 6 -d 40 {{ output }}
