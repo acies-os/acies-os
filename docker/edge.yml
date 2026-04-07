@@ -1,0 +1,41 @@
+# Edge infrastructure: zenohd (router) + gateway.
+# Used in all scenarios.
+#
+# Usage:
+#   docker compose -f edge.yml up
+#
+# Env vars:
+#   ACIES_NAMESPACE   Hostname prefix (default: machine hostname)
+#   ACIES_CONFIG      Gateway config file inside /config (default: ict.toml)
+#   ACIES_LISTEN      WebSocket listen address (default: ws://0.0.0.0:8765)
+#   ZENOH_CONNECT     Zenoh local endpoint (default: tcp/127.0.0.1:7501)
+#   ZENOH_LISTEN      Zenoh external listen for pi peers (default: tcp/0.0.0.0:7447)
+#   ACIES_LOG         Per-logger level overrides
+
+services:
+  zenohd:
+    image: acies-server:latest
+    command: >-
+      zenohd
+      --listen ${ZENOH_LISTEN:-tcp/0.0.0.0:7447}
+      --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+    network_mode: host
+    volumes:
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  gateway:
+    image: acies-server:latest
+    command: acies-gateway --config /config/${ACIES_CONFIG:-ict.toml}
+    network_mode: host
+    environment:
+      - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}/infra
+      - ACIES_NAME=gateway
+      - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+      - ACIES_LISTEN=${ACIES_LISTEN:-ws://0.0.0.0:8765}
+    volumes:
+      - ~/.acies:/root/.acies
+      - ../packages/controllers/data:/config:ro
+    restart: unless-stopped

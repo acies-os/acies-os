@@ -1,0 +1,75 @@
+# Classifier(s) on edge. Combine with edge.yml + replay.yml.
+# Scenario 2 (lab development).
+#
+# Usage — select nodes with --profile (must match replay.yml profiles):
+#   MODEL_DIR=/model VFM_WEIGHT=weights.pt \
+#     docker compose -f edge.yml -f replay.yml -f classifier.yml \
+#     --profile rs1 --profile rs3 up
+#
+# Env vars:
+#   MODEL_DIR         Host path to model directory (required)
+#   VFM_WEIGHT        Weight filename inside MODEL_DIR (required)
+#   ZENOH_CONNECT     Zenoh endpoint (default: tcp/127.0.0.1:7501)
+#   ACIES_LOG         Per-logger level overrides
+
+x-env: &env
+  PATH: /acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+  ACIES_LOG: ${ACIES_LOG:-}
+  ACIES_CONNECT: ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+
+x-vfm: &vfm
+  image: acies-server:latest
+  network_mode: host
+  volumes:
+    - ${MODEL_DIR}:/model:ro
+    - ~/.acies:/root/.acies
+  restart: unless-stopped
+
+services:
+  rs1-vfm:
+    <<: *vfm
+    profiles: [rs1, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs1/geo --mic rs1/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: vfm }
+
+  rs2-vfm:
+    <<: *vfm
+    profiles: [rs2, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs2/geo --mic rs2/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: vfm }
+
+  rs3-vfm:
+    <<: *vfm
+    profiles: [rs3, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs3/geo --mic rs3/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: vfm }
+
+  rs5-vfm:
+    <<: *vfm
+    profiles: [rs5, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs5/geo --mic rs5/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: vfm }
+
+  rs6-vfm:
+    <<: *vfm
+    profiles: [rs6, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs6/geo --mic rs6/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: vfm }
+
+  rs7-vfm:
+    <<: *vfm
+    profiles: [rs7, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs7/geo --mic rs7/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: vfm }
+
+  rs8-vfm:
+    <<: *vfm
+    profiles: [rs8, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs8/geo --mic rs8/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: vfm }
+
+  rs10-vfm:
+    <<: *vfm
+    profiles: [rs10, all]
+    command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs10/geo --mic rs10/mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: vfm }

@@ -1,0 +1,140 @@
+# Replay sensor data (mic + geo) on selected nodes, all on edge.
+# Scenario 2 (lab development). Combine with edge.yml.
+#
+# Usage — select nodes with --profile:
+#   SCENE=2024-03-29-ICT RUN=2 \
+#     docker compose -f edge.yml -f replay.yml --profile rs1 --profile rs3 up
+#
+# All nodes:
+#   SCENE=2024-03-29-ICT RUN=2 \
+#     docker compose -f edge.yml -f replay.yml --profile all up
+#
+# Override replay node names (e.g. for GCQ mapping):
+#   SCENE=2024-08-06-GQ RUN=29 NODE_RS1=gq-1 NODE_RS3=gq-2 \
+#     docker compose -f edge.yml -f replay.yml --profile rs1 --profile rs3 up
+#
+# Env vars:
+#   SCENE             Scene name (required)
+#   RUN               Run ID (required)
+#   NODE_RS*          Override replay node name per host
+#   DATA_DIR          Host path to data directory (default: /data)
+#   ZENOH_CONNECT     Zenoh endpoint (default: tcp/127.0.0.1:7501)
+#   ACIES_LOG         Per-logger level overrides
+
+x-env: &env
+  PATH: /acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+  ACIES_LOG: ${ACIES_LOG:-}
+  ACIES_CONNECT: ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+
+x-replay: &replay
+  image: acies-server:latest
+  network_mode: host
+  volumes:
+    - ${DATA_DIR:-/data}:/data:ro
+    - ~/.acies:/root/.acies
+  restart: unless-stopped
+
+services:
+  # --- rs1 ---
+  rs1-geo:
+    <<: *replay
+    profiles: [rs1, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS1:-rs1} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: geo }
+
+  rs1-mic:
+    <<: *replay
+    profiles: [rs1, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS1:-rs1} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: mic }
+
+  # --- rs2 ---
+  rs2-geo:
+    <<: *replay
+    profiles: [rs2, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS2:-rs2} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: geo }
+
+  rs2-mic:
+    <<: *replay
+    profiles: [rs2, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS2:-rs2} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: mic }
+
+  # --- rs3 ---
+  rs3-geo:
+    <<: *replay
+    profiles: [rs3, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS3:-rs3} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: geo }
+
+  rs3-mic:
+    <<: *replay
+    profiles: [rs3, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS3:-rs3} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: mic }
+
+  # --- rs5 ---
+  rs5-geo:
+    <<: *replay
+    profiles: [rs5, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS5:-rs5} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: geo }
+
+  rs5-mic:
+    <<: *replay
+    profiles: [rs5, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS5:-rs5} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: mic }
+
+  # --- rs6 ---
+  rs6-geo:
+    <<: *replay
+    profiles: [rs6, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS6:-rs6} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: geo }
+
+  rs6-mic:
+    <<: *replay
+    profiles: [rs6, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS6:-rs6} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: mic }
+
+  # --- rs7 ---
+  rs7-geo:
+    <<: *replay
+    profiles: [rs7, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS7:-rs7} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: geo }
+
+  rs7-mic:
+    <<: *replay
+    profiles: [rs7, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS7:-rs7} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: mic }
+
+  # --- rs8 ---
+  rs8-geo:
+    <<: *replay
+    profiles: [rs8, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS8:-rs8} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: geo }
+
+  rs8-mic:
+    <<: *replay
+    profiles: [rs8, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS8:-rs8} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: mic }
+
+  # --- rs10 ---
+  rs10-geo:
+    <<: *replay
+    profiles: [rs10, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS10:-rs10} --run ${RUN} --modality geo
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: geo }
+
+  rs10-mic:
+    <<: *replay
+    profiles: [rs10, all]
+    command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS10:-rs10} --run ${RUN} --modality mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: mic }

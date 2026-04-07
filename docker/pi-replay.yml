@@ -1,0 +1,78 @@
+# Pi demo deployment: zenohd (client) + replay sensors + classifier.
+# Scenario 3 (tabletop demo).
+#
+# Usage:
+#   ACIES_NAMESPACE=rs1 SCENE=2024-03-29-ICT RUN=2 \
+#     ZENOH_BRIDGE="--connect tcp/LAPTOP_IP:7447" \
+#     docker compose -f pi-replay.yml up
+#
+# Env vars:
+#   ACIES_NAMESPACE   Node name (e.g. rs1)
+#   SCENE             Scene name (e.g. 2024-03-29-ICT)
+#   RUN               Run ID (e.g. 2)
+#   NODE              Replay node name if different from ACIES_NAMESPACE
+#   MODEL_DIR         Host path to model directory (default: /model)
+#   VFM_WEIGHT        Weight filename inside MODEL_DIR
+#   ZENOH_CONNECT     Local zenoh endpoint (default: tcp/127.0.0.1:7501)
+#   ZENOH_BRIDGE      Connect to edge zenohd (e.g. --connect tcp/192.168.1.10:7447)
+#   ACIES_LOG         Per-logger level overrides
+
+x-env: &env
+  PATH: /acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+  ACIES_LOG: ${ACIES_LOG:-}
+  ACIES_NAMESPACE: ${ACIES_NAMESPACE:-}
+  ACIES_CONNECT: ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+
+x-replay: &replay
+  image: acies-pi:latest
+  network_mode: host
+  volumes:
+    - /data:/data:ro
+    - ~/.acies:/root/.acies
+  restart: unless-stopped
+
+services:
+  zenohd:
+    image: acies-pi:latest
+    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} ${ZENOH_BRIDGE:-}
+    network_mode: host
+    volumes:
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  geo:
+    <<: *replay
+    command: >-
+      acies-replay --data-dir /data
+      --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
+      --modality geo
+    environment:
+      <<: *env
+      ACIES_NAME: geo
+
+  mic:
+    <<: *replay
+    command: >-
+      acies-replay --data-dir /data
+      --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
+      --modality mic
+    environment:
+      <<: *env
+      ACIES_NAME: mic
+
+  vfm:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm
+      --weight /model/${VFM_WEIGHT}
+      --geo ${ACIES_NAMESPACE:-}/geo
+      --mic ${ACIES_NAMESPACE:-}/mic
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm
+    volumes:
+      - /data:/data
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
