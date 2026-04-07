@@ -1,4 +1,4 @@
-# Edge infrastructure: zenohd (router) + gateway.
+# Edge infrastructure: zenohd (router) + gateway + UI.
 # Used in all scenarios.
 #
 # Usage:
@@ -7,7 +7,8 @@
 # Env vars:
 #   ACIES_NAMESPACE   Hostname prefix (default: machine hostname)
 #   ACIES_CONFIG      Gateway config file inside /config (default: ict.toml)
-#   ACIES_LISTEN      WebSocket listen address (default: ws://0.0.0.0:8765)
+#   ACIES_LISTEN      Gateway WebSocket address (default: ws://0.0.0.0:8765)
+#   UI_PORT           UI HTTP port (default: 5173)
 #   ZENOH_CONNECT     Zenoh local endpoint (default: tcp/127.0.0.1:7501)
 #   ZENOH_LISTEN      Zenoh external listen for pi peers (default: tcp/0.0.0.0:7447)
 #   ACIES_LOG         Per-logger level overrides
@@ -38,4 +39,12 @@ services:
     volumes:
       - ~/.acies:/root/.acies
       - ../packages/controllers/data:/config:ro
+    restart: unless-stopped
+
+  ui:
+    image: acies-ui:latest
+    command: python -m http.server ${UI_PORT:-5173} -d /ui/static
+    network_mode: host
+    environment:
+      - VITE_WS_URL=${ACIES_LISTEN:-ws://0.0.0.0:8765}/ws
     restart: unless-stopped
