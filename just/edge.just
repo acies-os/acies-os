@@ -8,7 +8,7 @@ pi_hosts := env("PI_HOSTS", "")
 default:
     @just -f {{ justfile() }} --list
 
-# Run zenohd in the server image. Listens on UDS for local apps; bridges to Pi devices via TCP.
+# Run zenohd in the server image.
 edge-zenohd *args:
     @mkdir -p ~/.acies/logs
     echo {{ edge_zenoh_connect }}
@@ -18,7 +18,7 @@ edge-zenohd *args:
         -v ~/.acies:/root/.acies \
         acies-server:latest zenohd --listen {{ edge_zenoh_connect }} {{ edge_zenoh_bridge }} {{ args }}
 
-# Run acies-gateway in the server image. Arguments are forwarded to acies-gateway directly.
+# Run acies-gateway in the server image.
 edge-gateway *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     -@docker run --rm -it \
@@ -31,7 +31,7 @@ edge-gateway *args:
         -v ~/.acies:/root/.acies \
         acies-server:latest acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
-# Run acies-gateway directly (no Docker). Arguments are forwarded to acies-gateway directly.
+# Run acies-gateway directly (no Docker).
 edge-gateway-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
@@ -39,14 +39,14 @@ edge-gateway-local *args:
     ACIES_NAME=gateway \
     uv run acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
-# Replay GPS data locally. Pass --data-dir, --scene, --run, --label, etc.
+# Replay GPS data locally.
 edge-replay-gps-local *args:
     @mkdir -p ~/.acies/logs ~/.acies/run
     ACIES_LOG={{ acies_log }} \
     uv run acies-gps --acies-namespace {{ acies_namespace }}/infra --acies-name gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
-# Upload a file to /model/ on all PI_HOSTS. Set PI_HOSTS="rs1 rs2 rs3" (space-separated).
+# Upload a file to /model/ on all PI_HOSTS.
 [no-cd]
 upload-model file:
     #!/usr/bin/env bash
