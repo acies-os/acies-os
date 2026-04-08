@@ -23,7 +23,9 @@ clean:
 deps:
     uv sync --package acies-sensors \
         --package acies-classifiers \
-        --package acies-controllers
+        --package acies-controllers \
+        --upgrade-package foundation-sense \
+        --upgrade-package rawshake
 
 # DOCS_SOURCE := "source"
 # DOCS_BUILD := "_build"
