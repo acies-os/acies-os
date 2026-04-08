@@ -20,9 +20,9 @@ server_hosts := env("SERVER_HOSTS", "")
 
 # print how to start the SSH agent.
 start-ssh-agent:
-    echo "Run:"
-    echo "eval (ssh-agent -c)"
-    echo "ssh-add ~/.ssh/id_<key>"
+    @echo "Run:"
+    @echo "eval (ssh-agent -c)"
+    @echo "ssh-add ~/.ssh/id_<key>"
 
 # ----------------------------------- build -----------------------------------
 
