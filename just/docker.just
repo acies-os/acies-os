@@ -31,6 +31,7 @@ setup-docker-apple-silicon:
     brew install docker docker-buildx docker-compose colima
     mkdir -p ~/.docker/cli-plugins
     ln -sf $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
+    ln -sf $(brew --prefix)/opt/docker-compose/bin/docker-compose ~/.docker/cli-plugins/docker-compose
 
 # One-time builder setup on Apple Silicon
 builder-setup:

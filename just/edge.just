@@ -48,7 +48,7 @@ edge-replay-gps-local *args:
 
 # Start infra for an edge replay
 edge-up-infra:
-    ACIES_NAMESPACE=$(hostname -s) docker-compose -p edge-replay \
+    ACIES_NAMESPACE=$(hostname -s) docker compose -p edge-replay \
         --env-file .env \
         -f docker/replay-gps.yml \
         -f docker/edge.yml \
@@ -56,7 +56,7 @@ edge-up-infra:
 
 # Start nodes for an edge replay
 edge-up-nodes *args:
-    docker-compose -p edge-replay --env-file .env \
+    docker compose -p edge-replay --env-file .env \
         -f docker/replay.yml \
         -f docker/classifier.yml \
         {{ args }} \
@@ -64,7 +64,7 @@ edge-up-nodes *args:
 
 # Stop all containers for an edge replay
 edge-down-all:
-    docker-compose -p edge-replay down
+    docker compose -p edge-replay down
 
 # Upload a file to /model/ on all PI_HOSTS.
 [no-cd]
