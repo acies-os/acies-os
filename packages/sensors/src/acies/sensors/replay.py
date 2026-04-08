@@ -157,8 +157,7 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['start_at'] = ctx.cfg.get('start_at')
     ctx.app['restart'] = threading.Event()
     ctx.app['reload'] = threading.Event()
-    # Track the start_at value that was last consumed by the replay thread.
-    # When a new start_at arrives, it differs from this -> triggers playback.
+    ctx.app['start_at_ev'] = threading.Event()
     ctx.app['last_start_at'] = None
 
 
@@ -177,6 +176,7 @@ def on_data_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 @app.subscribe(OnChange('start_at'))
 def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     logger.info('start_at changed to %s', msg.value)
+    ctx.app['start_at_ev'].set()
     ctx.app['restart'].set()
 
 
@@ -282,16 +282,22 @@ def _wait_for_start_at(
 
     Returns True if ready to play, False if interrupted by stop/restart.
     """
-    # --- wait for a new start_at value ---
+    start_at_ev: threading.Event = ctx.app['start_at_ev']
+    wake = [*cancel, start_at_ev]
+
+    # --- wait for start_at_ev (set by on_start_at_change) ---
     while not any(e.is_set() for e in cancel):
-        start_at: float | None = ctx.cfg.get('start_at')
-        if start_at is not None and start_at != ctx.app['last_start_at']:
-            ctx.app['last_start_at'] = start_at
-            break
-        # No start_at yet (or same as last consumed) -- wait for notification
+        if start_at_ev.is_set():
+            start_at_ev.clear()
+            start_at: float | None = ctx.cfg.get('start_at')
+            if start_at is not None:
+                ctx.app['last_start_at'] = start_at
+                break
         logger.debug('waiting for start_at...')
-        if _wait_for_any(cancel, timeout=1.0):
-            return False
+        if _wait_for_any(wake, timeout=1.0):
+            if any(e.is_set() for e in cancel):
+                return False
+            # woken by start_at_ev -- loop to consume it
     else:
         return False
 
