@@ -73,6 +73,14 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
         ctx.publish('ws://predictions', msg_filtered)
 
 
+@app.subscribe('**/energy')
+def on_energy(ctx: AciesContext, msg: Any) -> None:
+    energy_by_ch: dict[str, float] = msg['energy']
+    energy = next(iter(energy_by_ch.values()))
+    ctx.publish('ws://energy', {'source': msg['source'], 'timestamp': msg['timestamp'], 'energy': energy})
+    logger.debug('energy from %s: %.2f', msg['source'], energy)
+
+
 @app.subscribe('**/ctl/heartbeat')
 def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
     # --- validate source format (must contain namespace/name) ---
