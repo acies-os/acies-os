@@ -19,11 +19,13 @@ classifiers = [
 dependencies = [
   "acies-buffers",
   "acies-core",
+  "paho-mqtt>=2.1",
   "tomli>=2.4",
 ]
 # scripts.acies-controller = "acies.controller.base:main"
 # scripts.acies-twinctl = "acies.twin.twinctl:main"
 scripts.acies-gateway = "acies.gateway.gateway:main"
+scripts.acies-mqtt = "acies.gateway.mqtt:main"
 
 [tool.hatch]
 build.targets.wheel.packages = [ "src/acies" ]
