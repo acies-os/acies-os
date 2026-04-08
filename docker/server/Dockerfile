@@ -78,13 +78,16 @@ COPY packages/classifiers/pyproject.toml    packages/classifiers/pyproject.toml
 COPY packages/classifiers/src               packages/classifiers/src
 COPY packages/controllers/pyproject.toml    packages/controllers/pyproject.toml
 COPY packages/controllers/src               packages/controllers/src
+COPY packages/sensors/pyproject.toml        packages/sensors/pyproject.toml
+COPY packages/sensors/src                   packages/sensors/src
 RUN --mount=type=ssh \
     --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev \
         --package acies-core \
         --package acies-buffers \
         --package acies-classifiers \
-        --package acies-controllers
+        --package acies-controllers \
+        --package acies-sensors
 
 # Reset the entrypoint, don't invoke `uv`
 ENTRYPOINT []
