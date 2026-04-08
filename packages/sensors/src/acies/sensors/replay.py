@@ -250,7 +250,7 @@ def _play_windows(
             ),
         )
         energy = {
-            ch: float(np.sqrt(np.mean(np.frombuffer(p, dtype=np.dtype(dtype)).astype(np.float64) ** 2)))
+            ch: float(np.std(np.frombuffer(p, dtype=np.dtype(dtype)).astype(np.float64)))
             for ch, p in zip(channels, payloads)
         }
         energy_str = ', '.join(f'{ch}={e:.2f}' for ch, e in energy.items())
