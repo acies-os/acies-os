@@ -46,6 +46,22 @@ edge-replay-gps-local *args:
     uv run acies-gps --acies-namespace {{ acies_namespace }}/infra --acies-name gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
+# Start infra for an edge replay
+edge-up-infra:
+    ACIES_NAMESPACE=$(hostname -s) docker-compose \
+        --env-file .env \
+        -f docker/replay-gps.yml \
+        -f docker/edge.yml \
+        up
+
+# Start nodes for an edge replay
+edge-up-nodes *args:
+    docker-compose --env-file .env \
+        -f docker/replay.yml \
+        -f docker/classifier.yml \
+        {{ args }} \
+        up
+
 # Upload a file to /model/ on all PI_HOSTS.
 [no-cd]
 upload-model file:
