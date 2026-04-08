@@ -167,7 +167,13 @@ class AciesContext:
         """
         self._publish_fn(topic, msgspec.msgpack.encode(msg))
 
-    def query(self, topic: str, msg: msgspec.Struct, timeout: float = 1.0) -> msgspec.Struct | None:
+    def query(
+        self,
+        topic: str,
+        msg: msgspec.Struct,
+        timeout: float = 1.0,
+        reply_type: type = dict,
+    ) -> msgspec.Struct | None:
         """Synchronous RPC. Encodes the request, blocks until a reply arrives
         or timeout expires, then decodes and returns the reply struct.
 
@@ -176,5 +182,4 @@ class AciesContext:
         raw = self._query_fn(topic, msgspec.msgpack.encode(msg), timeout)
         if raw is None:
             return None
-        # TODO: decode with the reply type once reply typing is wired through specs
-        return msgspec.msgpack.decode(raw)
+        return msgspec.msgpack.decode(raw, type=reply_type)

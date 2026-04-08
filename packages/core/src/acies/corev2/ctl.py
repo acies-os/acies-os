@@ -95,7 +95,7 @@ def kv_call(
         ])
     """
     req = AciesKvRequest(source=target, timestamp=ctx.now(), ops=ops)
-    resp = ctx.query(f'{target}/ctl/kv', req, timeout=timeout)
+    resp = ctx.query(f'{target}/ctl/kv', req, timeout=timeout, reply_type=AciesKvResponse)
     if resp is None:
         logger.error('no response from %s/ctl/kv (timeout=%.1fs)', target, timeout)
         return []
