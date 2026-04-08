@@ -50,7 +50,6 @@ edge-replay-gps-local *args:
 edge-up-infra:
     ACIES_NAMESPACE=$(hostname -s) docker compose -p edge-replay \
         --env-file .env \
-        -f docker/replay-gps.yml \
         -f docker/edge.yml \
         up
 
