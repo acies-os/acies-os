@@ -47,10 +47,11 @@ edge-replay-gps-local *args:
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
 # Start infra for an edge replay
-edge-up-infra:
+edge-up-infra *args:
     ACIES_NAMESPACE=$(hostname -s) docker compose -p edge-replay \
         --env-file .env \
         -f docker/edge.yml \
+        {{ args }}
         up
 
 # Start nodes for an edge replay
