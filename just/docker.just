@@ -34,7 +34,7 @@ setup-docker-apple-silicon:
 
 # One-time builder setup on Apple Silicon
 builder-setup:
-    colima start
+    colima start --runtime docker -m 4
     docker buildx rm acies-builder 2>/dev/null || true
     docker buildx create --name acies-builder --use --bootstrap --driver-opt network=host
 
@@ -71,7 +71,7 @@ build-prune:
 # Start docker daemon (Colima). (macOS only)
 docker-up:
     -colima stop --force
-    colima start --runtime docker
+    colima start --runtime docker -m 4
     colima status
 
 # (on macOS 5000 is used by AirTunes)
