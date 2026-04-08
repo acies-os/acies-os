@@ -35,7 +35,9 @@ import click
 import numpy as np
 import numpy.typing as npt
 import torch
-from acies.buffers import TemporalBuffer
+
+# from acies.buffers import TemporalBuffer
+from acies.buffers import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, OnChange, setup_logging
 from acies.corev2.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
 from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
@@ -88,7 +90,8 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['modalities'] = modalities
     ctx.app['output_topic'] = output_topic
     ctx.app['ensemble_buf'] = deque(maxlen=ensemble_win)
-    ctx.app['buffer'] = TemporalBuffer(size=INPUT_LEN + 2)
+    # ctx.app['buffer'] = TemporalBuffer(size=INPUT_LEN + 2)
+    ctx.app['buffer'] = TimeWindow(window_ns=(INPUT_LEN + 2) * 1_000_000_000, data_clock=True)
 
     ctx.cfg['start_at'] = time.time()
 
@@ -126,9 +129,9 @@ def on_geo(ctx: AciesContext, msg: AciesTimeSeries) -> None:
     if energy < thresh:
         logger.debug('geo energy %.1f below threshold %.1f; dropping window', energy, thresh)
         return
-    ts_s = msg.timestamp // 1_000_000_000
+    # ts_s = msg.timestamp // 1_000_000_000
     with ctx.app.lock:
-        ctx.app['buffer'].add(ctx.cfg['geo_topic'], ts_s, samples)
+        ctx.app['buffer'].add(ctx.cfg['geo_topic'], msg.timestamp, samples)
 
 
 @app.subscribe('{mic_topic}')
@@ -141,9 +144,9 @@ def on_mic(ctx: AciesContext, msg: AciesTimeSeries) -> None:
     if energy < thresh:
         logger.debug('mic energy %.1f below threshold %.1f; dropping window', energy, thresh)
         return
-    ts_s = msg.timestamp // 1_000_000_000
+    # ts_s = msg.timestamp // 1_000_000_000
     with ctx.app.lock:
-        ctx.app['buffer'].add(ctx.cfg['mic_topic'], ts_s, samples)
+        ctx.app['buffer'].add(ctx.cfg['mic_topic'], msg.timestamp, samples)
 
 
 @app.schedule(1.0)
@@ -154,10 +157,11 @@ def run_inference(ctx: AciesContext) -> None:
 
     try:
         with ctx.app.lock:
-            samples = ctx.app['buffer'].pop(keys, INPUT_LEN)
+            # samples = ctx.app['buffer'].pop(keys, INPUT_LEN)
+            samples = ctx.app['buffer'].pop_aligned(keys, INPUT_LEN)
     except ValueError:
         with ctx.app.lock:
-            ts_by_topic = {k: sorted(ctx.app['buffer']._data[k]) for k in keys}
+            ts_by_topic = {k: [ts for ts, _ in ctx.app['buffer']._data.get(k, [])] for k in keys}
         logger.debug('not enough buffered data for inference; timestamps=%s', ts_by_topic)
         return
 
@@ -167,7 +171,8 @@ def run_inference(ctx: AciesContext) -> None:
     energy: dict[str, float] = {}
     for mod in modalities:
         topic = _mod_to_topic[mod]
-        arr: npt.NDArray[np.float32] = np.concatenate([v for _, v in sorted(samples[topic].items())]).astype(np.float32)
+        # arr: npt.NDArray[np.float32] = np.concatenate([v for _, v in sorted(samples[topic].items())]).astype(np.float32)
+        arr: npt.NDArray[np.float32] = np.concatenate([v for _, v in samples[topic]]).astype(np.float32)
         energy[mod] = float(np.std(arr))
         if mod == 'geo':
             # 2s x 200 Hz = 400 -> downsample x2 -> 200 -> (1, 1, 10, 20)

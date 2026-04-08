@@ -42,6 +42,47 @@ def test_get_missing_key():
     assert buf.get('missing') == []
 
 
+# --- data_clock ---
+
+
+def test_data_clock_keeps_historical_timestamps():
+    """With data_clock=True, historical timestamps are not pruned immediately."""
+    buf = TimeWindow(window_ns=4 * NS, data_clock=True)
+    # Timestamps from 2024 -- far in the past relative to wall clock
+    t0 = 1_700_000_000 * NS
+    buf.add('a', t0, 'v1')
+    buf.add('a', t0 + NS, 'v2')
+    buf.add('a', t0 + 2 * NS, 'v3')
+    assert len(buf.get('a')) == 3
+
+
+def test_data_clock_prunes_relative_to_latest():
+    """With data_clock=True, cutoff is latest_ts - window_ns."""
+    buf = TimeWindow(window_ns=2 * NS, data_clock=True)
+    t0 = 1_700_000_000 * NS
+    buf.add('a', t0, 'old')
+    buf.add('a', t0 + NS, 'mid')
+    buf.add('a', t0 + 3 * NS, 'new')  # latest_ts = t0+3; cutoff = t0+1
+    entries = buf.get('a')
+    assert len(entries) == 2
+    assert entries[0][1] == 'mid'
+    assert entries[1][1] == 'new'
+
+
+def test_data_clock_empty_buffer_returns_zero():
+    """_latest_ts starts at 0; empty buffer does not error."""
+    buf = TimeWindow(window_ns=4 * NS, data_clock=True)
+    assert buf.get('a') == []
+
+
+def test_wall_clock_unaffected():
+    """data_clock=False (default) still uses wall clock."""
+    buf, clock = _make(4, 100 * NS)
+    buf.add('a', 90 * NS, 'old')
+    buf.add('a', 99 * NS, 'keep')
+    assert len(buf.get('a')) == 1
+
+
 # --- pruning ---
 
 
@@ -393,7 +434,7 @@ def test_pop_aligned_not_enough_data():
     buf.add('b', 100 * NS, 'v')
     buf.add('b', 102 * NS, 'v')
     with pytest.raises(ValueError, match='no aligned window'):
-        buf.pop_aligned(['a', 'b'], n=3)
+        _ = buf.pop_aligned(['a', 'b'], n=3)
 
 
 def test_pop_aligned_no_common_timestamps():
@@ -402,7 +443,7 @@ def test_pop_aligned_no_common_timestamps():
     buf.add('a', 100 * NS, 'v')
     buf.add('b', 200 * NS, 'v')
     with pytest.raises(ValueError, match='no common timestamps'):
-        buf.pop_aligned(['a', 'b'], n=1)
+        _ = buf.pop_aligned(['a', 'b'], n=1)
 
 
 def test_pop_aligned_missing_key():
@@ -410,7 +451,7 @@ def test_pop_aligned_missing_key():
     buf, _ = _make(20, 110 * NS)
     buf.add('a', 100 * NS, 'v')
     with pytest.raises(ValueError):
-        buf.pop_aligned(['a', 'missing'], n=1)
+        _ = buf.pop_aligned(['a', 'missing'], n=1)
 
 
 def test_pop_aligned_multiple_entries_per_step():
