@@ -2,10 +2,10 @@
 # Used in all scenarios.
 #
 # Usage:
-#   docker compose -f edge.yml up
+#   ACIES_NAMESPACE=$(hostname -s) docker compose -f edge.yml up
 #
 # Env vars:
-#   ACIES_NAMESPACE   Hostname prefix (default: machine hostname)
+#   ACIES_NAMESPACE   Hostname prefix (default: must be set; use hostname -s)
 #   ACIES_CONFIG      Gateway config file inside /config (default: ict.toml)
 #   ACIES_LISTEN      Gateway WebSocket address (default: ws://0.0.0.0:8765)
 #   UI_PORT           UI HTTP port (default: 5173)
