@@ -249,7 +249,12 @@ def _play_windows(
                 dtype=dtype,
             ),
         )
-        logger.debug('%s: t=%.2f (%d channel(s))', topic, float(ts_ns / _NS_PER_S), len(channels))
+        energy = {
+            ch: float(np.sqrt(np.mean(np.frombuffer(p, dtype=np.dtype(dtype)).astype(np.float64) ** 2)))
+            for ch, p in zip(channels, payloads)
+        }
+        ctx.publish(ctx.ns.topic('energy'), {'source': ctx.ns.base, 'timestamp': ts_ns, 'energy': energy})
+        logger.debug('%s: t=%.2f (%d channel(s), %s)', topic, float(ts_ns / _NS_PER_S), len(channels), energy)
     return True
 
 
