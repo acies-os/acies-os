@@ -264,7 +264,7 @@ def system_health(ctx: AciesContext) -> None:
     hosts: dict[str, dict[str, Any]] = {}
     for source in heartbeat_buf.keys():
         # skip infrastructure services (e.g. edge/infra/gateway)
-        if matches(source, '**/infra/**'):
+        if matches('**/infra/**', source):
             continue
         entry = heartbeat_buf.latest(source)
         if entry is None:
