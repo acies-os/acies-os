@@ -90,6 +90,7 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
             default_ch: df['samples'].to_numpy().astype(np_dtype),
         }
         ch_timestamps: list[float] = df['timestamp'].to_list()
+        del df
     else:
         df = df.with_columns(pl.col('channel').cast(pl.String).alias('channel_str'))
         available = set(df['channel_str'].unique().to_list())
@@ -106,6 +107,8 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
             ch_arrays[ch] = ch_df['samples'].to_numpy().astype(np_dtype)
             if ch_timestamps is None:
                 ch_timestamps = ch_df['timestamp'].to_list()
+            del ch_df
+        del df
         assert ch_timestamps is not None
 
     # All channels should have the same number of samples
