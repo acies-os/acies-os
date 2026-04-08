@@ -151,19 +151,10 @@ def setup(ctx: AciesContext) -> None:
         raise SystemExit(1)
 
     ctx.app['windows'] = windows
-    ctx.app['topic'] = ctx.cfg.get('topic') or ctx.ns.base
-    ctx.app['speed'] = ctx.cfg.get('speed', 1.0)
-    ctx.app['loop'] = ctx.cfg.get('loop', False)
-    ctx.app['start_at'] = ctx.cfg.get('start_at')
     ctx.app['restart'] = threading.Event()
     ctx.app['reload'] = threading.Event()
     ctx.app['start_at_ev'] = threading.Event()
     ctx.app['last_start_at'] = None
-
-
-# --- kv change notifications ---
-# Data params: reload windows and restart replay.
-_DATA_KEYS = frozenset({'scene', 'node', 'run', 'modality', 'data_dir'})
 
 
 @app.subscribe(OnChange('scene'), OnChange('node'), OnChange('run'), OnChange('modality'), OnChange('data_dir'))
@@ -233,12 +224,12 @@ def _play_windows(
     ctx: AciesContext,
     cancel: list[threading.Event],
     windows: list[tuple[int, list[bytes], list[str], int, str]],
-    topic: str,
     speed: float,
 ) -> bool:
     """Play all windows at the given speed. Returns True if completed, False if interrupted."""
     wall_start = time.monotonic()
     data_start_ns = windows[0][0]
+    topic: str = ctx.cfg.get('topic') or ctx.ns.base
     for ts_ns, payloads, channels, sampling_rate, dtype in windows:
         if any(e.is_set() for e in cancel):
             return False
@@ -288,9 +279,9 @@ def _wait_for_start_at(
     # --- wait for start_at_ev (set by on_start_at_change) ---
     while not any(e.is_set() for e in cancel):
         if start_at_ev.is_set():
+            start_at_ev.clear()
             start_at: float | None = ctx.cfg.get('start_at')
             if start_at is not None:
-                start_at_ev.clear()
                 ctx.app['last_start_at'] = start_at
                 break
         logger.debug('waiting for start_at...')
@@ -329,7 +320,6 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
                 continue
 
         windows = ctx.app['windows']
-        topic: str = ctx.cfg.get('topic') or ctx.ns.base
         speed: float = ctx.cfg.get('speed', 1.0)
         loop: bool = ctx.cfg.get('loop', False)
         start_at: float | None = ctx.cfg.get('start_at')
@@ -352,7 +342,7 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
                 continue
 
         # --- play ---
-        completed = _play_windows(ctx, cancel, windows, topic, speed)
+        completed = _play_windows(ctx, cancel, windows, speed)
         if stop.is_set():
             return
         if not completed:
