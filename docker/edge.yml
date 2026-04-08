@@ -5,13 +5,14 @@
 #   ACIES_NAMESPACE=$(hostname -s) docker compose -f edge.yml up
 #
 # Env vars:
-#   ACIES_NAMESPACE   Hostname prefix (default: must be set; use hostname -s)
-#   ACIES_CONFIG      Gateway config file inside /config (default: ict.toml)
-#   ACIES_LISTEN      Gateway WebSocket address (default: ws://0.0.0.0:8765)
-#   UI_PORT           UI HTTP port (default: 5173)
-#   ZENOH_CONNECT     Zenoh local endpoint (default: tcp/127.0.0.1:7501)
-#   ZENOH_LISTEN      Zenoh external listen for pi peers (default: tcp/0.0.0.0:7447)
-#   ACIES_LOG         Per-logger level overrides
+#   ACIES_NAMESPACE       Hostname prefix (default: must be set; use hostname -s)
+#   ACIES_CONFIG          Gateway config file inside /config (default: ict.toml)
+#   ACIES_LISTEN          Gateway WebSocket address (default: ws://0.0.0.0:8765)
+#   UI_PORT               UI HTTP port (default: 5173)
+#   ZENOH_CONNECT         Zenoh local endpoint (default: tcp/127.0.0.1:7501)
+#   ZENOH_LISTEN          Zenoh external listen for pi peers (default: tcp/0.0.0.0:7447)
+#   ACIES_LOG             Per-logger level overrides
+#   ACIES_GATEWAY_DEBUG   Enable debug energy subscriber in gateway (unset to disable)
 
 services:
   zenohd:
@@ -36,6 +37,7 @@ services:
       - ACIES_NAME=gateway
       - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
       - ACIES_LISTEN=${ACIES_LISTEN:-ws://0.0.0.0:8765}
+      - ACIES_GATEWAY_DEBUG=${ACIES_GATEWAY_DEBUG:-}
     volumes:
       - ~/.acies:/root/.acies
       - ../packages/controllers/data:/config:ro
