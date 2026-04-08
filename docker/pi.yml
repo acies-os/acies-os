@@ -16,6 +16,7 @@
 #   ACIES_NAMESPACE   Node name (e.g. rs1)
 #   MODEL_DIR         Host path to model directory (default: /model)
 #   VFM_WEIGHT        Weight filename inside MODEL_DIR
+#   VFM_LABELS        Comma-separated label list
 #   ZENOH_CONNECT     Local zenoh endpoint (default: tcp/127.0.0.1:7501)
 #   ZENOH_BRIDGE      Connect to edge zenohd (e.g. --connect tcp/192.168.1.10:7447)
 #   ACIES_LOG         Per-logger level overrides
@@ -79,6 +80,7 @@ services:
       --weight /model/${VFM_WEIGHT}
       --geo ${ACIES_NAMESPACE:-}/geo
       --mic ${ACIES_NAMESPACE:-}/mic
+      --labels ${VFM_LABELS}
     network_mode: host
     environment:
       <<: *env
