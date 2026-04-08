@@ -13,6 +13,9 @@
 #   ZENOH_LISTEN          Zenoh external listen for pi peers (default: tcp/0.0.0.0:7447)
 #   ACIES_LOG             Per-logger level overrides
 #   ACIES_GATEWAY_DEBUG   Enable debug energy subscriber in gateway (unset to disable)
+#   MQTT_BROKER           MQTT broker hostname or IP for GPS bridge (unset to disable)
+#   MQTT_PORT             MQTT broker port (default: 1883)
+#   MQTT_TOPIC            MQTT topic pattern (default: /+/gps)
 
 services:
   zenohd:
@@ -49,4 +52,23 @@ services:
     network_mode: host
     environment:
       - VITE_WS_URL=${ACIES_LISTEN:-ws://0.0.0.0:8765}/ws
+    restart: unless-stopped
+
+  mqtt-gps:
+    image: acies-server:latest
+    profiles: [mqtt]
+    command: >-
+      acies-mqtt
+      --broker ${MQTT_BROKER}
+      --port ${MQTT_PORT:-1883}
+      --mqtt-topic ${MQTT_TOPIC:-/+/gps}
+    network_mode: host
+    environment:
+      - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}/infra
+      - ACIES_NAME=mqtt-gps
+      - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+    volumes:
+      - ~/.acies:/root/.acies
     restart: unless-stopped
