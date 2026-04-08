@@ -288,9 +288,9 @@ def _wait_for_start_at(
     # --- wait for start_at_ev (set by on_start_at_change) ---
     while not any(e.is_set() for e in cancel):
         if start_at_ev.is_set():
-            start_at_ev.clear()
             start_at: float | None = ctx.cfg.get('start_at')
             if start_at is not None:
+                start_at_ev.clear()
                 ctx.app['last_start_at'] = start_at
                 break
         logger.debug('waiting for start_at...')
