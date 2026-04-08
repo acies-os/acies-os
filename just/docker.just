@@ -28,7 +28,7 @@ start-ssh-agent:
 
 # One-time setup on Apple Silicon
 setup-docker-apple-silicon:
-    brew install docker docker-buildx colima
+    brew install docker docker-buildx docker-compose colima
     mkdir -p ~/.docker/cli-plugins
     ln -sf $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
 
