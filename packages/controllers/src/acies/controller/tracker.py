@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from collections import defaultdict
 from typing import Any, TypeAlias
 
@@ -204,8 +205,8 @@ def _arc_to_latlon(road: Road, arc: Metres) -> tuple[float, float]:
     return road[-1][0], road[-1][1]
 
 
-@app.on_startup
-def setup(ctx: AciesContext) -> None:
+def _reload_config(ctx: AciesContext) -> None:
+    """Read the toml config and update app state derived from it."""
     with open(ctx.cfg['config_path'], 'rb') as f:
         config = tomllib.load(f)
 
@@ -217,7 +218,7 @@ def setup(ctx: AciesContext) -> None:
     is_loop = _is_loop(road)
     ctx.app['is_loop'] = is_loop
     if is_loop:
-        logger.info('road detected as loop (first/last point <1m apart)')
+        logger.info('road detected as loop (first/last coordinates identical)')
 
     # project each node onto the road
     gps_table: dict[str, list[float]] = config.get('gps', {})
@@ -230,13 +231,37 @@ def setup(ctx: AciesContext) -> None:
     # map_node_mapping: maps alternative node ids (e.g. gq-1) to canonical ids (e.g. rs1)
     ctx.app['node_mapping'] = config.get('map_node_mapping', {})
 
+    # tracker config
+    tracker_cfg: dict[str, Any] = config.get('tracker', {})
+    ctx.app['alpha'] = tracker_cfg.get('alpha', 0.3)
+
+    ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
+    logger.info('tracker alpha=%.2f', ctx.app['alpha'])
+
+
+@app.on_startup
+def setup(ctx: AciesContext) -> None:
+    _reload_config(ctx)
+
     # tracker state
     ctx.app['energy'] = TimeWindow(window_ns=5 * _NS_PER_S, data_clock=True)
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
-    ctx.app['est_arc'] = road[-1][2] / 2  # start at midpoint
+    ctx.app['est_arc'] = ctx.app['road'][-1][2] / 2  # start at midpoint
     ctx.app['est_speed'] = 0.0  # m/s along road
     ctx.app['last_update_ns'] = 0
+
+
+@app.schedule(5.0)
+def check_config(ctx: AciesContext) -> None:
+    """Reload the toml config file if it has been modified on disk."""
+    try:
+        mtime = os.path.getmtime(ctx.cfg['config_path'])
+    except OSError:
+        return
+    if mtime != ctx.app['config_mtime']:
+        logger.info('config file changed on disk; reloading %s', ctx.cfg['config_path'])
+        _reload_config(ctx)
 
 
 @app.subscribe('**/energy')
@@ -301,34 +326,41 @@ def estimate(ctx: AciesContext) -> None:
 
     label = _ensemble_label(ctx.app['predictions']) or 'unknown'
 
+    alpha: float = ctx.app['alpha']
+    prev_arc: Metres = ctx.app['est_arc']
+
     if not fresh:
-        # no recent data -> extrapolate from last known state
+        # no recent data -> extrapolate and decay speed
         if last_ns > 0:
             dt = (now_ns - last_ns) / _NS_PER_S
-            ctx.app['est_arc'] = _wrap_arc(ctx.app['est_arc'] + ctx.app['est_speed'] * dt, total, is_loop)
+            ctx.app['est_arc'] = _wrap_arc(prev_arc + ctx.app['est_speed'] * dt, total, is_loop)
+            ctx.app['est_speed'] *= 0.9  # decay speed toward zero
             ctx.app['last_update_ns'] = now_ns
         lat, lon = _arc_to_latlon(road, ctx.app['est_arc'])
         ctx.publish(ctx.ns.topic('gps'), {label: {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
         return
 
-    # energy-weighted position estimate
+    # energy-weighted position measurement
     # on a loop, compute offsets relative to current estimate to avoid
     # averaging across the wraparound boundary
-    prev_arc = ctx.app['est_arc']
     total_weight = 0.0
     weighted_offset = 0.0
     for node, (_ts, e) in fresh.items():
         w = e * e  # square to sharpen the peak
         weighted_offset += w * _shortest_offset(prev_arc, node_arcs[node], total, is_loop)
         total_weight += w
-    new_arc = prev_arc + weighted_offset / total_weight if total_weight > 0 else prev_arc
-    new_arc = _wrap_arc(new_arc, total, is_loop)
+    measurement = prev_arc + weighted_offset / total_weight if total_weight > 0 else prev_arc
 
-    # estimate speed from position change
+    # EMA: blend measurement with previous estimate
+    offset = _shortest_offset(prev_arc, measurement, total, is_loop)
+    new_arc = _wrap_arc(prev_arc + alpha * offset, total, is_loop)
+
+    # estimate speed from smoothed position change
     if last_ns > 0:
         dt = (now_ns - last_ns) / _NS_PER_S
         if dt > 0:
-            ctx.app['est_speed'] = _shortest_offset(prev_arc, new_arc, total, is_loop) / dt
+            raw_speed = _shortest_offset(prev_arc, new_arc, total, is_loop) / dt
+            ctx.app['est_speed'] = alpha * raw_speed + (1 - alpha) * ctx.app['est_speed']
 
     ctx.app['est_arc'] = new_arc
     ctx.app['last_update_ns'] = now_ns

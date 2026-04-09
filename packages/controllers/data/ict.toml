@@ -10,6 +10,10 @@ rs7 = [40.2890667, -88.1264864]
 rs8 = [40.2891961, -88.1261333]
 rs10 = [40.2891928, -88.1264877]
 
+[tracker]
+# EMA smoothing factor for position estimate (0 = no update, 1 = no smoothing)
+alpha = 0.3
+
 [road]
 coordinates = [
   [
