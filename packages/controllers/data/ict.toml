@@ -12,7 +12,7 @@ rs10 = [40.2891928, -88.1264877]
 
 [tracker]
 # minimum distinct node peaks before fitting speed/direction
-min_peaks = 10
+min_peaks = 3
 # time window in seconds to collect peaks for fitting
 peak_window = 60
 
