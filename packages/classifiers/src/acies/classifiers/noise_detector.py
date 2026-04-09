@@ -22,7 +22,7 @@ import click
 import msgspec
 import numpy as np
 import numpy.typing as npt
-from acies.corev2 import AciesApp, AciesContext, AciesTimeSeries, setup_logging
+from acies.core import AciesApp, AciesContext, AciesTimeSeries, setup_logging
 
 logger = logging.getLogger(__name__)
 

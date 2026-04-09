@@ -4,7 +4,7 @@ import time
 import msgspec
 import websockets.sync.client
 
-from acies.corev2.transport.websocket import WebSocketTransport, WsFrame
+from acies.core.transport.websocket import WebSocketTransport, WsFrame
 
 # ---------------------------------- helpers ----------------------------------
 

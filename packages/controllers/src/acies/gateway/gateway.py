@@ -31,10 +31,10 @@ import click
 import numpy as np
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
-from acies.corev2 import AciesApp, AciesContext, setup_logging
-from acies.corev2.ctl import kv_call, kv_set
-from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction, AciesResult, Err, KvEntry
-from acies.corev2.namespace import matches
+from acies.core import AciesApp, AciesContext, setup_logging
+from acies.core.ctl import kv_call, kv_set
+from acies.core.msg import AciesHeartbeat, AciesInference, AciesPrediction, AciesResult, Err, KvEntry
+from acies.core.namespace import matches
 
 logger = logging.getLogger(__name__)
 

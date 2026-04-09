@@ -37,8 +37,8 @@ import numpy.typing as npt
 import torch
 
 from acies.buffers import TemporalBuffer
-from acies.corev2 import AciesApp, AciesContext, OnChange, setup_logging
-from acies.corev2.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
+from acies.core import AciesApp, AciesContext, OnChange, setup_logging
+from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
 from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)

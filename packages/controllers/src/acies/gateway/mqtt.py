@@ -30,7 +30,7 @@ from typing import Any
 
 import click
 import paho.mqtt.client as mqtt
-from acies.corev2 import AciesApp, AciesContext, setup_logging
+from acies.core import AciesApp, AciesContext, setup_logging
 
 logger = logging.getLogger(__name__)
 

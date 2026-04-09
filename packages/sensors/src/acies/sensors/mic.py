@@ -23,8 +23,8 @@ import msgspec.json
 import numpy as np
 import numpy.typing as npt
 import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
-from acies.corev2 import AciesApp, AciesContext, setup_logging
-from acies.corev2.msg import AciesTimeSeries
+from acies.core import AciesApp, AciesContext, setup_logging
+from acies.core.msg import AciesTimeSeries
 
 from .db import DbRow, flush, open_db
 

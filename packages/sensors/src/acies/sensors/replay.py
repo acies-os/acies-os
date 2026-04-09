@@ -36,8 +36,8 @@ import click
 import numpy as np
 import numpy.typing as npt
 import polars as pl
-from acies.corev2 import AciesApp, AciesContext, OnChange, setup_logging
-from acies.corev2.msg import AciesKvChange, AciesTimeSeries
+from acies.core import AciesApp, AciesContext, OnChange, setup_logging
+from acies.core.msg import AciesKvChange, AciesTimeSeries
 
 logger = logging.getLogger(__name__)
 

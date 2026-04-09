@@ -5,7 +5,7 @@ routing is handled transparently by the zenoh network. Same-host IPC
 uses UDP multicast discovery (no daemon required); for explicit
 endpoints pass connect/listen endpoint lists to the constructor.
 
-Logger: acies.corev2.transport.zenoh
+Logger: acies.core.transport.zenoh
 """
 
 from __future__ import annotations

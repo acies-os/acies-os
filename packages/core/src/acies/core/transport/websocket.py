@@ -31,7 +31,7 @@ Browser (outbound)::
 
 query() and advertise() are no-ops -- WebSocket does not support RPC.
 
-Logger: acies.corev2.transport.websocket
+Logger: acies.core.transport.websocket
 """
 
 from __future__ import annotations

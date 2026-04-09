@@ -10,7 +10,7 @@ Usage::
 
 from __future__ import annotations
 
-from acies.corev2 import AciesApp, setup_logging
+from acies.core import AciesApp, setup_logging
 
 app = AciesApp()
 
