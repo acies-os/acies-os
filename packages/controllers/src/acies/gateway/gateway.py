@@ -84,11 +84,11 @@ if os.getenv('ACIES_GATEWAY_DEBUG'):
         # normalize against rolling 95th percentile over a 60s window
         wins: dict[str, TimeWindow] = ctx.task.data.setdefault('energy_wins', {})
         if source not in wins:
-            wins[source] = TimeWindow(window_ns=60 * _NS_PER_S)
+            wins[source] = TimeWindow(window_ns=60 * _NS_PER_S, data_clock=True)
         win = wins[source]
         win.add(source, msg['timestamp'], energy)
-        entries = win.get(source)
-        p95 = float(np.percentile(np.fromiter((v for _, v in entries), dtype=np.float64), 95))
+        values = np.fromiter((v for _, v in win.get(source)), dtype=np.float64)
+        p95 = float(np.percentile(values, 95)) if values.size > 0 else energy
         normalized = min(energy / p95, 1.0) if p95 > 0 else 0.0
 
         ctx.publish('ws://energy', {'source': source, 'timestamp': msg['timestamp'], 'energy': normalized})
