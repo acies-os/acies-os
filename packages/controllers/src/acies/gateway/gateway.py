@@ -79,8 +79,19 @@ if os.getenv('ACIES_GATEWAY_DEBUG'):
     def on_energy(ctx: AciesContext, msg: Any) -> None:
         energy_by_ch: dict[str, float] = msg['energy']
         energy = next(iter(energy_by_ch.values()))
-        ctx.publish('ws://energy', {'source': msg['source'], 'timestamp': msg['timestamp'], 'energy': energy})
-        logger.debug('energy from %s: %.2f', msg['source'], energy)
+        source: str = msg['source']
+
+        # track per-source max and normalize
+        max_by_source: dict[str, float] = ctx.get('max_energy', {})
+        prev_max = max_by_source.get(source, 0.0)
+        if energy > prev_max:
+            max_by_source[source] = energy
+            ctx['max_energy'] = max_by_source
+        peak = max_by_source[source]
+        normalized = energy / peak if peak > 0 else 0.0
+
+        ctx.publish('ws://energy', {'source': source, 'timestamp': msg['timestamp'], 'energy': normalized})
+        logger.debug('energy from %s: %.2f (peak=%.2f normalized=%.3f)', source, energy, peak, normalized)
 
 
 @app.subscribe('**/ctl/heartbeat')
