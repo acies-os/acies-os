@@ -81,17 +81,18 @@ if os.getenv('ACIES_GATEWAY_DEBUG'):
         energy = next(iter(energy_by_ch.values()))
         source: str = msg['source']
 
-        # track per-source max and normalize
-        max_by_source: dict[str, float] = ctx.get('max_energy', {})
-        prev_max = max_by_source.get(source, 0.0)
-        if energy > prev_max:
-            max_by_source[source] = energy
-            ctx['max_energy'] = max_by_source
-        peak = max_by_source[source]
-        normalized = energy / peak if peak > 0 else 0.0
+        # normalize against rolling 95th percentile over a 60s window
+        wins: dict[str, TimeWindow] = ctx.task.data.setdefault('energy_wins', {})
+        if source not in wins:
+            wins[source] = TimeWindow(window_ns=60 * _NS_PER_S)
+        win = wins[source]
+        win.add(source, msg['timestamp'], energy)
+        entries = win.get(source)
+        p95 = float(np.percentile(np.fromiter((v for _, v in entries), dtype=np.float64), 95))
+        normalized = min(energy / p95, 1.0) if p95 > 0 else 0.0
 
         ctx.publish('ws://energy', {'source': source, 'timestamp': msg['timestamp'], 'energy': normalized})
-        logger.debug('energy from %s: %.2f (peak=%.2f normalized=%.3f)', source, energy, peak, normalized)
+        logger.debug('energy from %s: %.2f (p95=%.2f normalized=%.3f)', source, energy, p95, normalized)
 
 
 @app.subscribe('**/ctl/heartbeat')
