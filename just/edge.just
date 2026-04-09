@@ -39,6 +39,17 @@ edge-gateway-local *args:
     ACIES_NAME=gateway \
     uv run acies-gateway --acies-connect {{ edge_zenoh_connect }} {{ args }}
 
+# run tracker locally
+edge-tracker-local *args:
+    @mkdir -p ~/.acies/logs
+    ACIES_LOG={{ acies_log }} \
+    ACIES_NAMESPACE={{ acies_namespace }}/infra \
+    ACIES_NAME=tracker \
+    uv run acies-tracker \
+    --acies-connect {{ edge_zenoh_connect }} \
+    --config packages/controllers/data/itc.toml
+    {{ args }}
+
 # Replay GPS data locally.
 edge-replay-gps-local *args:
     @mkdir -p ~/.acies/logs
