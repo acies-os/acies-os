@@ -3,7 +3,6 @@
 FROM ghcr.io/astral-sh/uv:0.10.11-python3.12-trixie-slim
 
 ARG ZENOH_VERSION=1.8.0
-# ARG TARGETARCH=amd64
 
 # System deps:
 #   git      -- uv installs rawshake from GitHub
@@ -27,18 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     vim \
     && rm -rf /var/lib/apt/lists/*
-
-# Install zenohd (multi-arch: amd64 or arm64)
-RUN case "${TARGETARCH}" in \
-        amd64) ZENOH_ARCH="x86_64-unknown-linux-gnu"  ; DEB_ARCH="amd64" ;; \
-        arm64) ZENOH_ARCH="aarch64-unknown-linux-gnu"  ; DEB_ARCH="arm64" ;; \
-        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" && exit 1 ;; \
-    esac \
-    && curl -fsSL "https://github.com/eclipse-zenoh/zenoh/releases/download/${ZENOH_VERSION}/zenoh-${ZENOH_VERSION}-${ZENOH_ARCH}-debian.zip" \
-        -o /tmp/zenoh-debian.zip \
-    && unzip /tmp/zenoh-debian.zip -d /tmp/zenoh-debian \
-    && dpkg -i /tmp/zenoh-debian/zenohd_${ZENOH_VERSION}_${DEB_ARCH}.deb \
-    && rm -rf /tmp/zenoh-debian.zip /tmp/zenoh-debian
 
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
@@ -67,6 +54,20 @@ RUN --mount=type=ssh \
     --mount=type=bind,source=packages/core/pyproject.toml,target=packages/core/pyproject.toml \
     --mount=type=bind,source=packages/sensors/pyproject.toml,target=packages/sensors/pyproject.toml \
     uv sync --frozen --no-install-workspace --no-dev
+
+# Install zenohd (multi-arch: amd64 or arm64)
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+        amd64) ZENOH_ARCH="x86_64-unknown-linux-gnu"  ; DEB_ARCH="amd64" ;; \
+        arm64) ZENOH_ARCH="aarch64-unknown-linux-gnu"  ; DEB_ARCH="arm64" ;; \
+        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" && exit 1 ;; \
+    esac \
+    && curl -fsSL "https://github.com/eclipse-zenoh/zenoh/releases/download/${ZENOH_VERSION}/zenoh-${ZENOH_VERSION}-${ZENOH_ARCH}-debian.zip" \
+        -o /tmp/zenoh-debian.zip \
+    && unzip /tmp/zenoh-debian.zip -d /tmp/zenoh-debian \
+    && dpkg -i /tmp/zenoh-debian/zenohd_${ZENOH_VERSION}_${DEB_ARCH}.deb \
+    && rm -rf /tmp/zenoh-debian.zip /tmp/zenoh-debian
+
 
 # ----------------- source layer: rebuilds when source changes -----------------
 COPY pyproject.toml uv.lock ./
