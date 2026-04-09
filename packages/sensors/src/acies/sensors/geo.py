@@ -31,6 +31,7 @@ from acies.core.msg import AciesTimeSeries
 from rawshake.geophone import Channel, GeoReader, get_samples
 from rawshake.processing import RollingConditioner
 
+from . import signal_energy
 from .db import DbRow, flush, open_db
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             ),
         )
 
-        energy = {channel: float(np.sum(np.square(samples_array, dtype=np.float64)))}
+        energy = {channel: signal_energy(samples_array)}
         ctx.publish(ctx.ns.topic('energy'), {'source': ctx.ns.base, 'timestamp': ts_ns, 'energy': energy})
 
         # log latency
