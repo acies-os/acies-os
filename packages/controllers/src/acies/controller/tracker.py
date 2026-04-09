@@ -16,6 +16,7 @@ estimated speed and direction.
 
 Inputs:
     **/energy           energy dict from sensor nodes
+    **/vehicle          classifier predictions (for vehicle label)
     config [gps]        node GPS coordinates
     config [road]       road polyline coordinates
 
@@ -32,12 +33,14 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import defaultdict
 from typing import Any, TypeAlias
 
 import click
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.core import AciesApp, AciesContext, setup_logging
+from acies.core.msg import AciesInference
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +232,8 @@ def setup(ctx: AciesContext) -> None:
 
     # tracker state
     ctx.app['energy'] = TimeWindow(window_ns=5 * _NS_PER_S, data_clock=True)
+    ensemble_win = ctx.cfg.get('ensemble_win', 30)
+    ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
     ctx.app['est_arc'] = road[-1][2] / 2  # start at midpoint
     ctx.app['est_speed'] = 0.0  # m/s along road
     ctx.app['last_update_ns'] = 0
@@ -256,6 +261,24 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
     energy_win.add(canonical, ts_ns, energy)
 
 
+@app.subscribe('**/vehicle')
+def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
+    pred_win: TimeWindow = ctx.app['predictions']
+    for pred in msg.predictions:
+        pred_win.add(pred.label, msg.timestamp, pred.score)
+
+
+def _ensemble_label(pred_win: TimeWindow) -> str | None:
+    """Pick the label with the highest average score over the window."""
+    scores: dict[str, list[float]] = defaultdict(list)
+    for label in pred_win.keys():
+        for _ts, score in pred_win.get(label):
+            scores[label].append(score)
+    if not scores:
+        return None
+    return max(scores, key=lambda k: sum(scores[k]) / len(scores[k]))
+
+
 @app.schedule(1.0)
 def estimate(ctx: AciesContext) -> None:
     node_arcs: dict[str, float] = ctx.app['node_arcs']
@@ -276,6 +299,8 @@ def estimate(ctx: AciesContext) -> None:
     is_loop: bool = ctx.app['is_loop']
     last_ns: int = ctx.app['last_update_ns']
 
+    label = _ensemble_label(ctx.app['predictions']) or 'unknown'
+
     if not fresh:
         # no recent data -> extrapolate from last known state
         if last_ns > 0:
@@ -283,7 +308,7 @@ def estimate(ctx: AciesContext) -> None:
             ctx.app['est_arc'] = _wrap_arc(ctx.app['est_arc'] + ctx.app['est_speed'] * dt, total, is_loop)
             ctx.app['last_update_ns'] = now_ns
         lat, lon = _arc_to_latlon(road, ctx.app['est_arc'])
-        ctx.publish(ctx.ns.topic('gps'), {'tracker': {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
+        ctx.publish(ctx.ns.topic('gps'), {label: {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
         return
 
     # energy-weighted position estimate
@@ -309,7 +334,7 @@ def estimate(ctx: AciesContext) -> None:
     ctx.app['last_update_ns'] = now_ns
 
     lat, lon = _arc_to_latlon(road, new_arc)
-    ctx.publish(ctx.ns.topic('gps'), {'tracker': {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
+    ctx.publish(ctx.ns.topic('gps'), {label: {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
     logger.debug('estimate: arc=%.1f m speed=%.1f m/s lat=%.6f lon=%.6f', new_arc, ctx.app['est_speed'], lat, lon)
 
 
