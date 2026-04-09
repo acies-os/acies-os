@@ -184,7 +184,9 @@ def _play_positions(
         if sleep_s > 0 and _wait_for_any(cancel, timeout=sleep_s):
             return False
         ctx.publish(topic, {label: pos, 'timestamp': ts_ns})
-        logger.debug('%s: l=%s lat=%.6f lon=%.6f t=%s', topic, label, pos['lat'], pos['lon'], ts_ns)
+        logger.debug(
+            '%s: l=%s lat=%.6f lon=%.6f t=%.2f', topic, label, pos['lat'], pos['lon'], float(ts_ns / _NS_PER_S)
+        )
     return True
 
 
