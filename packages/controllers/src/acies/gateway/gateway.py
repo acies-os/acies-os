@@ -94,6 +94,12 @@ if os.getenv('ACIES_GATEWAY_DEBUG'):
         ctx.publish('ws://energy', {'source': source, 'timestamp': msg['timestamp'], 'energy': normalized})
         logger.debug('energy from %s: %.2f (p95=%.2f normalized=%.3f)', source, energy, p95, normalized)
 
+    @app.schedule(10)
+    def print_energy_wins(ctx: AciesContext) -> None:
+        wins: dict[str, TimeWindow] = ctx.task.data.get('energy_wins', {})
+        for source, win in wins.items():
+            logger.debug('energy win %s: %s', source, win)
+
 
 @app.subscribe('**/ctl/heartbeat')
 def on_heartbeat(ctx: AciesContext, msg: AciesHeartbeat) -> None:
