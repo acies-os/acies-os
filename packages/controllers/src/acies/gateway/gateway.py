@@ -289,11 +289,15 @@ def dummy_gps(ctx: AciesContext) -> None:
     ctx['direction'] = direction
 
 
-@app.subscribe('**/gps/truth')
-def on_gps(ctx: AciesContext, msg: Any) -> None:
+@app.subscribe('**gps/truth', '**/gps')
+def on_gps(ctx: AciesContext, msg: Any, topic: str) -> None:
     ts_ns = msg.pop('timestamp', -1)
-    ctx.publish('ws://gps_truth', msg)
-    logger.debug('gps update: %r t=%.2f', msg, float(ts_ns / _NS_PER_S) if ts_ns else None)
+    if matches('**/gps_truth', topic):
+        ctx.publish('ws://gps_truth', msg)
+        logger.debug('gps update: %r t=%.2f', msg, float(ts_ns / _NS_PER_S) if ts_ns else None)
+    else:
+        ctx.publish('ws://gps', msg)
+        logger.debug('gps estimate: %r t=%.2f', msg, float(ts_ns / _NS_PER_S) if ts_ns else None)
 
 
 @app.schedule(1.0)
