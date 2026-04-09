@@ -24,7 +24,7 @@ import os
 import random
 from collections import defaultdict, deque
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 import click
@@ -33,7 +33,7 @@ import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.corev2 import AciesApp, AciesContext, setup_logging
 from acies.corev2.ctl import kv_call, kv_set
-from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction, KvEntry
+from acies.corev2.msg import AciesHeartbeat, AciesInference, AciesPrediction, AciesResult, Err, KvEntry
 from acies.corev2.namespace import matches
 
 logger = logging.getLogger(__name__)
@@ -121,14 +121,28 @@ def _find_services(heartbeat_buf: TimeWindow, host: str) -> dict[str, str]:
     return result
 
 
-def _wait_futures(futures: list[Any], label: str) -> None:
-    """Wait for all futures to complete, logging errors."""
-    for f in futures:
+def _wait_futures(
+    items: list[tuple[str, Sequence[KvEntry], Future[list[AciesResult]]]],
+    label: str,
+) -> None:
+    """Wait for all futures to complete, logging per-op results per target."""
+    for target, ops, f in items:
         try:
-            f.result()
+            results = f.result()
         except Exception:
-            logger.exception('%s: kv request failed', label)
-    logger.info('%s complete: %d target(s)', label, len(futures))
+            logger.exception('%s: %s: request failed', label, target)
+            continue
+        if not results:
+            logger.warning('%s: %s: no response (timeout)', label, target)
+            continue
+        parts: list[str] = []
+        for op, result in zip(ops, results):
+            key_str = '/'.join(op.key)
+            if isinstance(result, Err):
+                parts.append(f'{key_str}=Err({result.reason})')
+            else:
+                parts.append(f'{key_str}=Ok')
+        logger.info('%s: %s: %s', label, target, ' '.join(parts))
 
 
 @app.subscribe('ws://ctl')
@@ -216,13 +230,14 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     with ThreadPoolExecutor() as pool:
         # pass 1: send data params in parallel
-        futures = [pool.submit(kv_call, ctx, target, ops) for target, ops in data_reconfig_pass]
-        _wait_futures(futures, 'pass 1 (data params)')
+        items1 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in data_reconfig_pass]
+        _wait_futures(items1, 'pass 1 (data params)')
 
         # pass 2: send start_at to all nodes in parallel
         start_at: float = float(ctx.now() / _NS_PER_S) + _REPLAY_AHEAD_TIME_S
-        futures = [pool.submit(kv_call, ctx, target, [kv_set('start_at', value=start_at)]) for target in all_targets]
-        _wait_futures(futures, 'pass 2 (start_at)')
+        start_ops: Sequence[KvEntry] = [kv_set('start_at', value=start_at)]
+        items2 = [(t, start_ops, pool.submit(kv_call, ctx, t, start_ops)) for t in all_targets]
+        _wait_futures(items2, 'pass 2 (start_at)')
 
 
 def get_north_and_south_end(gps: dict[str, list[float]]) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -270,7 +285,8 @@ def dummy_gps(ctx: AciesContext) -> None:
 @app.subscribe('**/gps/truth')
 def on_gps(ctx: AciesContext, msg: Any) -> None:
     ctx.publish('ws://gps_truth', msg)
-    logger.debug('gps update: %r', msg)
+    ts_ns = msg.pop('timestamp', -1)
+    logger.debug('gps update: %r t=%.2f', msg, float(ts_ns / _NS_PER_S) if ts_ns else None)
 
 
 @app.schedule(1.0)
