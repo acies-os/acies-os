@@ -31,7 +31,7 @@ services:
   zenohd:
     image: acies-pi:latest
     profiles: [geo, mic, geo-classifier, mic-classifier, multimodal]
-    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} ${ZENOH_BRIDGE:-}
+    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} --connect ${ZENOH_BRIDGE:-}
     network_mode: host
     volumes:
       - ~/.acies:/root/.acies
