@@ -38,6 +38,7 @@ import numpy.typing as npt
 import polars as pl
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesKvChange, AciesTimeSeries
+from acies.sensors import signal_energy
 
 logger = logging.getLogger(__name__)
 
@@ -249,10 +250,7 @@ def _play_windows(
                 dtype=dtype,
             ),
         )
-        energy = {
-            ch: float(np.sum(np.square(np.frombuffer(p, dtype=np.dtype(dtype)).astype(np.float64)))) / 1e9
-            for ch, p in zip(channels, payloads)
-        }
+        energy = {ch: signal_energy(p, dtype=dtype) for ch, p in zip(channels, payloads)}
         energy_str = ', '.join(f'{ch}={e:.2f}' for ch, e in energy.items())
         ctx.publish(ctx.ns.topic('energy'), {'source': ctx.ns.base, 'timestamp': ts_ns, 'energy': energy})
         logger.debug('%s: t=%.2f (%s)', topic, float(ts_ns / _NS_PER_S), energy_str)

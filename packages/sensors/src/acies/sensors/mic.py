@@ -26,6 +26,7 @@ import sounddevice as sd  # pyright: ignore[reportMissingTypeStubs]
 from acies.core import AciesApp, AciesContext, setup_logging
 from acies.core.msg import AciesTimeSeries
 
+from . import signal_energy
 from .db import DbRow, flush, open_db
 
 logger = logging.getLogger(__name__)
@@ -210,7 +211,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             ),
         )
 
-        energy = {'mono': float(np.sum(np.square(samples_1s, dtype=np.float64)))}
+        energy = {'mono': signal_energy(samples_1s)}
         ctx.publish(ctx.ns.topic('energy'), {'source': ctx.ns.base, 'timestamp': window_ts_ns, 'energy': energy})
 
         # log latency
