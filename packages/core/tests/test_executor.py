@@ -3,8 +3,8 @@ from typing import Callable
 
 import msgspec
 
-from acies.corev2.executor import Executor
-from acies.corev2.task import Job, ScheduleSpec
+from acies.core.executor import Executor
+from acies.core.task import Job, ScheduleSpec
 
 _SPEC = ScheduleSpec(name='test', fn=lambda ctx: None, interval=1.0)
 

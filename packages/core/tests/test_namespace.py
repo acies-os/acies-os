@@ -2,7 +2,7 @@
 
 import pytest
 
-from acies.corev2.namespace import Namespace, matches
+from acies.core.namespace import Namespace, matches
 
 # ---------------------------------- fixtures ----------------------------------
 

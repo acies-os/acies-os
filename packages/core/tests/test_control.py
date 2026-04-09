@@ -7,10 +7,10 @@ from contextlib import contextmanager
 import msgspec
 import pytest
 
-from acies.corev2._control import _del_path, _get_path, _set_path  # pyright: ignore[reportPrivateUsage]
-from acies.corev2.app import AciesApp
-from acies.corev2.context import AciesContext
-from acies.corev2.msg import (
+from acies.core._control import _del_path, _get_path, _set_path  # pyright: ignore[reportPrivateUsage]
+from acies.core.app import AciesApp
+from acies.core.context import AciesContext
+from acies.core.msg import (
     AciesDel,
     AciesGet,
     AciesIoRequest,
@@ -26,8 +26,8 @@ from acies.corev2.msg import (
     Ok,
     TopicRename,
 )
-from acies.corev2.router import Router
-from acies.corev2.transport import LocalTransport
+from acies.core.router import Router
+from acies.core.transport import LocalTransport
 
 # ---------------------------------- helpers ----------------------------------
 

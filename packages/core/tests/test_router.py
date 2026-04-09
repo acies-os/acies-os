@@ -4,11 +4,11 @@ import time
 import msgspec
 import pytest
 
-from acies.corev2.executor import Executor
-from acies.corev2.msg import TopicRename
-from acies.corev2.router import Router
-from acies.corev2.task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
-from acies.corev2.transport import LocalTransport
+from acies.core.executor import Executor
+from acies.core.msg import TopicRename
+from acies.core.router import Router
+from acies.core.task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec
+from acies.core.transport import LocalTransport
 
 # ---------------------------------- helpers ----------------------------------
 

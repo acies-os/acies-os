@@ -7,11 +7,11 @@ Configures a root logger with two handlers:
 
 Per-logger level overrides can be set via the ``ACIES_LOG`` environment variable::
 
-    ACIES_LOG=acies.corev2=INFO,acies.sensors.geo=DEBUG acies-geo ...
+    ACIES_LOG=acies.core=INFO,acies.sensors.geo=DEBUG acies-geo ...
 
 Usage::
 
-    from acies.corev2 import setup_logging
+    from acies.core import setup_logging
 
     setup_logging('geo')                          # -> ~/.acies/logs/geo.log
     setup_logging('geo', namespace='edge-01')     # -> ~/.acies/logs/edge-01/geo.log
@@ -82,7 +82,7 @@ def setup_logging(name: str, namespace: str | None = None) -> None:
     root.addHandler(console_handler)
 
     # suppress middleware debug noise by default; override via ACIES_LOG
-    logging.getLogger('acies.corev2').setLevel(logging.INFO)
+    logging.getLogger('acies.core').setLevel(logging.INFO)
 
     for entry in os.environ.get('ACIES_LOG', '').split(','):
         entry = entry.strip()

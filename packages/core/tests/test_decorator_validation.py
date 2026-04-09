@@ -11,10 +11,10 @@ import threading
 import msgspec
 import pytest
 
-from acies.corev2.app import AciesApp
-from acies.corev2.context import AciesContext
-from acies.corev2.router import Router
-from acies.corev2.transport import LocalTransport
+from acies.core.app import AciesApp
+from acies.core.context import AciesContext
+from acies.core.router import Router
+from acies.core.transport import LocalTransport
 
 
 def _make_app() -> AciesApp:

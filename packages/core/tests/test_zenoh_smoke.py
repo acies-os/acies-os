@@ -18,7 +18,7 @@ import time
 import msgspec
 import pytest
 
-from acies.corev2.transport import ZenohTransport
+from acies.core.transport import ZenohTransport
 
 # ---------------------------- pub/sub smoke tests ----------------------------
 

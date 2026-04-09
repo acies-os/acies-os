@@ -29,8 +29,8 @@ from typing import Any
 
 import click
 import polars as pl
-from acies.corev2 import AciesApp, AciesContext, OnChange, setup_logging
-from acies.corev2.msg import AciesKvChange
+from acies.core import AciesApp, AciesContext, OnChange, setup_logging
+from acies.core.msg import AciesKvChange
 
 logger = logging.getLogger(__name__)
 

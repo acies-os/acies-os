@@ -6,7 +6,7 @@ normal data-plane handlers.
 
 Usage::
 
-    from acies.corev2.ctl import kv_get, kv_set, kv_del, kv_call
+    from acies.core.ctl import kv_get, kv_set, kv_del, kv_call
 
     # build ops (no I/O)
     ops = [

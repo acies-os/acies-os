@@ -3,8 +3,8 @@ import time
 
 import msgspec
 
-from acies.corev2.namespace import matches
-from acies.corev2.transport import LocalTransport
+from acies.core.namespace import matches
+from acies.core.transport import LocalTransport
 
 # ---------------------------------------------------------------------------
 # matches unit tests

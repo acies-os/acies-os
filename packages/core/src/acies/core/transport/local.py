@@ -1,6 +1,6 @@
 """LocalTransport -- in-process queue-based transport for testing.
 
-Logger: acies.corev2.transport.local
+Logger: acies.core.transport.local
 
 Always handles all topics. Add to Router last so prefixed transports like
 WebSocketTransport take priority.
