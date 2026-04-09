@@ -358,32 +358,6 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
             peaks.append((ts_ns, node_arcs[loudest_node]))
             logger.info('peak transition: %s -> %s (arc=%.1f m)', prev_peak, loudest_node, node_arcs[loudest_node])
 
-            # prune old peaks
-            peak_window_ns: int = ctx.app['peak_window_ns']
-            cutoff = ts_ns - peak_window_ns
-            ctx.app['peaks'] = [(t, a) for t, a in peaks if t > cutoff]
-            peaks = ctx.app['peaks']
-
-            # attempt fit
-            min_peaks: int = ctx.app['min_peaks']
-            if len(peaks) >= min_peaks:
-                result = _fit_velocity(peaks)
-                if result is not None:
-                    speed, pos = result
-                    road: Road = ctx.app['road']
-                    total = road[-1][2]
-                    is_loop: bool = ctx.app['is_loop']
-                    ctx.app['speed'] = speed
-                    ctx.app['ref_arc'] = _wrap_arc(pos, total, is_loop)
-                    ctx.app['ref_time_ns'] = ts_ns
-                    ctx.app['tracking'] = True
-                    logger.info(
-                        'fit: speed=%.1f m/s pos=%.1f m (%d peaks)',
-                        speed,
-                        ctx.app['ref_arc'],
-                        len(peaks),
-                    )
-
 
 @app.subscribe('**/vehicle')
 def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
@@ -405,19 +379,39 @@ def _ensemble_label(pred_win: TimeWindow) -> str | None:
 
 @app.schedule(1.0)
 def estimate(ctx: AciesContext) -> None:
-    if not ctx.app['tracking']:
+    energy_win: TimeWindow = ctx.app['energy']
+    now_ns: int = energy_win.latest_ts
+    if now_ns == 0:
         return
 
     road: Road = ctx.app['road']
     total = road[-1][2]
     is_loop: bool = ctx.app['is_loop']
 
-    energy_win: TimeWindow = ctx.app['energy']
-    now_ns: int = energy_win.latest_ts
-    if now_ns == 0:
+    # --- prune old peaks and refit ---
+    peaks: list[tuple[int, Metres]] = ctx.app['peaks']
+    if peaks:
+        peak_window_ns: int = ctx.app['peak_window_ns']
+        cutoff = now_ns - peak_window_ns
+        peaks = [(t, a) for t, a in peaks if t > cutoff]
+        ctx.app['peaks'] = peaks
+
+    min_peaks: int = ctx.app['min_peaks']
+    if len(peaks) >= min_peaks:
+        result = _fit_velocity(peaks)
+        if result is not None:
+            speed, pos = result
+            ctx.app['speed'] = speed
+            ctx.app['ref_arc'] = _wrap_arc(pos, total, is_loop)
+            ctx.app['ref_time_ns'] = peaks[-1][0]
+            ctx.app['tracking'] = True
+            logger.debug('refit: speed=%.1f m/s pos=%.1f m (%d peaks)', speed, ctx.app['ref_arc'], len(peaks))
+
+    if not ctx.app['tracking']:
         return
 
-    speed: float = ctx.app['speed']
+    # --- extrapolate position ---
+    speed = ctx.app['speed']
     ref_arc: Metres = ctx.app['ref_arc']
     ref_time_ns: int = ctx.app['ref_time_ns']
 
