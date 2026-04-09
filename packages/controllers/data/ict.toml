@@ -11,12 +11,10 @@ rs8 = [40.2891961, -88.1261333]
 rs10 = [40.2891928, -88.1264877]
 
 [tracker]
-# minimum distinct node peaks before fitting speed/direction
-min_peaks = 3
-# time window in seconds to collect peaks for fitting
-peak_window = 60
-# energy above this value is considered a peak (vehicle nearby)
-peak_threshold = 100000
+# constant speed in m/s
+speed = 5.0
+# direction along road: 1 = start->end, -1 = end->start
+direction = 1
 
 [road]
 coordinates = [
