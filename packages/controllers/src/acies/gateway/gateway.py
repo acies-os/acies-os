@@ -289,7 +289,7 @@ def dummy_gps(ctx: AciesContext) -> None:
     ctx['direction'] = direction
 
 
-@app.subscribe('**gps/truth', '**/gps')
+@app.subscribe('**/gps/truth', '**/gps')
 def on_gps(ctx: AciesContext, msg: Any, topic: str) -> None:
     ts_ns = msg.pop('timestamp', -1)
     if matches('**/gps_truth', topic):
