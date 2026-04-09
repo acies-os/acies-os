@@ -198,11 +198,21 @@ def _arc_to_latlon(road: Road, arc: Metres) -> tuple[float, float]:
 # --- per-node peak detection ---
 
 
-def _detect_peaks(energy_win: TimeWindow, node_arcs: dict[str, float]) -> list[tuple[int, str, Metres]]:
-    """Detect energy peaks independently per node.
+def _detect_peaks(
+    energy_win: TimeWindow, node_arcs: dict[str, float], threshold_mult: float = 2.0
+) -> list[tuple[int, str, Metres]]:
+    """Detect significant energy peaks independently per node.
 
-    For each node, scan its energy history and find local maxima
-    (a value higher than both its predecessor and successor).
+    For each node, compute the median energy over the window as a
+    baseline. A local maximum is only counted as a peak if it exceeds
+    ``threshold_mult`` times the median — this filters out noise
+    fluctuations and only detects the energy surge from a passing vehicle.
+
+    Args:
+        energy_win: per-node energy history.
+        node_arcs: mapping of node name to arc position on road.
+        threshold_mult: a local max must exceed median * threshold_mult
+            to be considered a peak.
 
     Returns a list of (timestamp_ns, node_name, arc_m) sorted by time.
     """
@@ -211,11 +221,17 @@ def _detect_peaks(energy_win: TimeWindow, node_arcs: dict[str, float]) -> list[t
         entries = energy_win.get(node)  # [(ts, energy), ...] sorted by ts
         if len(entries) < 3:
             continue
+
+        # compute median energy as baseline
+        energies = sorted(e for _, e in entries)
+        median = energies[len(energies) // 2]
+        threshold = median * threshold_mult
+
         for i in range(1, len(entries) - 1):
             prev_e = entries[i - 1][1]
             curr_ts, curr_e = entries[i]
             next_e = entries[i + 1][1]
-            if curr_e > prev_e and curr_e > next_e:
+            if curr_e > prev_e and curr_e > next_e and curr_e > threshold:
                 peaks.append((curr_ts, node, arc))
     peaks.sort()
     return peaks
@@ -390,7 +406,7 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
 
     energy_win: TimeWindow = ctx.app['energy']
     energy_win.add(canonical, ts_ns, energy)
-    logger.debug('energy: %s=%.0f', canonical, energy)
+    # logger.debug('energy: %s=%.0f', canonical, energy)
 
 
 @app.subscribe('**/vehicle')
@@ -442,7 +458,10 @@ def estimate(ctx: AciesContext) -> None:
             ctx.app['tracking'] = True
             logger.info(
                 'fit: speed=%.1f m/s pos=%.1f m (%d peaks from %d nodes)',
-                speed, ctx.app['ref_arc'], len(peaks), distinct,
+                speed,
+                ctx.app['ref_arc'],
+                len(peaks),
+                distinct,
             )
         else:
             logger.info('fit failed (%d peaks from %d nodes)', len(peaks), distinct)
