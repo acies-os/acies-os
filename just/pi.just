@@ -113,6 +113,26 @@ pi-replay-local *args:
     uv run acies-replay --acies-namespace {{ acies_namespace }} \
         --acies-connect {{ pi_zenoh_connect }} {{ args }}
 
+# Start Pi services (live sensors) via docker compose.
+pi-up *args:
+    ACIES_NAMESPACE={{ acies_namespace }} docker compose -p pi \
+        --env-file .env \
+        -f docker/pi.yml \
+        {{ args }} \
+        up
+
+# Start Pi services (replay) via docker compose.
+pi-up-replay *args:
+    ACIES_NAMESPACE={{ acies_namespace }} docker compose -p pi \
+        --env-file .env \
+        -f docker/pi-replay.yml \
+        {{ args }} \
+        up
+
+# Stop all Pi containers.
+pi-down:
+    docker compose -p pi down
+
 # Record audio using arecord.
 record output="/data/alsa-test.wav":
     arecord -D hw:ArrayUAC10,0 -f S16_LE -r 16000 -c 6 -d 40 {{ output }}
