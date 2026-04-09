@@ -1,21 +1,22 @@
 """Vehicle position tracker for AciesOS.
 
 Estimates the position of a single vehicle on a road by observing
-when energy peaks pass through each sensor node.
+energy peaks at each sensor node independently.
 
 The road is modelled as a polyline projected into 1-D arc-length.
 Each sensor node has a known position along the road. As the vehicle
-passes nodes, their energy peaks in sequence. A linear regression of
-peak times vs node arc positions yields speed and direction:
+passes, each node's energy rises then falls — a local peak. The peak
+timestamps are collected and fit against node positions along the road:
 
     t_peak = slope * arc_node + intercept
     speed  = 1 / slope          (m/s, sign gives direction)
-    p0     = -intercept / slope (initial position at t=0)
 
-Once the fit has enough observations (``min_peaks``), the tracker
-publishes extrapolated positions at 1 Hz. New peaks continuously
-refine the fit. On open roads the vehicle bounces at the endpoints;
-on loops it wraps around.
+Direction is determined by checking which sign of slope (forward vs
+reverse along the road) better fits the observed peak ordering. The
+fit requires ``min_peaks`` distinct node peaks within ``peak_window``
+seconds. Position is then extrapolated at 1 Hz.
+
+On open roads the vehicle bounces at the endpoints; on loops it wraps.
 
 Inputs:
     **/energy           energy dict from sensor nodes
@@ -160,12 +161,9 @@ def _project_onto_road(road: Road, lat: float, lon: float, prev_arc: Metres | No
         return 0.0
 
     if prev_arc is None or not is_loop:
-        # no ambiguity: pick nearest segment
         best = min(candidates, key=lambda c: c[1])
         return best[0]
 
-    # loop: among segments within 2x the best perpendicular distance,
-    # pick the one closest to prev_arc along the road
     best_perp = min(c[1] for c in candidates)
     near = [c for c in candidates if c[1] <= best_perp * 2 + 1.0]
     return min(near, key=lambda c: _arc_distance(c[0], prev_arc, total, True))[0]
@@ -194,56 +192,116 @@ def _arc_to_latlon(road: Road, arc: Metres) -> tuple[float, float]:
             lon = road[i][1] + t * (road[i + 1][1] - road[i][1])
             return lat, lon
 
-    # fallback: last point
     return road[-1][0], road[-1][1]
+
+
+# --- per-node peak detection ---
+
+
+def _detect_peaks(energy_win: TimeWindow, node_arcs: dict[str, float]) -> list[tuple[int, str, Metres]]:
+    """Detect energy peaks independently per node.
+
+    For each node, scan its energy history and find local maxima
+    (a value higher than both its predecessor and successor).
+
+    Returns a list of (timestamp_ns, node_name, arc_m) sorted by time.
+    """
+    peaks: list[tuple[int, str, Metres]] = []
+    for node, arc in node_arcs.items():
+        entries = energy_win.get(node)  # [(ts, energy), ...] sorted by ts
+        if len(entries) < 3:
+            continue
+        for i in range(1, len(entries) - 1):
+            prev_e = entries[i - 1][1]
+            curr_ts, curr_e = entries[i]
+            next_e = entries[i + 1][1]
+            if curr_e > prev_e and curr_e > next_e:
+                peaks.append((curr_ts, node, arc))
+    peaks.sort()
+    return peaks
 
 
 # --- linear fit ---
 
 
-def _fit_velocity(peaks: list[tuple[int, Metres]]) -> tuple[float, Metres] | None:
-    """Fit a line t = slope * arc + intercept to observed peak times.
+def _fit_line(points: list[tuple[float, float]]) -> tuple[float, float, float] | None:
+    """Fit y = slope * x + intercept via least squares.
 
     Args:
-        peaks: list of (timestamp_ns, node_arc_m) pairs.
+        points: list of (x, y) pairs.
 
-    Returns (speed_m_s, position_at_latest_peak_time) or None if fit fails.
-    Speed sign encodes direction (positive = increasing arc).
+    Returns (slope, intercept, residual_sum_of_squares) or None.
     """
-    n = len(peaks)
+    n = len(points)
     if n < 2:
         return None
 
-    # linear regression: t_s = slope * arc + intercept
-    # use seconds relative to first peak to avoid precision issues
-    t0 = peaks[0][0]
-    sum_a = 0.0
-    sum_t = 0.0
-    sum_at = 0.0
-    sum_aa = 0.0
-    for ts_ns, arc in peaks:
-        t_s = (ts_ns - t0) / _NS_PER_S
-        sum_a += arc
-        sum_t += t_s
-        sum_at += arc * t_s
-        sum_aa += arc * arc
+    sum_x = sum_y = sum_xy = sum_xx = 0.0
+    for x, y in points:
+        sum_x += x
+        sum_y += y
+        sum_xy += x * y
+        sum_xx += x * x
 
-    denom = n * sum_aa - sum_a * sum_a
+    denom = n * sum_xx - sum_x * sum_x
     if abs(denom) < 1e-12:
-        return None  # all peaks at same node
+        return None
 
-    slope = (n * sum_at - sum_a * sum_t) / denom
-    intercept = (sum_t - slope * sum_a) / n
+    slope = (n * sum_xy - sum_x * sum_y) / denom
+    intercept = (sum_y - slope * sum_x) / n
 
+    # residual
+    rss = 0.0
+    for x, y in points:
+        r = y - (slope * x + intercept)
+        rss += r * r
+
+    return slope, intercept, rss
+
+
+def _fit_velocity(
+    peaks: list[tuple[int, str, Metres]],
+) -> tuple[float, Metres, int] | None:
+    """Fit speed and position from per-node peak events.
+
+    Fits t = slope * arc + intercept in both directions and picks the
+    one with the lower residual.
+
+    Args:
+        peaks: list of (timestamp_ns, node_name, arc_m) sorted by time.
+
+    Returns (speed_m_s, position_at_latest_peak, ref_time_ns) or None.
+    """
+    if len(peaks) < 2:
+        return None
+
+    # use only the latest peak per node (the most relevant observation)
+    latest_per_node: dict[str, tuple[int, Metres]] = {}
+    for ts_ns, node, arc in peaks:
+        latest_per_node[node] = (ts_ns, arc)
+
+    if len(latest_per_node) < 2:
+        return None  # need peaks from at least 2 distinct nodes
+
+    # build (arc, time_s) points for regression
+    t0 = min(ts for ts, _ in latest_per_node.values())
+    points = [(arc, (ts - t0) / _NS_PER_S) for ts, arc in latest_per_node.values()]
+
+    result = _fit_line(points)
+    if result is None:
+        return None
+
+    slope, intercept, _rss = result
     if abs(slope) < 1e-12:
-        return None  # near-zero slope -> can't determine speed
+        return None
 
-    speed = 1.0 / slope  # m/s (sign = direction)
-    # position at the latest peak time
-    latest_t_s = (peaks[-1][0] - t0) / _NS_PER_S
+    speed = 1.0 / slope  # m/s, sign = direction
+    # position at latest peak time
+    latest_ts = max(ts for ts, _ in latest_per_node.values())
+    latest_t_s = (latest_ts - t0) / _NS_PER_S
     pos = speed * (latest_t_s - intercept)
 
-    return speed, pos
+    return speed, pos, latest_ts
 
 
 # --- config ---
@@ -264,7 +322,6 @@ def _reload_config(ctx: AciesContext) -> None:
     if is_loop:
         logger.info('road detected as loop (first/last coordinates identical)')
 
-    # project each node onto the road
     gps_table: dict[str, list[float]] = config.get('gps', {})
     node_arcs: dict[str, float] = {}
     for node, (lat, lon) in gps_table.items():
@@ -276,10 +333,11 @@ def _reload_config(ctx: AciesContext) -> None:
 
     tracker_cfg: dict[str, Any] = config.get('tracker', {})
     ctx.app['min_peaks'] = tracker_cfg.get('min_peaks', 3)
-    ctx.app['peak_window_ns'] = int(tracker_cfg.get('peak_window', 30) * _NS_PER_S)
+    peak_window = tracker_cfg.get('peak_window', 60)
+    ctx.app['peak_window_ns'] = int(peak_window * _NS_PER_S)
 
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
-    logger.info('tracker min_peaks=%d peak_window=%ds', ctx.app['min_peaks'], tracker_cfg.get('peak_window', 30))
+    logger.info('tracker min_peaks=%d peak_window=%ds', ctx.app['min_peaks'], peak_window)
 
 
 # --- app ---
@@ -292,16 +350,14 @@ def setup(ctx: AciesContext) -> None:
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
 
-    # energy tracking: per-node energy for peak detection
-    ctx.app['energy'] = TimeWindow(window_ns=5 * _NS_PER_S, data_clock=True)
-    ctx.app['prev_peak_node'] = None  # last node that was the loudest
-    # peaks: list of (timestamp_ns, arc_m) for the linear fit
-    ctx.app['peaks'] = []
+    # per-node energy buffer for peak detection (use peak_window so we see
+    # enough history for the vehicle to pass multiple nodes)
+    ctx.app['energy'] = TimeWindow(window_ns=ctx.app['peak_window_ns'], data_clock=True)
 
-    # tracking state (populated once fit succeeds)
-    ctx.app['speed'] = 0.0  # m/s, signed
-    ctx.app['ref_arc'] = 0.0  # position at ref_time
-    ctx.app['ref_time_ns'] = 0  # timestamp of last fit
+    # tracking state
+    ctx.app['speed'] = 0.0
+    ctx.app['ref_arc'] = 0.0
+    ctx.app['ref_time_ns'] = 0
     ctx.app['tracking'] = False
 
 
@@ -335,29 +391,6 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
     energy_win: TimeWindow = ctx.app['energy']
     energy_win.add(canonical, ts_ns, energy)
 
-    # --- peak detection: which node is loudest right now? ---
-    loudest_node: str | None = None
-    loudest_energy = 0.0
-    for node in node_arcs:
-        entry = energy_win.latest(node)
-        if entry is not None:
-            _, e = entry
-            if e > loudest_energy:
-                loudest_energy = e
-                loudest_node = node
-
-    if loudest_node is None:
-        return
-
-    prev_peak: str | None = ctx.app['prev_peak_node']
-    if loudest_node != prev_peak:
-        ctx.app['prev_peak_node'] = loudest_node
-        if prev_peak is not None:
-            # transition detected -> record peak
-            peaks: list[tuple[int, Metres]] = ctx.app['peaks']
-            peaks.append((ts_ns, node_arcs[loudest_node]))
-            logger.info('peak transition: %s -> %s (arc=%.1f m)', prev_peak, loudest_node, node_arcs[loudest_node])
-
 
 @app.subscribe('**/vehicle')
 def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
@@ -387,38 +420,39 @@ def estimate(ctx: AciesContext) -> None:
     road: Road = ctx.app['road']
     total = road[-1][2]
     is_loop: bool = ctx.app['is_loop']
+    node_arcs: dict[str, float] = ctx.app['node_arcs']
 
-    # --- prune old peaks and refit ---
-    peaks: list[tuple[int, Metres]] = ctx.app['peaks']
-    if peaks:
-        peak_window_ns: int = ctx.app['peak_window_ns']
-        cutoff = now_ns - peak_window_ns
-        peaks = [(t, a) for t, a in peaks if t > cutoff]
-        ctx.app['peaks'] = peaks
-
+    # --- detect peaks from energy buffer and attempt fit ---
+    peaks = _detect_peaks(energy_win, node_arcs)
     min_peaks: int = ctx.app['min_peaks']
+
     if len(peaks) >= min_peaks:
         result = _fit_velocity(peaks)
         if result is not None:
-            speed, pos = result
+            speed, pos, ref_ts = result
             ctx.app['speed'] = speed
             ctx.app['ref_arc'] = _wrap_arc(pos, total, is_loop)
-            ctx.app['ref_time_ns'] = peaks[-1][0]
+            ctx.app['ref_time_ns'] = ref_ts
             ctx.app['tracking'] = True
-            logger.debug('refit: speed=%.1f m/s pos=%.1f m (%d peaks)', speed, ctx.app['ref_arc'], len(peaks))
+            logger.debug(
+                'fit: speed=%.1f m/s pos=%.1f m (%d peaks from %d nodes)',
+                speed,
+                ctx.app['ref_arc'],
+                len(peaks),
+                len({p[1] for p in peaks}),
+            )
 
     if not ctx.app['tracking']:
         return
 
     # --- extrapolate position ---
-    speed = ctx.app['speed']
+    speed: float = ctx.app['speed']
     ref_arc: Metres = ctx.app['ref_arc']
     ref_time_ns: int = ctx.app['ref_time_ns']
 
     dt = (now_ns - ref_time_ns) / _NS_PER_S
     arc = ref_arc + speed * dt
 
-    # bounce on open roads
     if not is_loop:
         while True:
             if arc < 0:
