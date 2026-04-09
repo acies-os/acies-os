@@ -183,8 +183,8 @@ def _play_positions(
         sleep_s = wall_target - time.monotonic()
         if sleep_s > 0 and _wait_for_any(cancel, timeout=sleep_s):
             return False
-        ctx.publish(topic, {label: pos})
-        logger.debug('%s <- %s: lat=%.6f lon=%.6f', topic, label, pos['lat'], pos['lon'])
+        ctx.publish(topic, {label: pos, 'timestamp': ts_ns})
+        logger.debug('%s: l=%s lat=%.6f lon=%.6f t=%s', topic, label, pos['lat'], pos['lon'], ts_ns)
     return True
 
 
