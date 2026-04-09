@@ -122,7 +122,7 @@ def _find_services(heartbeat_buf: TimeWindow, host: str) -> dict[str, str]:
 
 
 def _wait_futures(
-    items: list[tuple[str, Sequence[KvEntry], Future[list[AciesResult]]]],
+    items: Sequence[tuple[str, Sequence[KvEntry], Future[list[AciesResult]]]],
     label: str,
 ) -> None:
     """Wait for all futures to complete, logging per-op results per target."""
