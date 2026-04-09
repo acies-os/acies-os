@@ -3,7 +3,7 @@
 FROM ghcr.io/astral-sh/uv:0.10.11-python3.12-trixie-slim
 
 ARG ZENOH_VERSION=1.8.0
-ARG TARGETARCH
+# ARG TARGETARCH=amd64
 
 # System deps:
 #   git      -- uv installs rawshake from GitHub
