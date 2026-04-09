@@ -1,24 +1,28 @@
 """Vehicle position tracker for AciesOS.
 
-Estimates the position of a single vehicle on a road segment by fusing
-energy readings from multiple sensor nodes. Each node's energy (std dev
-of geophone samples) is used as a proximity signal; higher energy means
-the vehicle is closer to that node.
+Estimates the position of a single vehicle on a road by observing
+when energy peaks pass through each sensor node.
 
-The road is modelled as a polyline. Node positions and the polyline are
-projected into a 1-D coordinate (arc-length along the road). An energy-
-weighted average of node positions gives the estimated vehicle location,
-which is then converted back to lat/lon and published in the same format
-as gps.py.
+The road is modelled as a polyline projected into 1-D arc-length.
+Each sensor node has a known position along the road. As the vehicle
+passes nodes, their energy peaks in sequence. A linear regression of
+peak times vs node arc positions yields speed and direction:
 
-Between energy updates the position is extrapolated using the last
-estimated speed and direction.
+    t_peak = slope * arc_node + intercept
+    speed  = 1 / slope          (m/s, sign gives direction)
+    p0     = -intercept / slope (initial position at t=0)
+
+Once the fit has enough observations (``min_peaks``), the tracker
+publishes extrapolated positions at 1 Hz. New peaks continuously
+refine the fit. On open roads the vehicle bounces at the endpoints;
+on loops it wraps around.
 
 Inputs:
     **/energy           energy dict from sensor nodes
     **/vehicle          classifier predictions (for vehicle label)
     config [gps]        node GPS coordinates
     config [road]       road polyline coordinates
+    config [tracker]    min_peaks, peak_window
 
 Output:
     ctx.ns.topic('gps') position dict matching gps.py format
@@ -167,17 +171,6 @@ def _project_onto_road(road: Road, lat: float, lon: float, prev_arc: Metres | No
     return min(near, key=lambda c: _arc_distance(c[0], prev_arc, total, True))[0]
 
 
-def _shortest_offset(a: Metres, b: Metres, total: Metres, is_loop: bool) -> Metres:
-    """Signed offset from a to b, taking the shorter path on loops."""
-    offset = b - a
-    if is_loop:
-        if offset > total / 2:
-            offset -= total
-        elif offset < -total / 2:
-            offset += total
-    return offset
-
-
 def _wrap_arc(arc: Metres, total: Metres, is_loop: bool) -> Metres:
     """Clamp arc to [0, total] or wrap around for loops."""
     if is_loop:
@@ -205,6 +198,57 @@ def _arc_to_latlon(road: Road, arc: Metres) -> tuple[float, float]:
     return road[-1][0], road[-1][1]
 
 
+# --- linear fit ---
+
+
+def _fit_velocity(peaks: list[tuple[int, Metres]]) -> tuple[float, Metres] | None:
+    """Fit a line t = slope * arc + intercept to observed peak times.
+
+    Args:
+        peaks: list of (timestamp_ns, node_arc_m) pairs.
+
+    Returns (speed_m_s, position_at_latest_peak_time) or None if fit fails.
+    Speed sign encodes direction (positive = increasing arc).
+    """
+    n = len(peaks)
+    if n < 2:
+        return None
+
+    # linear regression: t_s = slope * arc + intercept
+    # use seconds relative to first peak to avoid precision issues
+    t0 = peaks[0][0]
+    sum_a = 0.0
+    sum_t = 0.0
+    sum_at = 0.0
+    sum_aa = 0.0
+    for ts_ns, arc in peaks:
+        t_s = (ts_ns - t0) / _NS_PER_S
+        sum_a += arc
+        sum_t += t_s
+        sum_at += arc * t_s
+        sum_aa += arc * arc
+
+    denom = n * sum_aa - sum_a * sum_a
+    if abs(denom) < 1e-12:
+        return None  # all peaks at same node
+
+    slope = (n * sum_at - sum_a * sum_t) / denom
+    intercept = (sum_t - slope * sum_a) / n
+
+    if abs(slope) < 1e-12:
+        return None  # near-zero slope -> can't determine speed
+
+    speed = 1.0 / slope  # m/s (sign = direction)
+    # position at the latest peak time
+    latest_t_s = (peaks[-1][0] - t0) / _NS_PER_S
+    pos = speed * (latest_t_s - intercept)
+
+    return speed, pos
+
+
+# --- config ---
+
+
 def _reload_config(ctx: AciesContext) -> None:
     """Read the toml config and update app state derived from it."""
     with open(ctx.cfg['config_path'], 'rb') as f:
@@ -228,28 +272,37 @@ def _reload_config(ctx: AciesContext) -> None:
         logger.info('node %s: lat=%.6f lon=%.6f -> arc=%.1f m', node, lat, lon, node_arcs[node])
     ctx.app['node_arcs'] = node_arcs
 
-    # map_node_mapping: maps alternative node ids (e.g. gq-1) to canonical ids (e.g. rs1)
     ctx.app['node_mapping'] = config.get('map_node_mapping', {})
 
-    # tracker config
     tracker_cfg: dict[str, Any] = config.get('tracker', {})
-    ctx.app['alpha'] = tracker_cfg.get('alpha', 0.3)
+    ctx.app['min_peaks'] = tracker_cfg.get('min_peaks', 3)
+    ctx.app['peak_window_ns'] = int(tracker_cfg.get('peak_window', 30) * _NS_PER_S)
 
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
-    logger.info('tracker alpha=%.2f', ctx.app['alpha'])
+    logger.info('tracker min_peaks=%d peak_window=%ds', ctx.app['min_peaks'], tracker_cfg.get('peak_window', 30))
+
+
+# --- app ---
 
 
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
     _reload_config(ctx)
 
-    # tracker state
-    ctx.app['energy'] = TimeWindow(window_ns=5 * _NS_PER_S, data_clock=True)
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
-    ctx.app['est_arc'] = ctx.app['road'][-1][2] / 2  # start at midpoint
-    ctx.app['est_speed'] = 0.0  # m/s along road
-    ctx.app['last_update_ns'] = 0
+
+    # energy tracking: per-node energy for peak detection
+    ctx.app['energy'] = TimeWindow(window_ns=5 * _NS_PER_S, data_clock=True)
+    ctx.app['prev_peak_node'] = None  # last node that was the loudest
+    # peaks: list of (timestamp_ns, arc_m) for the linear fit
+    ctx.app['peaks'] = []
+
+    # tracking state (populated once fit succeeds)
+    ctx.app['speed'] = 0.0  # m/s, signed
+    ctx.app['ref_arc'] = 0.0  # position at ref_time
+    ctx.app['ref_time_ns'] = 0  # timestamp of last fit
+    ctx.app['tracking'] = False
 
 
 @app.schedule(5.0)
@@ -271,10 +324,7 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
     energy_by_ch: dict[str, float] = msg['energy']
     energy = max(energy_by_ch.values())
 
-    # extract host name from source (e.g. "rs1/geo" -> "rs1", "gq-2/geo" -> "gq-2")
     host = source.split('/')[0]
-
-    # map alternative node id to canonical id if needed
     node_mapping: dict[str, str] = ctx.app['node_mapping']
     canonical = node_mapping.get(host, host)
 
@@ -284,6 +334,55 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
 
     energy_win: TimeWindow = ctx.app['energy']
     energy_win.add(canonical, ts_ns, energy)
+
+    # --- peak detection: which node is loudest right now? ---
+    loudest_node: str | None = None
+    loudest_energy = 0.0
+    for node in node_arcs:
+        entry = energy_win.latest(node)
+        if entry is not None:
+            _, e = entry
+            if e > loudest_energy:
+                loudest_energy = e
+                loudest_node = node
+
+    if loudest_node is None:
+        return
+
+    prev_peak: str | None = ctx.app['prev_peak_node']
+    if loudest_node != prev_peak:
+        ctx.app['prev_peak_node'] = loudest_node
+        if prev_peak is not None:
+            # transition detected -> record peak
+            peaks: list[tuple[int, Metres]] = ctx.app['peaks']
+            peaks.append((ts_ns, node_arcs[loudest_node]))
+            logger.info('peak transition: %s -> %s (arc=%.1f m)', prev_peak, loudest_node, node_arcs[loudest_node])
+
+            # prune old peaks
+            peak_window_ns: int = ctx.app['peak_window_ns']
+            cutoff = ts_ns - peak_window_ns
+            ctx.app['peaks'] = [(t, a) for t, a in peaks if t > cutoff]
+            peaks = ctx.app['peaks']
+
+            # attempt fit
+            min_peaks: int = ctx.app['min_peaks']
+            if len(peaks) >= min_peaks:
+                result = _fit_velocity(peaks)
+                if result is not None:
+                    speed, pos = result
+                    road: Road = ctx.app['road']
+                    total = road[-1][2]
+                    is_loop: bool = ctx.app['is_loop']
+                    ctx.app['speed'] = speed
+                    ctx.app['ref_arc'] = _wrap_arc(pos, total, is_loop)
+                    ctx.app['ref_time_ns'] = ts_ns
+                    ctx.app['tracking'] = True
+                    logger.info(
+                        'fit: speed=%.1f m/s pos=%.1f m (%d peaks)',
+                        speed,
+                        ctx.app['ref_arc'],
+                        len(peaks),
+                    )
 
 
 @app.subscribe('**/vehicle')
@@ -306,68 +405,44 @@ def _ensemble_label(pred_win: TimeWindow) -> str | None:
 
 @app.schedule(1.0)
 def estimate(ctx: AciesContext) -> None:
-    node_arcs: dict[str, float] = ctx.app['node_arcs']
-    road: Road = ctx.app['road']
-
-    energy_win: TimeWindow = ctx.app['energy']
-    now_ns: int = energy_win.latest_ts  # use data clock as time source
-    if now_ns == 0:
-        return  # no data received yet
-
-    fresh: dict[str, tuple[int, float]] = {}
-    for node in node_arcs:
-        entry = energy_win.latest(node)
-        if entry is not None:
-            fresh[node] = entry
-
-    total = road[-1][2]
-    is_loop: bool = ctx.app['is_loop']
-    last_ns: int = ctx.app['last_update_ns']
-
-    label = _ensemble_label(ctx.app['predictions']) or 'unknown'
-
-    alpha: float = ctx.app['alpha']
-    prev_arc: Metres = ctx.app['est_arc']
-
-    if not fresh:
-        # no recent data -> extrapolate and decay speed
-        if last_ns > 0:
-            dt = (now_ns - last_ns) / _NS_PER_S
-            ctx.app['est_arc'] = _wrap_arc(prev_arc + ctx.app['est_speed'] * dt, total, is_loop)
-            ctx.app['est_speed'] *= 0.9  # decay speed toward zero
-            ctx.app['last_update_ns'] = now_ns
-        lat, lon = _arc_to_latlon(road, ctx.app['est_arc'])
-        ctx.publish(ctx.ns.topic('gps'), {label: {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
+    if not ctx.app['tracking']:
         return
 
-    # energy-weighted position measurement
-    # on a loop, compute offsets relative to current estimate to avoid
-    # averaging across the wraparound boundary
-    total_weight = 0.0
-    weighted_offset = 0.0
-    for node, (_ts, e) in fresh.items():
-        w = e * e  # square to sharpen the peak
-        weighted_offset += w * _shortest_offset(prev_arc, node_arcs[node], total, is_loop)
-        total_weight += w
-    measurement = prev_arc + weighted_offset / total_weight if total_weight > 0 else prev_arc
+    road: Road = ctx.app['road']
+    total = road[-1][2]
+    is_loop: bool = ctx.app['is_loop']
 
-    # EMA: blend measurement with previous estimate
-    offset = _shortest_offset(prev_arc, measurement, total, is_loop)
-    new_arc = _wrap_arc(prev_arc + alpha * offset, total, is_loop)
+    energy_win: TimeWindow = ctx.app['energy']
+    now_ns: int = energy_win.latest_ts
+    if now_ns == 0:
+        return
 
-    # estimate speed from smoothed position change
-    if last_ns > 0:
-        dt = (now_ns - last_ns) / _NS_PER_S
-        if dt > 0:
-            raw_speed = _shortest_offset(prev_arc, new_arc, total, is_loop) / dt
-            ctx.app['est_speed'] = alpha * raw_speed + (1 - alpha) * ctx.app['est_speed']
+    speed: float = ctx.app['speed']
+    ref_arc: Metres = ctx.app['ref_arc']
+    ref_time_ns: int = ctx.app['ref_time_ns']
 
-    ctx.app['est_arc'] = new_arc
-    ctx.app['last_update_ns'] = now_ns
+    dt = (now_ns - ref_time_ns) / _NS_PER_S
+    arc = ref_arc + speed * dt
 
-    lat, lon = _arc_to_latlon(road, new_arc)
+    # bounce on open roads
+    if not is_loop:
+        while True:
+            if arc < 0:
+                arc = -arc
+                speed = -speed
+            elif arc > total:
+                arc = 2 * total - arc
+                speed = -speed
+            else:
+                break
+        ctx.app['speed'] = speed
+
+    arc = _wrap_arc(arc, total, is_loop)
+
+    label = _ensemble_label(ctx.app['predictions']) or 'unknown'
+    lat, lon = _arc_to_latlon(road, arc)
     ctx.publish(ctx.ns.topic('gps'), {label: {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
-    logger.debug('estimate: arc=%.1f m speed=%.1f m/s lat=%.6f lon=%.6f', new_arc, ctx.app['est_speed'], lat, lon)
+    logger.debug('estimate: arc=%.1f m speed=%.1f m/s lat=%.6f lon=%.6f', arc, speed, lat, lon)
 
 
 @app.on_shutdown
