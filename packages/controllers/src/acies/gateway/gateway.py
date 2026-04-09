@@ -292,7 +292,7 @@ def dummy_gps(ctx: AciesContext) -> None:
 @app.subscribe('**/gps/truth', '**/gps')
 def on_gps(ctx: AciesContext, msg: Any, topic: str) -> None:
     ts_ns = msg.pop('timestamp', -1)
-    if matches('**/gps_truth', topic):
+    if matches('**/gps/truth', topic):
         ctx.publish('ws://gps_truth', msg)
         logger.debug('gps update: %r t=%.2f', msg, float(ts_ns / _NS_PER_S) if ts_ns else None)
     else:
