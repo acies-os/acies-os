@@ -4,9 +4,7 @@ default:
 
 # Show all sensor logs for a replay.
 replay:
-    find . \( -name geo.log -o -name mic.log -o -name gps.log \) -print0 | \
-        sort -z | \
-        xargs -0 -r multitail
+    multitail $(find . \( -name geo.log -o -name mic.log -o -name gps.log \) | sort)
 
 # Show mic and geo energy of the given node based on gateway log.
 gateway-energy node:
