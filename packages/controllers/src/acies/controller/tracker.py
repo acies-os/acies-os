@@ -1,29 +1,19 @@
 """Vehicle position tracker for AciesOS.
 
-Estimates the position of a single vehicle on a road by observing
-energy peaks at each sensor node independently.
+Simplified tracker: starts at the beginning of the road, moves at a
+constant configured speed in a configured direction. Subscribes to
+energy and vehicle topics for future refinement but currently does
+not use them for position estimation.
 
 The road is modelled as a polyline projected into 1-D arc-length.
-Each sensor node has a known position along the road. As the vehicle
-passes, each node's energy rises then falls — a local peak. The peak
-timestamps are collected and fit against node positions along the road:
-
-    t_peak = slope * arc_node + intercept
-    speed  = 1 / slope          (m/s, sign gives direction)
-
-Direction is determined by checking which sign of slope (forward vs
-reverse along the road) better fits the observed peak ordering. The
-fit requires ``min_peaks`` distinct node peaks within ``peak_window``
-seconds. Position is then extrapolated at 1 Hz.
-
-On open roads the vehicle bounces at the endpoints; on loops it wraps.
+Position is extrapolated at 1 Hz. On open roads the vehicle bounces
+at the endpoints; on loops it wraps around.
 
 Inputs:
-    **/energy           energy dict from sensor nodes
+    **/energy           energy dict from sensor nodes (logged for tuning)
     **/vehicle          classifier predictions (for vehicle label)
-    config [gps]        node GPS coordinates
     config [road]       road polyline coordinates
-    config [tracker]    min_peaks, peak_window
+    config [tracker]    speed, direction
 
 Output:
     ctx.ns.topic('gps') position dict matching gps.py format
@@ -65,7 +55,7 @@ RoadPoint: TypeAlias = tuple[float, float, Metres]
 Road: TypeAlias = list[RoadPoint]
 """Road polyline as a sequence of RoadPoints."""
 
-# --- geometry helpers (lat/lon in degrees, distances in metres) ---
+# --- geometry helpers ---
 
 _DEG_TO_RAD = math.pi / 180.0
 _EARTH_R = 6_371_000.0  # metres
@@ -85,10 +75,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _build_road(coords: list[list[float]]) -> Road:
-    """Convert a polyline of [lat, lon] into (lat, lon, cumulative_distance_m).
-
-    Returns a list sorted by cumulative distance from the first point.
-    """
+    """Convert a polyline of [lat, lon] into (lat, lon, cumulative_distance_m)."""
     road: Road = [(coords[0][0], coords[0][1], 0.0)]
     cumulative = 0.0
     for i in range(1, len(coords)):
@@ -96,77 +83,6 @@ def _build_road(coords: list[list[float]]) -> Road:
         cumulative += d
         road.append((coords[i][0], coords[i][1], cumulative))
     return road
-
-
-def _project_onto_segment(
-    lat: float, lon: float, lat1: float, lon1: float, lat2: float, lon2: float, arc1: Metres, arc2: Metres
-) -> tuple[Metres, Metres]:
-    """Project a point onto a single road segment.
-
-    Args:
-        lat, lon: point to project.
-        lat1, lon1: segment start point.
-        lat2, lon2: segment end point.
-        arc1: cumulative road distance at segment start.
-        arc2: cumulative road distance at segment end.
-
-    Returns (arc_length, perpendicular_distance_m).
-    """
-    seg_len = arc2 - arc1
-    if seg_len == 0:
-        return arc1, _haversine(lat, lon, lat1, lon1)
-
-    dx = (lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
-    dy = lat2 - lat1
-    px = (lon - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
-    py = lat - lat1
-    t = max(0.0, min(1.0, (px * dx + py * dy) / (dx * dx + dy * dy)))
-
-    proj_lat = lat1 + t * (lat2 - lat1)
-    proj_lon = lon1 + t * (lon2 - lon1)
-    return arc1 + t * seg_len, _haversine(lat, lon, proj_lat, proj_lon)
-
-
-def _arc_distance(a: Metres, b: Metres, total: Metres, is_loop: bool) -> Metres:
-    """Shortest distance in metres between two road positions, wrapping if loop."""
-    d = abs(a - b)
-    if is_loop:
-        return min(d, total - d)
-    return d
-
-
-def _project_onto_road(road: Road, lat: float, lon: float, prev_arc: Metres | None = None) -> Metres:
-    """Project a lat/lon point onto the road polyline.
-
-    Args:
-        road: road polyline.
-        lat, lon: point to project.
-        prev_arc: previous estimated position along the road.
-            When given and the road is a loop, the candidate closest to
-            this value is preferred to resolve ambiguity.
-
-    Returns the projected position in metres along the road.
-    """
-    total = road[-1][2]
-    is_loop = _is_loop(road)
-
-    candidates: list[tuple[Metres, Metres]] = []  # (arc, perp_dist)
-    for i in range(len(road) - 1):
-        lat1, lon1, arc1 = road[i]
-        lat2, lon2, arc2 = road[i + 1]
-        arc, dist = _project_onto_segment(lat, lon, lat1, lon1, lat2, lon2, arc1, arc2)
-        candidates.append((arc, dist))
-
-    if not candidates:
-        return 0.0
-
-    if prev_arc is None or not is_loop:
-        best = min(candidates, key=lambda c: c[1])
-        return best[0]
-
-    best_perp = min(c[1] for c in candidates)
-    near = [c for c in candidates if c[1] <= best_perp * 2 + 1.0]
-    return min(near, key=lambda c: _arc_distance(c[0], prev_arc, total, True))[0]
 
 
 def _wrap_arc(arc: Metres, total: Metres, is_loop: bool) -> Metres:
@@ -195,126 +111,6 @@ def _arc_to_latlon(road: Road, arc: Metres) -> tuple[float, float]:
     return road[-1][0], road[-1][1]
 
 
-# --- per-node peak detection ---
-
-
-def _detect_active_nodes(
-    energy_win: TimeWindow, node_arcs: dict[str, float], threshold: float
-) -> list[tuple[int, str, Metres]]:
-    """Find all energy readings above threshold, sorted by time.
-
-    Returns a list of (timestamp_ns, node_name, arc_m).
-    """
-    active: list[tuple[int, str, Metres]] = []
-    for node, arc in node_arcs.items():
-        for ts, energy in energy_win.get(node):
-            if energy > threshold:
-                active.append((ts, node, arc))
-    active.sort()
-    return active
-
-
-def _merge_adjacent(active: list[tuple[int, str, Metres]]) -> list[tuple[int, str, Metres]]:
-    """Merge consecutive entries from the same node into one.
-
-    Keeps the entry with the midpoint timestamp from each run.
-    e.g. [rs1, rs1, rs3, rs3, rs5] -> [rs1, rs3, rs5]
-    """
-    if not active:
-        return []
-
-    merged: list[tuple[int, str, Metres]] = []
-    run_start = 0
-    for i in range(1, len(active)):
-        if active[i][1] != active[run_start][1]:
-            # end of run — pick the midpoint entry
-            mid = (run_start + i - 1) // 2
-            merged.append(active[mid])
-            run_start = i
-    # last run
-    mid = (run_start + len(active) - 1) // 2
-    merged.append(active[mid])
-    return merged
-
-
-# --- linear fit ---
-
-
-def _fit_line(points: list[tuple[float, float]]) -> tuple[float, float, float] | None:
-    """Fit y = slope * x + intercept via least squares.
-
-    Args:
-        points: list of (x, y) pairs.
-
-    Returns (slope, intercept, residual_sum_of_squares) or None.
-    """
-    n = len(points)
-    if n < 2:
-        return None
-
-    sum_x = sum_y = sum_xy = sum_xx = 0.0
-    for x, y in points:
-        sum_x += x
-        sum_y += y
-        sum_xy += x * y
-        sum_xx += x * x
-
-    denom = n * sum_xx - sum_x * sum_x
-    if abs(denom) < 1e-12:
-        return None
-
-    slope = (n * sum_xy - sum_x * sum_y) / denom
-    intercept = (sum_y - slope * sum_x) / n
-
-    # residual
-    rss = 0.0
-    for x, y in points:
-        r = y - (slope * x + intercept)
-        rss += r * r
-
-    return slope, intercept, rss
-
-
-def _fit_velocity(
-    merged: list[tuple[int, str, Metres]],
-) -> tuple[float, Metres, int] | None:
-    """Fit speed and position from merged peak sequence.
-
-    Fits t = slope * arc + intercept. The sign of slope gives direction.
-
-    Args:
-        merged: list of (timestamp_ns, node_name, arc_m) sorted by time,
-            with adjacent duplicates already merged.
-
-    Returns (speed_m_s, position_at_latest_peak, ref_time_ns) or None.
-    """
-    if len(merged) < 2:
-        return None
-
-    # need at least 2 distinct nodes
-    distinct_nodes = {node for _, node, _ in merged}
-    if len(distinct_nodes) < 2:
-        return None
-
-    t0 = merged[0][0]
-    points = [(arc, (ts - t0) / _NS_PER_S) for ts, _, arc in merged]
-
-    result = _fit_line(points)
-    if result is None:
-        return None
-
-    slope, intercept, _rss = result
-    if abs(slope) < 1e-12:
-        return None
-
-    speed = 1.0 / slope
-    latest_ts = merged[-1][0]
-    latest_t_s = (latest_ts - t0) / _NS_PER_S
-    pos = speed * (latest_t_s - intercept)
-
-    return speed, pos, latest_ts
-
-
 # --- config ---
 
 
@@ -326,33 +122,17 @@ def _reload_config(ctx: AciesContext) -> None:
     road_coords: list[list[float]] = config['road']['coordinates']
     road = _build_road(road_coords)
     ctx.app['road'] = road
-    logger.info('road: %d segments, %.1f m total', len(road) - 1, road[-1][2])
-
-    is_loop = _is_loop(road)
-    ctx.app['is_loop'] = is_loop
-    if is_loop:
-        logger.info('road detected as loop (first/last coordinates identical)')
-
-    gps_table: dict[str, list[float]] = config.get('gps', {})
-    node_arcs: dict[str, float] = {}
-    for node, (lat, lon) in gps_table.items():
-        node_arcs[node] = _project_onto_road(road, lat, lon)
-        logger.info('node %s: lat=%.6f lon=%.6f -> arc=%.1f m', node, lat, lon, node_arcs[node])
-    ctx.app['node_arcs'] = node_arcs
+    ctx.app['is_loop'] = _is_loop(road)
+    logger.info('road: %d segments, %.1f m total, loop=%s', len(road) - 1, road[-1][2], ctx.app['is_loop'])
 
     ctx.app['node_mapping'] = config.get('map_node_mapping', {})
 
     tracker_cfg: dict[str, Any] = config.get('tracker', {})
-    ctx.app['min_peaks'] = tracker_cfg.get('min_peaks', 3)
-    peak_window = tracker_cfg.get('peak_window', 60)
-    ctx.app['peak_window_ns'] = int(peak_window * _NS_PER_S)
-    ctx.app['peak_threshold'] = tracker_cfg.get('peak_threshold', 100000)
+    ctx.app['speed'] = float(tracker_cfg.get('speed', 5.0))  # m/s
+    ctx.app['direction'] = int(tracker_cfg.get('direction', 1))  # +1 or -1
 
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
-    logger.info(
-        'tracker min_peaks=%d peak_window=%ds peak_threshold=%.0f',
-        ctx.app['min_peaks'], peak_window, ctx.app['peak_threshold'],
-    )
+    logger.info('tracker speed=%.1f m/s direction=%d', ctx.app['speed'], ctx.app['direction'])
 
 
 # --- app ---
@@ -364,16 +144,12 @@ def setup(ctx: AciesContext) -> None:
 
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
+    ctx.app['energy'] = TimeWindow(window_ns=60 * _NS_PER_S, data_clock=True)
 
-    # per-node energy buffer for peak detection (use peak_window so we see
-    # enough history for the vehicle to pass multiple nodes)
-    ctx.app['energy'] = TimeWindow(window_ns=ctx.app['peak_window_ns'], data_clock=True)
-
-    # tracking state
-    ctx.app['speed'] = 0.0
-    ctx.app['ref_arc'] = 0.0
+    # start at beginning of road (arc=0 for direction=+1, arc=total for direction=-1)
+    road: Road = ctx.app['road']
+    ctx.app['ref_arc'] = 0.0 if ctx.app['direction'] == 1 else road[-1][2]
     ctx.app['ref_time_ns'] = 0
-    ctx.app['tracking'] = False
 
 
 @app.schedule(5.0)
@@ -399,15 +175,9 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
     node_mapping: dict[str, str] = ctx.app['node_mapping']
     canonical = node_mapping.get(host, host)
 
-    node_arcs: dict[str, float] = ctx.app['node_arcs']
-    if canonical not in node_arcs:
-        return
-
     energy_win: TimeWindow = ctx.app['energy']
     energy_win.add(canonical, ts_ns, energy)
-    threshold: float = ctx.app['peak_threshold']
-    above = '+' if energy > threshold else '-'
-    logger.debug('energy: %s=%10.0f  thresh=%10.0f  [%s]', canonical, energy, threshold, above)
+    logger.debug('energy: %s=%.0f', canonical, energy)
 
 
 @app.subscribe('**/vehicle')
@@ -438,45 +208,19 @@ def estimate(ctx: AciesContext) -> None:
     road: Road = ctx.app['road']
     total = road[-1][2]
     is_loop: bool = ctx.app['is_loop']
-    node_arcs: dict[str, float] = ctx.app['node_arcs']
 
-    # --- detect active nodes, merge, and fit ---
-    threshold: float = ctx.app['peak_threshold']
-    active = _detect_active_nodes(energy_win, node_arcs, threshold)
-    merged = _merge_adjacent(active)
-    min_peaks: int = ctx.app['min_peaks']
+    # set reference time on first data
+    if ctx.app['ref_time_ns'] == 0:
+        ctx.app['ref_time_ns'] = now_ns
 
-    if merged:
-        seq = ' -> '.join(f'{node}@{ts / _NS_PER_S:.1f}' for ts, node, _arc in merged)
-        distinct = len({p[1] for p in merged})
-        logger.info('sequence (%d from %d nodes): %s', len(merged), distinct, seq)
-
-    if len(merged) >= min_peaks:
-        result = _fit_velocity(merged)
-        if result is not None:
-            speed, pos, ref_ts = result
-            ctx.app['speed'] = speed
-            ctx.app['ref_arc'] = _wrap_arc(pos, total, is_loop)
-            ctx.app['ref_time_ns'] = ref_ts
-            ctx.app['tracking'] = True
-            logger.info(
-                'fit: speed=%.1f m/s pos=%.1f m (%d entries from %d nodes)',
-                speed, ctx.app['ref_arc'], len(merged), distinct,
-            )
-        else:
-            logger.info('fit failed (%d entries from %d nodes)', len(merged), distinct)
-
-    if not ctx.app['tracking']:
-        return
-
-    # --- extrapolate position ---
-    speed: float = ctx.app['speed']
+    speed: float = ctx.app['speed'] * ctx.app['direction']
     ref_arc: Metres = ctx.app['ref_arc']
     ref_time_ns: int = ctx.app['ref_time_ns']
 
     dt = (now_ns - ref_time_ns) / _NS_PER_S
     arc = ref_arc + speed * dt
 
+    # bounce on open roads
     if not is_loop:
         while True:
             if arc < 0:
@@ -487,7 +231,6 @@ def estimate(ctx: AciesContext) -> None:
                 speed = -speed
             else:
                 break
-        ctx.app['speed'] = speed
 
     arc = _wrap_arc(arc, total, is_loop)
 
