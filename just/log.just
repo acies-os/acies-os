@@ -7,7 +7,7 @@ replay:
     multitail $(find . \( -name geo.log -o -name mic.log -o -name gps.log \) | sort)
 
 # Show mic and geo energy of the given node based on gateway log.
-gateway-energy +node:
+gateway-energy +nodes:
     #!/usr/bin/env bash
     set -euo pipefail
 
