@@ -198,43 +198,43 @@ def _arc_to_latlon(road: Road, arc: Metres) -> tuple[float, float]:
 # --- per-node peak detection ---
 
 
-def _detect_peaks(
-    energy_win: TimeWindow, node_arcs: dict[str, float], threshold_mult: float = 2.0
+def _detect_active_nodes(
+    energy_win: TimeWindow, node_arcs: dict[str, float], threshold: float
 ) -> list[tuple[int, str, Metres]]:
-    """Detect significant energy peaks independently per node.
+    """Find all energy readings above threshold, sorted by time.
 
-    For each node, compute the median energy over the window as a
-    baseline. A local maximum is only counted as a peak if it exceeds
-    ``threshold_mult`` times the median — this filters out noise
-    fluctuations and only detects the energy surge from a passing vehicle.
-
-    Args:
-        energy_win: per-node energy history.
-        node_arcs: mapping of node name to arc position on road.
-        threshold_mult: a local max must exceed median * threshold_mult
-            to be considered a peak.
-
-    Returns a list of (timestamp_ns, node_name, arc_m) sorted by time.
+    Returns a list of (timestamp_ns, node_name, arc_m).
     """
-    peaks: list[tuple[int, str, Metres]] = []
+    active: list[tuple[int, str, Metres]] = []
     for node, arc in node_arcs.items():
-        entries = energy_win.get(node)  # [(ts, energy), ...] sorted by ts
-        if len(entries) < 3:
-            continue
+        for ts, energy in energy_win.get(node):
+            if energy > threshold:
+                active.append((ts, node, arc))
+    active.sort()
+    return active
 
-        # compute median energy as baseline
-        energies = sorted(e for _, e in entries)
-        median = energies[len(energies) // 2]
-        threshold = median * threshold_mult
 
-        for i in range(1, len(entries) - 1):
-            prev_e = entries[i - 1][1]
-            curr_ts, curr_e = entries[i]
-            next_e = entries[i + 1][1]
-            if curr_e > prev_e and curr_e > next_e and curr_e > threshold:
-                peaks.append((curr_ts, node, arc))
-    peaks.sort()
-    return peaks
+def _merge_adjacent(active: list[tuple[int, str, Metres]]) -> list[tuple[int, str, Metres]]:
+    """Merge consecutive entries from the same node into one.
+
+    Keeps the entry with the midpoint timestamp from each run.
+    e.g. [rs1, rs1, rs3, rs3, rs5] -> [rs1, rs3, rs5]
+    """
+    if not active:
+        return []
+
+    merged: list[tuple[int, str, Metres]] = []
+    run_start = 0
+    for i in range(1, len(active)):
+        if active[i][1] != active[run_start][1]:
+            # end of run — pick the midpoint entry
+            mid = (run_start + i - 1) // 2
+            merged.append(active[mid])
+            run_start = i
+    # last run
+    mid = (run_start + len(active) - 1) // 2
+    merged.append(active[mid])
+    return merged
 
 
 # --- linear fit ---
@@ -276,32 +276,28 @@ def _fit_line(points: list[tuple[float, float]]) -> tuple[float, float, float] |
 
 
 def _fit_velocity(
-    peaks: list[tuple[int, str, Metres]],
+    merged: list[tuple[int, str, Metres]],
 ) -> tuple[float, Metres, int] | None:
-    """Fit speed and position from per-node peak events.
+    """Fit speed and position from merged peak sequence.
 
-    Fits t = slope * arc + intercept in both directions and picks the
-    one with the lower residual.
+    Fits t = slope * arc + intercept. The sign of slope gives direction.
 
     Args:
-        peaks: list of (timestamp_ns, node_name, arc_m) sorted by time.
+        merged: list of (timestamp_ns, node_name, arc_m) sorted by time,
+            with adjacent duplicates already merged.
 
     Returns (speed_m_s, position_at_latest_peak, ref_time_ns) or None.
     """
-    if len(peaks) < 2:
+    if len(merged) < 2:
         return None
 
-    # use only the latest peak per node (the most relevant observation)
-    latest_per_node: dict[str, tuple[int, Metres]] = {}
-    for ts_ns, node, arc in peaks:
-        latest_per_node[node] = (ts_ns, arc)
+    # need at least 2 distinct nodes
+    distinct_nodes = {node for _, node, _ in merged}
+    if len(distinct_nodes) < 2:
+        return None
 
-    if len(latest_per_node) < 2:
-        return None  # need peaks from at least 2 distinct nodes
-
-    # build (arc, time_s) points for regression
-    t0 = min(ts for ts, _ in latest_per_node.values())
-    points = [(arc, (ts - t0) / _NS_PER_S) for ts, arc in latest_per_node.values()]
+    t0 = merged[0][0]
+    points = [(arc, (ts - t0) / _NS_PER_S) for ts, _, arc in merged]
 
     result = _fit_line(points)
     if result is None:
@@ -311,9 +307,8 @@ def _fit_velocity(
     if abs(slope) < 1e-12:
         return None
 
-    speed = 1.0 / slope  # m/s, sign = direction
-    # position at latest peak time
-    latest_ts = max(ts for ts, _ in latest_per_node.values())
+    speed = 1.0 / slope
+    latest_ts = merged[-1][0]
     latest_t_s = (latest_ts - t0) / _NS_PER_S
     pos = speed * (latest_t_s - intercept)
 
@@ -351,9 +346,13 @@ def _reload_config(ctx: AciesContext) -> None:
     ctx.app['min_peaks'] = tracker_cfg.get('min_peaks', 3)
     peak_window = tracker_cfg.get('peak_window', 60)
     ctx.app['peak_window_ns'] = int(peak_window * _NS_PER_S)
+    ctx.app['peak_threshold'] = tracker_cfg.get('peak_threshold', 100000)
 
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
-    logger.info('tracker min_peaks=%d peak_window=%ds', ctx.app['min_peaks'], peak_window)
+    logger.info(
+        'tracker min_peaks=%d peak_window=%ds peak_threshold=%.0f',
+        ctx.app['min_peaks'], peak_window, ctx.app['peak_threshold'],
+    )
 
 
 # --- app ---
@@ -406,7 +405,9 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
 
     energy_win: TimeWindow = ctx.app['energy']
     energy_win.add(canonical, ts_ns, energy)
-    # logger.debug('energy: %s=%.0f', canonical, energy)
+    threshold: float = ctx.app['peak_threshold']
+    above = '+' if energy > threshold else '-'
+    logger.debug('energy: %s=%10.0f  thresh=%10.0f  [%s]', canonical, energy, threshold, above)
 
 
 @app.subscribe('**/vehicle')
@@ -439,17 +440,19 @@ def estimate(ctx: AciesContext) -> None:
     is_loop: bool = ctx.app['is_loop']
     node_arcs: dict[str, float] = ctx.app['node_arcs']
 
-    # --- detect peaks from energy buffer and attempt fit ---
-    peaks = _detect_peaks(energy_win, node_arcs)
+    # --- detect active nodes, merge, and fit ---
+    threshold: float = ctx.app['peak_threshold']
+    active = _detect_active_nodes(energy_win, node_arcs, threshold)
+    merged = _merge_adjacent(active)
     min_peaks: int = ctx.app['min_peaks']
 
-    if peaks:
-        peak_order = ' -> '.join(f'{node}@{ts / _NS_PER_S:.1f}' for ts, node, _arc in peaks)
-        distinct = len({p[1] for p in peaks})
-        logger.info('peaks (%d from %d nodes): %s', len(peaks), distinct, peak_order)
+    if merged:
+        seq = ' -> '.join(f'{node}@{ts / _NS_PER_S:.1f}' for ts, node, _arc in merged)
+        distinct = len({p[1] for p in merged})
+        logger.info('sequence (%d from %d nodes): %s', len(merged), distinct, seq)
 
-    if len(peaks) >= min_peaks:
-        result = _fit_velocity(peaks)
+    if len(merged) >= min_peaks:
+        result = _fit_velocity(merged)
         if result is not None:
             speed, pos, ref_ts = result
             ctx.app['speed'] = speed
@@ -457,14 +460,11 @@ def estimate(ctx: AciesContext) -> None:
             ctx.app['ref_time_ns'] = ref_ts
             ctx.app['tracking'] = True
             logger.info(
-                'fit: speed=%.1f m/s pos=%.1f m (%d peaks from %d nodes)',
-                speed,
-                ctx.app['ref_arc'],
-                len(peaks),
-                distinct,
+                'fit: speed=%.1f m/s pos=%.1f m (%d entries from %d nodes)',
+                speed, ctx.app['ref_arc'], len(merged), distinct,
             )
         else:
-            logger.info('fit failed (%d peaks from %d nodes)', len(peaks), distinct)
+            logger.info('fit failed (%d entries from %d nodes)', len(merged), distinct)
 
     if not ctx.app['tracking']:
         return
