@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "acies-core"
-version = "0.4.0"
+version = "0.3.0"
 description = "Core library for the Acies project"
 authors = [ { name = "Jinyang Li", email = "jinyang7@illinois.edu" } ]
 requires-python = ">=3.10"
