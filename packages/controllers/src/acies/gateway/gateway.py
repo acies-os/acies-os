@@ -91,7 +91,7 @@ if os.getenv('ACIES_GATEWAY_DEBUG'):
         p95 = float(np.percentile(values, 95)) if values.size > 0 else energy
         normalized = min(energy / p95, 1.0) if p95 > 0 else 0.0
 
-        ctx.publish('ws://energy', {'source': source, 'timestamp': msg['timestamp'], 'energy': normalized})
+        ctx.publish('ws://energy', {'source': source, 'timestamp': msg['timestamp'], 'energy': energy})
         logger.debug('energy from %s: %.2f (p95=%.2f normalized=%.3f)', source, energy, p95, normalized)
 
     @app.schedule(10)
