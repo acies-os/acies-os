@@ -1,10 +1,11 @@
 # Edge infrastructure: zenohd (router) + gateway + UI.
 # Used in all scenarios. GPS is optional via profiles.
 #
-# Profiles (mutually exclusive):
-#   (none)   No GPS -- zenohd + gateway + UI only
-#   replay   GPS replay from parquet (lab scenarios)
-#   live     Live GPS bridge over MQTT (field scenarios)
+# Profiles (combinable):
+#   (none)    No GPS -- zenohd + gateway + UI only
+#   replay    GPS replay from parquet (lab scenarios)
+#   live      Live GPS bridge over MQTT (field scenarios)
+#   tracker   Vehicle position tracker from energy readings
 #
 # Usage:
 #   ACIES_NAMESPACE=$(hostname -s) docker compose -f edge.yml [--profile replay|live] up
@@ -81,6 +82,22 @@ services:
     volumes:
       - ${DATA_DIR:-/data}:/data:ro
       - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  tracker:
+    image: acies-server:latest
+    profiles: [tracker]
+    command: acies-tracker --config /config/${ACIES_CONFIG:-ict.toml}
+    network_mode: host
+    environment:
+      - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}/infra
+      - ACIES_NAME=tracker
+      - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+    volumes:
+      - ~/.acies:/root/.acies
+      - ../packages/controllers/data:/config:ro
     restart: unless-stopped
 
   mqtt-gps:
