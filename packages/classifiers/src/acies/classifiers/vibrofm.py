@@ -35,7 +35,6 @@ import click
 import numpy as np
 import numpy.typing as npt
 import torch
-
 from acies.buffers import TemporalBuffer
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries

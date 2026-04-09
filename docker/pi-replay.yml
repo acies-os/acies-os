@@ -67,6 +67,7 @@ services:
       --weight /model/${VFM_WEIGHT}
       --geo ${ACIES_NAMESPACE:-}/geo
       --mic ${ACIES_NAMESPACE:-}/mic
+      --labels ${VFM_LABELS}
     network_mode: host
     environment:
       <<: *env
