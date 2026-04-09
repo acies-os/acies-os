@@ -2,6 +2,10 @@
 default:
     @just -f {{ justfile() }} --list
 
+install node:
+    ssh {{ node }} 'sudo sh -lc "apt-get update || true; apt-get install -y multitail"'
+    scp ~/.multitailrc {{ node }}:~/.multitailrc
+
 # Show all sensor logs for a replay.
 replay:
     multitail $(find . \( -name geo.log -o -name mic.log -o -name gps.log \) | sort)
