@@ -66,6 +66,17 @@ edge-up-nodes *args:
 edge-down-all:
     docker compose -p edge-replay down
 
+# Stop all containers for an edge replay and clear all images.
+edge-clear:
+    just edge-down-all
+    docker image prune -f
+
+# Pull the latest code and rebuild the server image.
+edge-rebuild:
+    -git pull
+    just build-server
+    just edge-clear
+
 # Upload a file to /model/ on all PI_HOSTS.
 [no-cd]
 upload-model file:
