@@ -45,7 +45,7 @@ pi-zenohd *args:
 
 # Run acies-mic in the Pi image.
 pi-mic *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
@@ -62,7 +62,7 @@ pi-mic *args:
 
 # Run acies-geo in the Pi image.
 pi-geo *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
@@ -81,7 +81,7 @@ pi-geo *args:
 
 # Run acies-vfm in the Pi image.
 pi-vfm *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
@@ -97,7 +97,7 @@ pi-vfm *args:
 
 # Run acies-vfm locally (no Docker).
 pi-vfm-local *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     ACIES_LOG={{ acies_log }} \
     uv run acies-vfm --acies-namespace {{ acies_namespace }} --acies-name vfm \
         --acies-connect {{ pi_zenoh_connect }} \
@@ -108,7 +108,7 @@ pi-vfm-local *args:
 
 # Replay sensor data locally.
 pi-replay-local *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     ACIES_LOG={{ acies_log }} \
     uv run acies-replay --acies-namespace {{ acies_namespace }} \
         --acies-connect {{ pi_zenoh_connect }} {{ args }}

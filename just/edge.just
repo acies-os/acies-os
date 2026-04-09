@@ -20,7 +20,7 @@ edge-zenohd *args:
 
 # Run acies-gateway in the server image.
 edge-gateway *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     -@docker run --rm -it \
         --detach-keys="ctrl-z,z" \
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
@@ -33,7 +33,7 @@ edge-gateway *args:
 
 # Run acies-gateway directly (no Docker).
 edge-gateway-local *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     ACIES_LOG={{ acies_log }} \
     ACIES_NAMESPACE={{ acies_namespace }}/infra \
     ACIES_NAME=gateway \
@@ -41,7 +41,7 @@ edge-gateway-local *args:
 
 # Replay GPS data locally.
 edge-replay-gps-local *args:
-    @mkdir -p ~/.acies/logs ~/.acies/run
+    @mkdir -p ~/.acies/logs
     ACIES_LOG={{ acies_log }} \
     uv run acies-gps --acies-namespace {{ acies_namespace }}/infra --acies-name gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
