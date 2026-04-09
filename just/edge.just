@@ -47,7 +47,7 @@ edge-tracker-local *args:
     ACIES_NAME=tracker \
     uv run acies-tracker \
     --acies-connect {{ edge_zenoh_connect }} \
-    --config packages/controllers/data/itc.toml
+    --config packages/controllers/data/ict.toml
     {{ args }}
 
 # Replay GPS data locally.
