@@ -210,7 +210,7 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
             ),
         )
 
-        energy = {'mono': float(np.std(samples_1s, dtype=np.float64))}
+        energy = {'mono': float(np.sum(np.square(samples_1s, dtype=np.float64)))}
         ctx.publish(ctx.ns.topic('energy'), {'source': ctx.ns.base, 'timestamp': window_ts_ns, 'energy': energy})
 
         # log latency
