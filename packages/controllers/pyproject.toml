@@ -26,6 +26,7 @@ dependencies = [
 # scripts.acies-twinctl = "acies.twin.twinctl:main"
 scripts.acies-gateway = "acies.gateway.gateway:main"
 scripts.acies-mqtt = "acies.gateway.mqtt:main"
+scripts.acies-tracker = "acies.controller.tracker:main"
 
 [tool.hatch]
 build.targets.wheel.packages = [ "src/acies" ]

@@ -101,13 +101,13 @@ dependencies = [
 requires-dist = [
     { name = "acies-buffers", editable = "packages/buffers" },
     { name = "acies-core", editable = "packages/core" },
-    { name = "paho-mqtt", specifier = ">=2.1.0" },
+    { name = "paho-mqtt", specifier = ">=2.1" },
     { name = "tomli", specifier = ">=2.4" },
 ]
 
 [[package]]
 name = "acies-core"
-version = "0.4.0"
+version = "0.3.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "click", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -135,7 +135,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.1" },
     { name = "eclipse-zenoh", specifier = ">=1.8,<2" },
     { name = "msgspec", specifier = ">=0.20" },
-    { name = "websockets", specifier = ">=16.0" },
+    { name = "websockets", specifier = ">=16" },
 ]
 
 [package.metadata.requires-dev]

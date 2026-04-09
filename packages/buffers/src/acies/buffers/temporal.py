@@ -87,6 +87,11 @@ class TimeWindow:
     _latest_ts: Timestamp = field(default=0, repr=False)
     _now_fn: Callable[[], Timestamp] | None = field(default=None, repr=False)
 
+    @property
+    def latest_ts(self) -> Timestamp:
+        """The latest timestamp seen by the buffer."""
+        return self._latest_ts
+
     def _now(self) -> Timestamp:
         if self._now_fn is not None:
             return self._now_fn()
