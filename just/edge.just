@@ -45,6 +45,7 @@ edge-tracker-local *args:
     ACIES_LOG={{ acies_log }} \
     ACIES_NAMESPACE={{ acies_namespace }}/infra \
     ACIES_NAME=tracker \
+    ACIES_LISTENER= \
     uv run acies-tracker \
     --acies-connect {{ edge_zenoh_connect }} \
     --config packages/controllers/data/ict.toml
