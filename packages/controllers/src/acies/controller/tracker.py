@@ -390,6 +390,7 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
 
     energy_win: TimeWindow = ctx.app['energy']
     energy_win.add(canonical, ts_ns, energy)
+    logger.debug('energy: %s=%.0f', canonical, energy)
 
 
 @app.subscribe('**/vehicle')
@@ -426,6 +427,11 @@ def estimate(ctx: AciesContext) -> None:
     peaks = _detect_peaks(energy_win, node_arcs)
     min_peaks: int = ctx.app['min_peaks']
 
+    if peaks:
+        peak_order = ' -> '.join(f'{node}@{ts / _NS_PER_S:.1f}' for ts, node, _arc in peaks)
+        distinct = len({p[1] for p in peaks})
+        logger.info('peaks (%d from %d nodes): %s', len(peaks), distinct, peak_order)
+
     if len(peaks) >= min_peaks:
         result = _fit_velocity(peaks)
         if result is not None:
@@ -434,13 +440,12 @@ def estimate(ctx: AciesContext) -> None:
             ctx.app['ref_arc'] = _wrap_arc(pos, total, is_loop)
             ctx.app['ref_time_ns'] = ref_ts
             ctx.app['tracking'] = True
-            logger.debug(
+            logger.info(
                 'fit: speed=%.1f m/s pos=%.1f m (%d peaks from %d nodes)',
-                speed,
-                ctx.app['ref_arc'],
-                len(peaks),
-                len({p[1] for p in peaks}),
+                speed, ctx.app['ref_arc'], len(peaks), distinct,
             )
+        else:
+            logger.info('fit failed (%d peaks from %d nodes)', len(peaks), distinct)
 
     if not ctx.app['tracking']:
         return
