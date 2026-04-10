@@ -1,19 +1,20 @@
 """Vehicle position tracker for AciesOS.
 
-Simplified tracker: starts at the beginning of the road, moves at a
-constant configured speed in a configured direction. Subscribes to
-energy and vehicle topics for future refinement but currently does
-not use them for position estimation.
+Uses a particle filter with a constant-velocity motion model to
+estimate the vehicle's position and speed along a road.
 
 The road is modelled as a polyline projected into 1-D arc-length.
-Position is extrapolated at 1 Hz. On open roads the vehicle bounces
-at the endpoints; on loops it wraps around.
+Each sensor node has a known arc position. The measurement model
+uses relative log-energy ratios: closer sensors see higher energy.
+A log-distance attenuation model relates particle-to-sensor arc
+distance to expected relative energy.
 
 Inputs:
-    **/energy           energy dict from sensor nodes (logged for tuning)
+    **/energy           energy dict from sensor nodes
     **/vehicle          classifier predictions (for vehicle label)
     config [road]       road polyline coordinates
-    config [tracker]    speed, direction
+    config [gps]        sensor node GPS coordinates
+    config [tracker]    particle filter parameters
 
 Output:
     ctx.ns.topic('gps') position dict matching gps.py format
@@ -30,13 +31,17 @@ import logging
 import math
 import os
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
 import click
+import numpy as np
+import numpy.typing as npt
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange
+from numpy.random import Generator
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +59,149 @@ RoadPoint: TypeAlias = tuple[float, float, Metres]
 
 Road: TypeAlias = list[RoadPoint]
 """Road polyline as a sequence of RoadPoints."""
+
+
+# --- particle filter ---
+
+
+def systematic_resample(weights: npt.NDArray[np.float64], rng: Generator | None = None) -> npt.NDArray[np.intp]:
+    """Systematic resampling. Returns indices of selected particles."""
+    if rng is None:
+        rng = np.random.default_rng()
+    n = len(weights)
+    positions = (rng.random() + np.arange(n)) / n
+    cumsum = np.cumsum(weights)
+    return np.searchsorted(cumsum, positions)
+
+
+@dataclass
+class RoadParticleFilter:
+    """Particle filter for 1-D road tracking.
+
+    State per particle: (s, v) where s is arc position in metres
+    and v is speed in m/s (signed: positive = increasing arc).
+
+    Measurement model uses relative log-energy ratios between sensors.
+    Sensor 0 (first in sorted order) is the reference. For each other
+    sensor i:
+        expected = -eta * log((|s - a_i| + d0) / (|s - a_0| + d0))
+        observed = log(E_i) - log(E_0)
+    """
+
+    n_particles: int
+    dt: float  # seconds between predict steps
+    sigma_s: float  # position process noise std (metres)
+    sigma_v: float  # velocity process noise std (m/s)
+    road_length: float
+    sensor_arcs: npt.NDArray[np.float64]  # shape (M,) — arc positions of sensors
+    eta: float = 1.0  # attenuation exponent in log-distance model
+    d0: float = 1.0  # distance floor to avoid log(0)
+    meas_sigma: float = 1.0  # measurement noise std in relative log-energy space
+    is_loop: bool = False
+    v_min: float = -30.0
+    v_max: float = 30.0
+
+    # --- particle state (initialized in __post_init__) ---
+    s: npt.NDArray[np.float64] = field(init=False)
+    v: npt.NDArray[np.float64] = field(init=False)
+    w: npt.NDArray[np.float64] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.sensor_arcs = np.asarray(self.sensor_arcs, dtype=np.float64)
+        self.s = np.zeros(self.n_particles, dtype=np.float64)
+        self.v = np.zeros(self.n_particles, dtype=np.float64)
+        self.w = np.ones(self.n_particles, dtype=np.float64) / self.n_particles
+
+    # --- arc distance ---
+
+    def _arc_dist(self, s: npt.NDArray[np.float64], a: float) -> npt.NDArray[np.float64]:
+        """Absolute arc distance from particles to a sensor, handling loops."""
+        d = np.abs(s - a)
+        if self.is_loop:
+            d = np.minimum(d, self.road_length - d)
+        return d
+
+    # --- initialization ---
+
+    def initialize_uniform(self, rng: Generator | None = None) -> None:
+        if rng is None:
+            rng = np.random.default_rng()
+        self.s = rng.uniform(0.0, self.road_length, size=self.n_particles)
+        self.v = rng.uniform(self.v_min, self.v_max, size=self.n_particles)
+        self.w[:] = 1.0 / self.n_particles
+
+    # --- predict ---
+
+    def predict(self, rng: Generator | None = None) -> None:
+        if rng is None:
+            rng = np.random.default_rng()
+        self.v = np.clip(
+            self.v + rng.normal(0.0, self.sigma_v, size=self.n_particles),
+            self.v_min,
+            self.v_max,
+        )
+        self.s = self.s + self.v * self.dt + rng.normal(0.0, self.sigma_s, size=self.n_particles)
+        if self.is_loop:
+            self.s %= self.road_length
+        else:
+            self.s = np.clip(self.s, 0.0, self.road_length)
+
+    # --- measurement model ---
+
+    def _expected_relative_log_energy(self, s: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Expected relative log-energy for each particle.
+
+        Uses sensor 0 as reference.
+        Returns shape (N, M-1).
+        """
+        # distance from each particle to each sensor: (N, M)
+        dists = np.column_stack([self._arc_dist(s, a) for a in self.sensor_arcs])
+        ref = dists[:, 0:1]  # (N, 1)
+        return -self.eta * np.log((dists[:, 1:] + self.d0) / (ref + self.d0))
+
+    @staticmethod
+    def _observed_relative_log_energy(
+        raw_energy: npt.NDArray[np.float64], eps: float = 1e-12
+    ) -> npt.NDArray[np.float64]:
+        """Convert raw sensor energies (M,) to relative log-energy (M-1,)."""
+        loge = np.log(raw_energy + eps)
+        return loge[1:] - loge[0]
+
+    # --- update ---
+
+    def update(self, raw_energy: npt.NDArray[np.float64]) -> None:
+        """Update weights using measured raw energies from all sensors."""
+        z = self._observed_relative_log_energy(raw_energy)  # (M-1,)
+        z_hat = self._expected_relative_log_energy(self.s)  # (N, M-1)
+        residual = z_hat - z[None, :]  # (N, M-1)
+
+        # Gaussian log-likelihood
+        ll = -0.5 * np.sum((residual / self.meas_sigma) ** 2, axis=1)
+        ll -= np.max(ll)  # numerical stability
+        w_new = np.exp(ll)
+
+        self.w *= w_new
+        self.w += 1e-300
+        self.w /= np.sum(self.w)
+
+    # --- resampling ---
+
+    def effective_sample_size(self) -> float:
+        return float(1.0 / np.sum(self.w**2))
+
+    def resample_if_needed(self, threshold_ratio: float = 0.5, rng: Generator | None = None) -> None:
+        if self.effective_sample_size() < threshold_ratio * self.n_particles:
+            idx = systematic_resample(self.w, rng=rng)
+            self.s = self.s[idx]
+            self.v = self.v[idx]
+            self.w[:] = 1.0 / self.n_particles
+
+    # --- estimation ---
+
+    def estimate(self) -> tuple[float, float]:
+        """Weighted mean estimate of (arc_position, speed)."""
+        return float(np.sum(self.w * self.s)), float(np.sum(self.w * self.v))
+
 
 # --- geometry helpers ---
 
@@ -85,6 +233,48 @@ def _build_road(coords: list[list[float]]) -> Road:
     return road
 
 
+def _project_onto_segment(
+    lat: float, lon: float, lat1: float, lon1: float, lat2: float, lon2: float, arc1: Metres, arc2: Metres
+) -> tuple[Metres, Metres]:
+    """Project a point onto a single road segment.
+
+    Args:
+        lat, lon: point to project.
+        lat1, lon1: segment start point.
+        lat2, lon2: segment end point.
+        arc1: cumulative road distance at segment start.
+        arc2: cumulative road distance at segment end.
+
+    Returns (arc_length, perpendicular_distance_m).
+    """
+    seg_len = arc2 - arc1
+    if seg_len == 0:
+        return arc1, _haversine(lat, lon, lat1, lon1)
+
+    dx = (lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
+    dy = lat2 - lat1
+    px = (lon - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
+    py = lat - lat1
+    t = max(0.0, min(1.0, (px * dx + py * dy) / (dx * dx + dy * dy)))
+
+    proj_lat = lat1 + t * (lat2 - lat1)
+    proj_lon = lon1 + t * (lon2 - lon1)
+    return arc1 + t * seg_len, _haversine(lat, lon, proj_lat, proj_lon)
+
+
+def _project_onto_road(road: Road, lat: float, lon: float) -> Metres:
+    """Project a lat/lon point onto the road polyline. Returns arc-length in metres."""
+    candidates: list[tuple[Metres, Metres]] = []
+    for i in range(len(road) - 1):
+        lat1, lon1, arc1 = road[i]
+        lat2, lon2, arc2 = road[i + 1]
+        arc, dist = _project_onto_segment(lat, lon, lat1, lon1, lat2, lon2, arc1, arc2)
+        candidates.append((arc, dist))
+    if not candidates:
+        return 0.0
+    return min(candidates, key=lambda c: c[1])[0]
+
+
 def _wrap_arc(arc: Metres, total: Metres, is_loop: bool) -> Metres:
     """Clamp arc to [0, total] or wrap around for loops."""
     if is_loop:
@@ -114,6 +304,34 @@ def _arc_to_latlon(road: Road, arc: Metres) -> tuple[float, float]:
 # --- config ---
 
 
+def _build_particle_filter(ctx: AciesContext) -> RoadParticleFilter:
+    """Create and initialize a particle filter from current app state."""
+    road: Road = ctx.app['road']
+    is_loop: bool = ctx.app['is_loop']
+    sensor_order: list[str] = ctx.app['sensor_order']
+    node_arcs: dict[str, Metres] = ctx.app['node_arcs']
+    tracker_cfg: dict[str, Any] = ctx.app['tracker_cfg']
+
+    sensor_arcs = np.array([node_arcs[s] for s in sensor_order], dtype=np.float64)
+
+    pf = RoadParticleFilter(
+        n_particles=tracker_cfg.get('n_particles', 500),
+        dt=1.0,  # predict step matches schedule interval
+        sigma_s=tracker_cfg.get('sigma_s', 2.0),
+        sigma_v=tracker_cfg.get('sigma_v', 1.0),
+        road_length=road[-1][2],
+        sensor_arcs=sensor_arcs,
+        eta=tracker_cfg.get('eta', 1.0),
+        d0=tracker_cfg.get('d0', 5.0),
+        meas_sigma=tracker_cfg.get('meas_sigma', 1.0),
+        is_loop=is_loop,
+        v_min=tracker_cfg.get('v_min', -30.0),
+        v_max=tracker_cfg.get('v_max', 30.0),
+    )
+    pf.initialize_uniform(rng=ctx.app['rng'])
+    return pf
+
+
 def _reload_config(ctx: AciesContext) -> None:
     """Read the toml config and update app state derived from it."""
     with open(ctx.cfg['config_path'], 'rb') as f:
@@ -127,12 +345,21 @@ def _reload_config(ctx: AciesContext) -> None:
 
     ctx.app['node_mapping'] = config.get('map_node_mapping', {})
 
-    tracker_cfg: dict[str, Any] = config.get('tracker', {})
-    ctx.app['speed'] = float(tracker_cfg.get('speed', 5.0))  # m/s
-    ctx.app['direction'] = int(tracker_cfg.get('direction', 1))  # +1 or -1
+    # project sensor nodes onto road
+    gps_table: dict[str, list[float]] = config.get('gps', {})
+    node_arcs: dict[str, Metres] = {}
+    for node, (lat, lon) in gps_table.items():
+        node_arcs[node] = _project_onto_road(road, lat, lon)
+        logger.info('node %s: lat=%.6f lon=%.6f -> arc=%.1f m', node, lat, lon, node_arcs[node])
+    ctx.app['node_arcs'] = node_arcs
 
+    # sorted sensor order for consistent energy vector indexing
+    ctx.app['sensor_order'] = sorted(node_arcs.keys())
+    logger.info('sensor order: %s', ctx.app['sensor_order'])
+
+    ctx.app['tracker_cfg'] = config.get('tracker', {})
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
-    logger.info('tracker speed=%.1f m/s direction=%d', ctx.app['speed'], ctx.app['direction'])
+    logger.info('tracker cfg: %s', ctx.app['tracker_cfg'])
 
 
 # --- app ---
@@ -140,6 +367,8 @@ def _reload_config(ctx: AciesContext) -> None:
 
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
+    ctx.app['rng'] = np.random.default_rng()
+
     _reload_config(ctx)
 
     ctx.cfg['start_at'] = None
@@ -148,10 +377,7 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
     ctx.app['energy'] = TimeWindow(window_ns=10 * _NS_PER_S, data_clock=True)
 
-    # start at beginning of road (arc=0 for direction=+1, arc=total for direction=-1)
-    road: Road = ctx.app['road']
-    ctx.app['ref_arc'] = 0.0 if ctx.app['direction'] == 1 else road[-1][2]
-    ctx.app['ref_time_ns'] = 0
+    ctx.app['pf'] = _build_particle_filter(ctx)
 
 
 @app.schedule(5.0)
@@ -164,6 +390,7 @@ def check_config(ctx: AciesContext) -> None:
     if mtime != ctx.app['config_mtime']:
         logger.info('config file changed on disk; reloading %s', ctx.cfg['config_path'])
         _reload_config(ctx)
+        ctx.app['pf'] = _build_particle_filter(ctx)
 
 
 @app.subscribe('**/energy')
@@ -176,22 +403,20 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
     host, _, rest = source.partition('/')
     node_mapping: dict[str, str] = ctx.app['node_mapping']
     canonical = node_mapping.get(host, host)
-    cannoical_topic = f'{canonical}/{rest}'
+    canonical_topic = f'{canonical}/{rest}'
 
     energy_win: TimeWindow = ctx.app['energy']
-    energy_win.add(cannoical_topic, ts_ns, energy)
-    # logger.debug('energy: %8s=%4.0f', cannoical_topic, energy)
+    energy_win.add(canonical_topic, ts_ns, energy)
+    # logger.debug('energy: %8s=%4.0f', canonical_topic, energy)
 
 
 @app.subscribe(OnChange('start_at'))
 def on_start_at(ctx: AciesContext, msg: AciesKvChange) -> None:
     logger.info('start_at changed to %s; resetting tracker state', msg.value)
-    road: Road = ctx.app['road']
     ctx.app['energy'] = TimeWindow(window_ns=10 * _NS_PER_S, data_clock=True)
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
-    ctx.app['ref_arc'] = 0.0 if ctx.app['direction'] == 1 else road[-1][2]
-    ctx.app['ref_time_ns'] = 0
+    ctx.app['pf'] = _build_particle_filter(ctx)
 
 
 @app.subscribe('**/vehicle')
@@ -212,6 +437,30 @@ def _ensemble_label(pred_win: TimeWindow) -> str | None:
     return max(scores, key=lambda k: sum(scores[k]) / len(scores[k]))
 
 
+def _get_energy_vector(energy_win: TimeWindow, sensor_order: list[str]) -> npt.NDArray[np.float64] | None:
+    """Build an energy vector aligned with sensor_order from the latest readings.
+
+    For each sensor, looks for any modality topic (geo or mic) and takes the
+    max energy across modalities. Returns None if any sensor has no data.
+    """
+    energies: list[float] = []
+    for sensor in sensor_order:
+        # find all topics for this sensor (e.g. rs1/geo, rs1/mic)
+        best = 0.0
+        found = False
+        for key in energy_win.keys():
+            if key.startswith(sensor + '/'):
+                entry = energy_win.latest(key)
+                if entry is not None:
+                    _, e = entry
+                    best = max(best, e)
+                    found = True
+        if not found:
+            return None
+        energies.append(best)
+    return np.array(energies, dtype=np.float64)
+
+
 @app.schedule(1.0)
 def estimate(ctx: AciesContext) -> None:
     energy_win: TimeWindow = ctx.app['energy']
@@ -219,45 +468,45 @@ def estimate(ctx: AciesContext) -> None:
     if now_ns == 0:
         return
 
-    # energy_win: TimeWindow = ctx.app['energy']
     logger.debug('>>>> t=%s', int(energy_win.latest_ts / _NS_PER_S))
     logger.debug('>>>> %s', energy_win.keys())
     for k in sorted(energy_win.keys()):
         logger.debug('>>>> %8s: %s', k, ' '.join([f'{x[1]:7.2f}' for x in energy_win.get(k)]))
 
     road: Road = ctx.app['road']
-    total = road[-1][2]
-    is_loop: bool = ctx.app['is_loop']
+    pf: RoadParticleFilter = ctx.app['pf']
+    rng: Generator = ctx.app['rng']
+    sensor_order: list[str] = ctx.app['sensor_order']
 
-    # set reference time on first data
-    if ctx.app['ref_time_ns'] == 0:
-        ctx.app['ref_time_ns'] = now_ns
+    # --- predict ---
+    pf.predict(rng=rng)
 
-    speed: float = ctx.app['speed'] * ctx.app['direction']
-    ref_arc: Metres = ctx.app['ref_arc']
-    ref_time_ns: int = ctx.app['ref_time_ns']
+    # --- update (if we have energy from all sensors) ---
+    energy_vec = _get_energy_vector(energy_win, sensor_order)
+    if energy_vec is not None:
+        pf.update(energy_vec)
+        pf.resample_if_needed(rng=rng)
+        logger.debug(
+            'pf update: energy=[%s] ESS=%.0f',
+            ', '.join(f'{e:.1f}' for e in energy_vec),
+            pf.effective_sample_size(),
+        )
 
-    dt = (now_ns - ref_time_ns) / _NS_PER_S
-    arc = ref_arc + speed * dt
-
-    # bounce on open roads
-    if not is_loop:
-        while True:
-            if arc < 0:
-                arc = -arc
-                speed = -speed
-            elif arc > total:
-                arc = 2 * total - arc
-                speed = -speed
-            else:
-                break
-
-    arc = _wrap_arc(arc, total, is_loop)
+    # --- estimate ---
+    s_hat, v_hat = pf.estimate()
+    arc = _wrap_arc(s_hat, road[-1][2], ctx.app['is_loop'])
 
     label = _ensemble_label(ctx.app['predictions']) or 'unknown'
     lat, lon = _arc_to_latlon(road, arc)
     ctx.publish(ctx.ns.topic('gps'), {label: {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
-    logger.debug('estimate: arc=%.1f m speed=%.1f m/s lat=%.6f lon=%.6f', arc, speed, lat, lon)
+    logger.debug(
+        'estimate: arc=%.1f m speed=%.1f m/s lat=%.6f lon=%.6f ESS=%.0f',
+        arc,
+        v_hat,
+        lat,
+        lon,
+        pf.effective_sample_size(),
+    )
 
 
 @app.on_shutdown

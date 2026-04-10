@@ -11,10 +11,14 @@ rs8 = [40.2891961, -88.1261333]
 rs10 = [40.2891928, -88.1264877]
 
 [tracker]
-# constant speed in m/s
-speed = 5.0
-# direction along road: 1 = start->end, -1 = end->start
-direction = 1
+n_particles = 500
+sigma_s = 2.0     # position process noise (metres)
+sigma_v = 1.0     # velocity process noise (m/s)
+eta = 1.0         # log-distance attenuation exponent
+d0 = 5.0          # distance floor (metres) to avoid log(0)
+meas_sigma = 1.0  # measurement noise std in relative log-energy space
+v_min = -30.0     # min speed (m/s, negative = reverse)
+v_max = 30.0      # max speed (m/s)
 
 [road]
 coordinates = [
