@@ -1,0 +1,283 @@
+# Node locations
+[gps]
+# node_name = [latitude, longitude]
+rs1 = [41.35150493592693, -74.05781130039642]
+rs2 = [41.35150493592693, -74.05781130039642]
+rs3 = [41.35254302774996, -74.0561831884334]
+rs5 = [41.35254302774996, -74.0561831884334]
+rs6 = [41.35361193312915, -74.0541574237192]
+rs7 = [41.35361193312915, -74.0541574237192]
+rs8 = [41.35468718331484, -74.05264304450696]
+rs10 = [41.35468718331484, -74.05264304450696]
+
+[tracker]
+# ------------------------- particle filter parameters -------------------------
+#
+# Tuning:
+#   1. Run a replay with debug logging and watch ESS (effective sample size).
+#   2. Healthy ESS is 100-300 for 500 particles.
+#   3. Tune meas_sigma first to get ESS in that range, then fine-tune others.
+#
+#   ESS drops to ~1 quickly   -> meas_sigma too small (overconfident), increase it
+#   ESS stays near n_particles -> meas_sigma too large (ignoring data), decrease it
+#   Position estimate is jumpy -> increase n_particles or decrease sigma_s
+#   Position lags the vehicle  -> increase sigma_s and sigma_v
+#   Particles cluster at one sensor -> eta too high or d0 too small
+
+n_particles = 2000      # more = smoother but slower
+sigma_s = 2.0           # position process noise per step (metres)
+sigma_v = 1.0           # velocity process noise per step (m/s)
+eta = 2.0               # log-distance attenuation exponent (~2.0 for inverse-square)
+d0 = 5.0                # distance floor (metres) to avoid log(0), ~sensor near-field
+meas_sigma = 1.0        # measurement noise std in relative log-energy space (tune first)
+v_min = -30.0           # min speed (m/s, negative = reverse)
+v_max = 30.0            # max speed (m/s)
+modality = "mic"        # energy modality to use for tracking: "geo", "mic", or omit for max of both
+energy_threshold = 10.0 # skip pf update when max energy is below this (vehicle not detected)
+
+[road]
+coordinates = [
+  [41.35125091984173, -74.05823118880424],
+  [41.35150493592693, -74.05781130039642],
+  [41.35184923586167, -74.05736337150873],
+  [41.35196198866086, -74.0571943923475],
+  [41.35227205785169, -74.05667404381927],
+  [41.35254302774996, -74.0561831884334],
+  [41.352750871841856, -74.055736785606],
+  [41.35314110791774, -74.05513216408416],
+  [41.35347407925794, -74.0545303678355],
+  [41.35361193312915, -74.0541574237192],
+  [41.35376675328262, -74.05373079825286],    
+  [41.35419939943994, -74.05313747799445],
+  [41.35468718331484, -74.05264304450696],
+  [41.35498833502691, -74.05224184702554],
+]
+
+
+# map selected map and target to the corresponding runID path
+[routes.wp]
+suv = "2026-04-14-WP/run0"
+sedan = "2026-04-14-WP/run1"
+
+# map gq-X to rsY for GCQ
+[map_node_mapping]
+gq-1 = "rs1"
+gq-2 = "rs3"
+gq-3 = "rs8"
+gq-4 = "rs10"
+
+
+# Confidence threshold to filter multi-label output
+[confidence_threshold.vfm]
+suv = 0.85
+sedan = 0.85
+
+[ensemble]
+# ensemble temporal window size in seconds
+win = 30
+
+# minimum number of predictions required to calculate the ensemble result
+size = 3
+
+# Confidence threshold to filter ensemble output
+# meaning: number of detection in win
+[ensemble_confidence_threshold]
+suv = 4
+sedan = 4
+
+[noise_thresh]
+rs1 = { geo = 100000, mic = 3500 }
+rs2 = { geo = 100000, mic = 3500 }
+rs3 = { geo = 100000, mic = 3500 }
+rs5 = { geo = 100000, mic = 3500 }
+rs6 = { geo = 100000, mic = 3500 }
+rs7 = { geo = 100000, mic = 3500 }
+rs8 = { geo = 100000, mic = 3500 }
+rs10 = { geo = 100000, mic = 3500 }
+
+[service_types]
+geo = "(?:.*[^_]+|^)(geo).*"
+mic = "(?:.*[^_]+|^)(mic).*"
+infer = ".*((?:vfm|mae|ds)(?:_geo|_mic)*).*"
+
+[dependencies]
+vfm = ['geo', 'mic']
+vfm_mic = ["mic"]
+vfm_geo = ["geo"]
+
+
+[failover]
+
+# active services when in `healthy` state
+ok_states = [
+  [
+    "mic",
+    "geo",
+    "vfm",
+  ],
+  [
+    "mic",
+    "geo",
+    "mae",
+  ],
+  [
+    "mic",
+    "geo",
+    "ds",
+  ],
+  [
+    "mic",
+    "vfm_mic",
+  ],
+  [
+    "mic",
+    "mae_mic",
+  ],
+  [
+    "mic",
+    "ds_mic",
+  ],
+  [
+    "geo",
+    "vfm_geo",
+  ],
+  [
+    "geo",
+    "mae_geo",
+  ],
+  [
+    "geo",
+    "ds_geo",
+  ],
+]
+
+# active services when in `service failure` state
+service_failures = [
+  [
+    "mic",
+    "geo",
+    "vfm_geo",
+  ],
+  [
+    "mic",
+    "geo",
+    "mae_geo",
+  ],
+  [
+    "mic",
+    "geo",
+    "ds_geo",
+  ],
+  [
+    "mic",
+    "geo",
+    "vfm_mic",
+  ],
+  [
+    "mic",
+    "geo",
+    "mae_mic",
+  ],
+  [
+    "mic",
+    "geo",
+    "ds_mic",
+  ],
+  [
+    "mic",
+    "geo",
+  ],
+  [
+    "mic",
+    "vfm",
+  ],
+  [
+    "mic",
+    "mae",
+  ],
+  [
+    "mic",
+    "ds",
+  ],
+  [
+    "mic",
+    "vfm_geo",
+  ],
+  [
+    "mic",
+    "mae_geo",
+  ],
+  [
+    "mic",
+    "ds_geo",
+  ],
+  [
+    "mic",
+  ],
+  [
+    "geo",
+    "vfm",
+  ],
+  [
+    "geo",
+    "mae",
+  ],
+  [
+    "geo",
+    "ds",
+  ],
+  [
+    "geo",
+    "vfm_mic",
+  ],
+  [
+    "geo",
+    "mae_mic",
+  ],
+  [
+    "geo",
+    "ds_mic",
+  ],
+  [
+    "geo",
+  ],
+]
+
+# failover target service
+service_failover = "infer"
+
+# active services when in `node failure` state
+node_failures = [
+  [
+  ],
+  [
+    "vfm",
+  ],
+  [
+    "mae",
+  ],
+  [
+    "ds",
+  ],
+  [
+    "vfm_geo",
+  ],
+  [
+    "mae_geo",
+  ],
+  [
+    "ds_geo",
+  ],
+  [
+    "vfm_mic",
+  ],
+  [
+    "mae_mic",
+  ],
+  [
+    "ds_mic",
+  ],
+]
+
+# # node failover target
+# node_failover = "activate_backup_node"
