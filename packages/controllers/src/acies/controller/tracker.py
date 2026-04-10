@@ -488,6 +488,7 @@ def on_start_at(ctx: AciesContext, msg: AciesKvChange) -> None:
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
     ctx.app['pf'] = _build_particle_filter(ctx)
+    ctx.app.data.pop('prev_output_arc', None)
 
 
 @app.subscribe('**/vehicle')
@@ -576,9 +577,24 @@ def estimate(ctx: AciesContext) -> None:
     elif energy_vec is not None:
         logger.debug('pf skip: max energy %.1f below threshold %.1f', np.max(energy_vec), energy_threshold)
 
-    # --- estimate ---
+    # --- estimate with output clamping ---
+    total = road[-1][2]
     s_hat, v_hat = pf.estimate()
-    arc = _wrap_arc(s_hat, road[-1][2], ctx.app['is_loop'])
+    arc = _wrap_arc(s_hat, total, ctx.app['is_loop'])
+
+    # clamp output: don't move more than v_max * dt from previous position
+    prev_arc: float = ctx.app.get('prev_output_arc', arc)
+    max_step = pf.v_max * pf.dt
+    delta = arc - prev_arc
+    if ctx.app['is_loop']:
+        # shortest path on loop
+        if delta > total / 2:
+            delta -= total
+        elif delta < -total / 2:
+            delta += total
+    clamped_delta = max(-max_step, min(max_step, delta))
+    arc = _wrap_arc(prev_arc + clamped_delta, total, ctx.app['is_loop'])
+    ctx.app['prev_output_arc'] = arc
 
     label = _ensemble_label(ctx.app['predictions']) or 'unknown'
     lat, lon = _arc_to_latlon(road, arc)
