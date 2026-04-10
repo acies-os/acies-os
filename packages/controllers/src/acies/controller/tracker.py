@@ -144,7 +144,7 @@ def setup(ctx: AciesContext) -> None:
 
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
-    ctx.app['energy'] = TimeWindow(window_ns=60 * _NS_PER_S, data_clock=True)
+    ctx.app['energy'] = TimeWindow(window_ns=10 * _NS_PER_S, data_clock=True)
 
     # start at beginning of road (arc=0 for direction=+1, arc=total for direction=-1)
     road: Road = ctx.app['road']
@@ -171,13 +171,14 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
     energy_by_ch: dict[str, float] = msg['energy']
     energy = max(energy_by_ch.values())
 
-    host = source.split('/')[0]
+    host, _, rest = source.partition('/')
     node_mapping: dict[str, str] = ctx.app['node_mapping']
     canonical = node_mapping.get(host, host)
+    cannoical_topic = f'{canonical}/{rest}'
 
     energy_win: TimeWindow = ctx.app['energy']
-    energy_win.add(canonical, ts_ns, energy)
-    logger.debug('energy: %s=%.0f', canonical, energy)
+    energy_win.add(cannoical_topic, ts_ns, energy)
+    # logger.debug('energy: %8s=%4.0f', cannoical_topic, energy)
 
 
 @app.subscribe('**/vehicle')
@@ -204,6 +205,12 @@ def estimate(ctx: AciesContext) -> None:
     now_ns: int = energy_win.latest_ts
     if now_ns == 0:
         return
+
+    # energy_win: TimeWindow = ctx.app['energy']
+    logger.debug('>>>> t=%s', int(energy_win.latest_ts / _NS_PER_S))
+    logger.debug('>>>> %s', energy_win.keys())
+    for k in sorted(energy_win.keys()):
+        logger.debug('>>>> %8s: %s', k, ' '.join([f'{x[1]:7.2f}' for x in energy_win.get(k)]))
 
     road: Road = ctx.app['road']
     total = road[-1][2]

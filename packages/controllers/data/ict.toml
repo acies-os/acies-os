@@ -67,10 +67,10 @@ gq-4 = "rs10"
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
-miata = 1.1
-cx30 = 0.75
-gle350 = 0.65
-mustang = 1.1
+miata = 0.85
+cx30 = 0.85
+gle350 = 0.85
+mustang = 0.85
 
 polaris = 0.95
 warthog = 0.95
