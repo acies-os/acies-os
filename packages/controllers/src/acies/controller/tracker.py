@@ -508,24 +508,33 @@ def _ensemble_label(pred_win: TimeWindow) -> str | None:
     return max(scores, key=lambda k: sum(scores[k]) / len(scores[k]))
 
 
-def _get_energy_vector(energy_win: TimeWindow, sensor_order: list[str]) -> npt.NDArray[np.float64] | None:
+def _get_energy_vector(
+    energy_win: TimeWindow, sensor_order: list[str], modality: str | None = None
+) -> npt.NDArray[np.float64] | None:
     """Build an energy vector aligned with sensor_order from the latest readings.
 
-    For each sensor, looks for any modality topic (geo or mic) and takes the
-    max energy across modalities. Returns None if any sensor has no data.
+    Args:
+        energy_win: per-topic energy history.
+        sensor_order: sorted list of sensor names.
+        modality: if set (e.g. 'geo' or 'mic'), only use that modality.
+            If None, takes the max across all modalities per sensor.
+
+    Returns None if any sensor has no data.
     """
     energies: list[float] = []
     for sensor in sensor_order:
-        # find all topics for this sensor (e.g. rs1/geo, rs1/mic)
         best = 0.0
         found = False
         for key in energy_win.keys():
-            if key.startswith(sensor + '/'):
-                entry = energy_win.latest(key)
-                if entry is not None:
-                    _, e = entry
-                    best = max(best, e)
-                    found = True
+            if not key.startswith(sensor + '/'):
+                continue
+            if modality is not None and not key.endswith('/' + modality):
+                continue
+            entry = energy_win.latest(key)
+            if entry is not None:
+                _, e = entry
+                best = max(best, e)
+                found = True
         if not found:
             return None
         energies.append(best)
@@ -553,7 +562,8 @@ def estimate(ctx: AciesContext) -> None:
     pf.predict(rng=rng)
 
     # --- update (if we have energy from all sensors) ---
-    energy_vec = _get_energy_vector(energy_win, sensor_order)
+    modality: str | None = ctx.app['tracker_cfg'].get('modality')
+    energy_vec = _get_energy_vector(energy_win, sensor_order, modality=modality)
     if energy_vec is not None:
         pf.update(energy_vec)
         pf.resample_if_needed(rng=rng)
