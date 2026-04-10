@@ -32,6 +32,7 @@ d0 = 5.0          # distance floor (metres) to avoid log(0), ~sensor near-field
 meas_sigma = 1.0  # measurement noise std in relative log-energy space (tune first)
 v_min = -30.0     # min speed (m/s, negative = reverse)
 v_max = 30.0      # max speed (m/s)
+modality = "mic"  # energy modality to use for tracking: "geo", "mic", or omit for max of both
 
 [road]
 coordinates = [
