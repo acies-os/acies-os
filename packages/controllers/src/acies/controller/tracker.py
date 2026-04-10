@@ -561,10 +561,11 @@ def estimate(ctx: AciesContext) -> None:
     # --- predict ---
     pf.predict(rng=rng)
 
-    # --- update (if we have energy from all sensors) ---
+    # --- update (if we have energy from all sensors and a vehicle is detected) ---
     modality: str | None = ctx.app['tracker_cfg'].get('modality')
+    energy_threshold: float = ctx.app['tracker_cfg'].get('energy_threshold', 0.0)
     energy_vec = _get_energy_vector(energy_win, sensor_order, modality=modality)
-    if energy_vec is not None:
+    if energy_vec is not None and np.max(energy_vec) > energy_threshold:
         pf.update(energy_vec)
         pf.resample_if_needed(rng=rng)
         logger.debug(
@@ -572,6 +573,8 @@ def estimate(ctx: AciesContext) -> None:
             ', '.join(f'{e:.1f}' for e in energy_vec),
             pf.effective_sample_size(),
         )
+    elif energy_vec is not None:
+        logger.debug('pf skip: max energy %.1f below threshold %.1f', np.max(energy_vec), energy_threshold)
 
     # --- estimate ---
     s_hat, v_hat = pf.estimate()
