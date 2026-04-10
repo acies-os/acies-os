@@ -76,16 +76,20 @@ def systematic_resample(weights: npt.NDArray[np.float64], rng: Generator | None 
 
 @dataclass
 class RoadParticleFilter:
-    """Particle filter for 1-D road tracking.
+    """Particle filter for 1-D road tracking with 2-D measurement model.
 
     State per particle: (s, v) where s is arc position in metres
     and v is speed in m/s (signed: positive = increasing arc).
 
-    Measurement model uses relative log-energy ratios between sensors.
-    Sensor 0 (first in sorted order) is the reference. For each other
-    sensor i:
-        expected = -eta * log((|s - a_i| + d0) / (|s - a_0| + d0))
-        observed = log(E_i) - log(E_0)
+    The measurement model uses physical (Euclidean) distances in XY
+    space, not arc distances. This is important for loop roads where
+    sensors on opposite sides of the loop are physically close but
+    far apart in arc space.
+
+    For each particle, arc position is converted to XY via road polyline
+    interpolation, then Euclidean distance to each sensor is computed.
+    Relative log-energy ratios (sensor 0 as reference) are compared
+    against observations.
     """
 
     n_particles: int
@@ -93,7 +97,9 @@ class RoadParticleFilter:
     sigma_s: float  # position process noise std (metres)
     sigma_v: float  # velocity process noise std (m/s)
     road_length: float
-    sensor_arcs: npt.NDArray[np.float64]  # shape (M,) — arc positions of sensors
+    road_arcs: npt.NDArray[np.float64]  # shape (P,) — arc at each road polyline point
+    road_xy: npt.NDArray[np.float64]  # shape (P, 2) — XY at each road polyline point
+    sensor_xy: npt.NDArray[np.float64]  # shape (M, 2) — XY positions of sensors
     eta: float = 1.0  # attenuation exponent in log-distance model
     d0: float = 1.0  # distance floor to avoid log(0)
     meas_sigma: float = 1.0  # measurement noise std in relative log-energy space
@@ -107,19 +113,45 @@ class RoadParticleFilter:
     w: npt.NDArray[np.float64] = field(init=False)
 
     def __post_init__(self) -> None:
-        self.sensor_arcs = np.asarray(self.sensor_arcs, dtype=np.float64)
+        self.road_arcs = np.asarray(self.road_arcs, dtype=np.float64)
+        self.road_xy = np.asarray(self.road_xy, dtype=np.float64)
+        self.sensor_xy = np.asarray(self.sensor_xy, dtype=np.float64)
         self.s = np.zeros(self.n_particles, dtype=np.float64)
         self.v = np.zeros(self.n_particles, dtype=np.float64)
         self.w = np.ones(self.n_particles, dtype=np.float64) / self.n_particles
 
-    # --- arc distance ---
+    # --- arc to XY ---
 
-    def _arc_dist(self, s: npt.NDArray[np.float64], a: float) -> npt.NDArray[np.float64]:
-        """Absolute arc distance from particles to a sensor, handling loops."""
-        d = np.abs(s - a)
+    def _arc_to_xy(self, s: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Interpolate arc positions to XY coordinates along the road polyline.
+
+        Args:
+            s: shape (N,) — arc positions of particles.
+
+        Returns shape (N, 2) — XY coordinates.
+        """
+        # clamp/wrap arc values
         if self.is_loop:
-            d = np.minimum(d, self.road_length - d)
-        return d
+            s = s % self.road_length
+        else:
+            s = np.clip(s, 0.0, self.road_length)
+
+        # find segment index for each particle
+        idx = np.searchsorted(self.road_arcs, s, side='right') - 1
+        idx = np.clip(idx, 0, len(self.road_arcs) - 2)
+
+        # interpolation parameter within each segment
+        seg_start = self.road_arcs[idx]
+        seg_end = self.road_arcs[idx + 1]
+        seg_len = seg_end - seg_start
+        # avoid division by zero for zero-length segments
+        safe_len = np.where(seg_len > 0, seg_len, 1.0)
+        t = (s - seg_start) / safe_len
+        t = np.clip(t, 0.0, 1.0)
+
+        xy_start = self.road_xy[idx]  # (N, 2)
+        xy_end = self.road_xy[idx + 1]  # (N, 2)
+        return xy_start + t[:, None] * (xy_end - xy_start)
 
     # --- initialization ---
 
@@ -151,11 +183,14 @@ class RoadParticleFilter:
     def _expected_relative_log_energy(self, s: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Expected relative log-energy for each particle.
 
-        Uses sensor 0 as reference.
+        Converts arc -> XY, computes Euclidean distance to each sensor,
+        then computes relative log-energy with sensor 0 as reference.
         Returns shape (N, M-1).
         """
-        # distance from each particle to each sensor: (N, M)
-        dists = np.column_stack([self._arc_dist(s, a) for a in self.sensor_arcs])
+        xy = self._arc_to_xy(s)  # (N, 2)
+        # Euclidean distance from each particle to each sensor: (N, M)
+        diff = xy[:, None, :] - self.sensor_xy[None, :, :]  # (N, M, 2)
+        dists = np.linalg.norm(diff, axis=2)  # (N, M)
         ref = dists[:, 0:1]  # (N, 1)
         return -self.eta * np.log((dists[:, 1:] + self.d0) / (ref + self.d0))
 
@@ -220,6 +255,21 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlon = (lon2 - lon1) * _DEG_TO_RAD
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1 * _DEG_TO_RAD) * math.cos(lat2 * _DEG_TO_RAD) * math.sin(dlon / 2) ** 2
     return _EARTH_R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _latlon_to_xy(lat: float, lon: float, ref_lat: float, ref_lon: float) -> tuple[float, float]:
+    """Convert lat/lon to local XY in metres, using a flat-Earth approximation.
+
+    Args:
+        lat, lon: point to convert.
+        ref_lat, ref_lon: reference origin (XY = 0, 0).
+
+    Returns (x_metres, y_metres) where x is east and y is north.
+    """
+    cos_ref = math.cos(ref_lat * _DEG_TO_RAD)
+    x = (lon - ref_lon) * _DEG_TO_RAD * _EARTH_R * cos_ref
+    y = (lat - ref_lat) * _DEG_TO_RAD * _EARTH_R
+    return x, y
 
 
 def _build_road(coords: list[list[float]]) -> Road:
@@ -309,18 +359,20 @@ def _build_particle_filter(ctx: AciesContext) -> RoadParticleFilter:
     road: Road = ctx.app['road']
     is_loop: bool = ctx.app['is_loop']
     sensor_order: list[str] = ctx.app['sensor_order']
-    node_arcs: dict[str, Metres] = ctx.app['node_arcs']
+    node_xy: dict[str, tuple[float, float]] = ctx.app['node_xy']
     tracker_cfg: dict[str, Any] = ctx.app['tracker_cfg']
 
-    sensor_arcs = np.array([node_arcs[s] for s in sensor_order], dtype=np.float64)
+    sensor_xy = np.array([node_xy[s] for s in sensor_order], dtype=np.float64)
 
     pf = RoadParticleFilter(
         n_particles=tracker_cfg.get('n_particles', 500),
-        dt=1.0,  # predict step matches schedule interval
+        dt=1.0,
         sigma_s=tracker_cfg.get('sigma_s', 2.0),
         sigma_v=tracker_cfg.get('sigma_v', 1.0),
         road_length=road[-1][2],
-        sensor_arcs=sensor_arcs,
+        road_arcs=ctx.app['road_arcs'],
+        road_xy=ctx.app['road_xy'],
+        sensor_xy=sensor_xy,
         eta=tracker_cfg.get('eta', 1.0),
         d0=tracker_cfg.get('d0', 5.0),
         meas_sigma=tracker_cfg.get('meas_sigma', 1.0),
@@ -343,15 +395,34 @@ def _reload_config(ctx: AciesContext) -> None:
     ctx.app['is_loop'] = _is_loop(road)
     logger.info('road: %d segments, %.1f m total, loop=%s', len(road) - 1, road[-1][2], ctx.app['is_loop'])
 
+    # compute local XY for road polyline (reference = first road point)
+    ref_lat, ref_lon = road[0][0], road[0][1]
+    ctx.app['ref_latlon'] = (ref_lat, ref_lon)
+    road_arcs = np.array([p[2] for p in road], dtype=np.float64)
+    road_xy = np.array([_latlon_to_xy(p[0], p[1], ref_lat, ref_lon) for p in road], dtype=np.float64)
+    ctx.app['road_arcs'] = road_arcs
+    ctx.app['road_xy'] = road_xy
+
     ctx.app['node_mapping'] = config.get('map_node_mapping', {})
 
-    # project sensor nodes onto road
+    # project sensor nodes onto road and compute their XY
     gps_table: dict[str, list[float]] = config.get('gps', {})
     node_arcs: dict[str, Metres] = {}
+    node_xy: dict[str, tuple[float, float]] = {}
     for node, (lat, lon) in gps_table.items():
         node_arcs[node] = _project_onto_road(road, lat, lon)
-        logger.info('node %s: lat=%.6f lon=%.6f -> arc=%.1f m', node, lat, lon, node_arcs[node])
+        node_xy[node] = _latlon_to_xy(lat, lon, ref_lat, ref_lon)
+        logger.info(
+            'node %s: lat=%.6f lon=%.6f -> arc=%.1f m xy=(%.1f, %.1f)',
+            node,
+            lat,
+            lon,
+            node_arcs[node],
+            node_xy[node][0],
+            node_xy[node][1],
+        )
     ctx.app['node_arcs'] = node_arcs
+    ctx.app['node_xy'] = node_xy
 
     # sorted sensor order for consistent energy vector indexing
     ctx.app['sensor_order'] = sorted(node_arcs.keys())
