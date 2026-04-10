@@ -11,12 +11,25 @@ rs8 = [40.2891961, -88.1261333]
 rs10 = [40.2891928, -88.1264877]
 
 [tracker]
-n_particles = 500
-sigma_s = 2.0     # position process noise (metres)
-sigma_v = 1.0     # velocity process noise (m/s)
-eta = 1.0         # log-distance attenuation exponent
-d0 = 5.0          # distance floor (metres) to avoid log(0)
-meas_sigma = 1.0  # measurement noise std in relative log-energy space
+# ------------------------- particle filter parameters -------------------------
+#
+# Tuning:
+#   1. Run a replay with debug logging and watch ESS (effective sample size).
+#   2. Healthy ESS is 100-300 for 500 particles.
+#   3. Tune meas_sigma first to get ESS in that range, then fine-tune others.
+#
+#   ESS drops to ~1 quickly   -> meas_sigma too small (overconfident), increase it
+#   ESS stays near n_particles -> meas_sigma too large (ignoring data), decrease it
+#   Position estimate is jumpy -> increase n_particles or decrease sigma_s
+#   Position lags the vehicle  -> increase sigma_s and sigma_v
+#   Particles cluster at one sensor -> eta too high or d0 too small
+
+n_particles = 500 # more = smoother but slower
+sigma_s = 2.0     # position process noise per step (metres)
+sigma_v = 1.0     # velocity process noise per step (m/s)
+eta = 1.0         # log-distance attenuation exponent (~2.0 for inverse-square)
+d0 = 5.0          # distance floor (metres) to avoid log(0), ~sensor near-field
+meas_sigma = 1.0  # measurement noise std in relative log-energy space (tune first)
 v_min = -30.0     # min speed (m/s, negative = reverse)
 v_max = 30.0      # max speed (m/s)
 
