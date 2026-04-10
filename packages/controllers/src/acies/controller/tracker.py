@@ -35,8 +35,8 @@ from typing import Any, TypeAlias
 import click
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
-from acies.core import AciesApp, AciesContext, setup_logging
-from acies.core.msg import AciesInference
+from acies.core import AciesApp, AciesContext, OnChange, setup_logging
+from acies.core.msg import AciesInference, AciesKvChange
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +179,17 @@ def on_energy(ctx: AciesContext, msg: Any) -> None:
     energy_win: TimeWindow = ctx.app['energy']
     energy_win.add(cannoical_topic, ts_ns, energy)
     # logger.debug('energy: %8s=%4.0f', cannoical_topic, energy)
+
+
+@app.subscribe(OnChange('start_at'))
+def on_start_at(ctx: AciesContext, msg: AciesKvChange) -> None:
+    logger.info('start_at changed to %s; resetting tracker state', msg.value)
+    road: Road = ctx.app['road']
+    ctx.app['energy'] = TimeWindow(window_ns=10 * _NS_PER_S, data_clock=True)
+    ensemble_win = ctx.cfg.get('ensemble_win', 30)
+    ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
+    ctx.app['ref_arc'] = 0.0 if ctx.app['direction'] == 1 else road[-1][2]
+    ctx.app['ref_time_ns'] = 0
 
 
 @app.subscribe('**/vehicle')

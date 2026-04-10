@@ -199,9 +199,10 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     heartbeat_buf: TimeWindow = ctx.app['heartbeat']
 
-    # --- look up GPS service from heartbeat records ---
+    # --- look up GPS and tracker services from heartbeat records ---
     edge_host = ctx.ns.namespace.split('/')[0]
-    gps_base = _find_services(heartbeat_buf, edge_host).get('gps')
+    edge_services = _find_services(heartbeat_buf, edge_host)
+    gps_base = edge_services.get('gps')
     if gps_base is None:
         logger.error('gps service not found in heartbeat records')
         return
@@ -209,6 +210,9 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     # --- build kv ops for each target using service discovery ---
     data_reconfig_pass: list[tuple[str, Sequence[KvEntry]]] = []
     all_targets: list[str] = [gps_base]
+    tracker_base = edge_services.get('tracker')
+    if tracker_base is not None:
+        all_targets.append(tracker_base)
     for node_id, state in new_node_states.items():
         services = _find_services(heartbeat_buf, node_id)
         data_ops = [
