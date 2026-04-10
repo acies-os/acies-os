@@ -142,6 +142,8 @@ def _reload_config(ctx: AciesContext) -> None:
 def setup(ctx: AciesContext) -> None:
     _reload_config(ctx)
 
+    ctx.cfg['start_at'] = None
+
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
     ctx.app['energy'] = TimeWindow(window_ns=10 * _NS_PER_S, data_clock=True)
