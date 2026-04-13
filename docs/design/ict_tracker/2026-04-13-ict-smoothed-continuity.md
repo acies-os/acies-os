@@ -2,6 +2,12 @@
 
 Date: `2026-04-13`
 
+Report order note:
+
+- this is the earlier same-day compact continuity report
+- it uses the narrower `mustang`/`gle350` visualization subset
+- the later broader follow-up is [`2026-04-13-ict-balanced-subset-continuity.md`](/home/kara4/demo/acies-os/docs/design/ict_tracker/2026-04-13-ict-balanced-subset-continuity.md)
+
 ## Scope
 
 This is the compact ICT evaluation report for the current best continuity-first tracker.

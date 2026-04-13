@@ -2,6 +2,11 @@
 
 Date: `2026-04-13`
 
+Report order note:
+
+- this is an earlier same-day algorithm summary
+- later `2026-04-13` notes added the balanced-subset inventory and broader multi-target continuity evaluation
+
 ## Purpose
 
 This is the consolidated algorithm report for the ICT tracker work.

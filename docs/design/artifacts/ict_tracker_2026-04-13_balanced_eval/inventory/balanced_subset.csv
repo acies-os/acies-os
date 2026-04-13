@@ -1,0 +1,9 @@
+run_id,label,selected,selection_rank_within_label,selection_reason,shortfall_note
+7,cx30,True,1,"usable loops=52, loop_cv=0.109, runtime_step=9.53 m",only 2 usable runs available for target cx30; target was 3
+6,cx30,True,2,"usable loops=16, loop_cv=0.101, runtime_step=10.78 m",only 2 usable runs available for target cx30; target was 3
+5,gle350,True,1,"usable loops=60, loop_cv=0.044, runtime_step=11.82 m",only 2 usable runs available for target gle350; target was 3
+4,gle350,True,2,"usable loops=17, loop_cv=0.029, runtime_step=10.16 m",only 2 usable runs available for target gle350; target was 3
+3,miata,True,1,"usable loops=49, loop_cv=0.144, runtime_step=10.25 m",only 2 usable runs available for target miata; target was 3
+2,miata,True,2,"usable loops=13, loop_cv=0.031, runtime_step=10.59 m",only 2 usable runs available for target miata; target was 3
+1,mustang,True,1,"usable loops=56, loop_cv=0.111, runtime_step=11.38 m",only 2 usable runs available for target mustang; target was 3
+0,mustang,True,2,"usable loops=16, loop_cv=0.076, runtime_step=10.67 m",only 2 usable runs available for target mustang; target was 3

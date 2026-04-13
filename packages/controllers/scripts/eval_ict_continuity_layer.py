@@ -839,15 +839,18 @@ def plot_loop_comparison(
 
 
 def plot_loop_clean(
-    smooth_df: pd.DataFrame,
+    track_df: pd.DataFrame,
     sensor_geometry: pd.DataFrame,
     run_id: int,
     out_path: Path,
     loop_selection: str,
+    plot_label: str,
+    timing_meaning: str,
+    finalize_lag_steps: int | None = None,
 ) -> None:
     ref_lat = float(sensor_geometry["ref_latitude"].iloc[0])
     ref_lon = float(sensor_geometry["ref_longitude"].iloc[0])
-    run_df = smooth_df[smooth_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
+    run_df = track_df[track_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
     start_idx, end_idx = _select_loop_bounds(run_df, mode=loop_selection)
     loop_df = run_df.iloc[start_idx : end_idx + 1].copy()
     gt_x, gt_y = latlon_to_xy_m(loop_df["latitude"], loop_df["longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
@@ -855,19 +858,37 @@ def plot_loop_clean(
 
     fig, ax = plt.subplots(figsize=(8.5, 8.5))
     ax.plot(gt_x, gt_y, color="tab:blue", linewidth=2.2, label="ground truth GPS")
-    ax.plot(loop_df["pred_x_m"], loop_df["pred_y_m"], color="tab:green", linewidth=2.0, alpha=0.95, label="smoothed continuity")
+    ax.plot(loop_df["pred_x_m"], loop_df["pred_y_m"], color="tab:green", linewidth=2.0, alpha=0.95, label=plot_label)
     ax.scatter(sensor_x, sensor_y, color="black", s=70, label="sensors")
     ax.scatter(gt_x.iloc[0], gt_y.iloc[0], color="tab:blue", marker="o", s=60, label="GT start")
     ax.scatter(gt_x.iloc[-1], gt_y.iloc[-1], color="tab:blue", marker="s", s=60, label="GT end")
+    ax.scatter(loop_df["pred_x_m"].iloc[0], loop_df["pred_y_m"].iloc[0], color="tab:green", marker="o", s=55, label="Pred start")
+    ax.scatter(loop_df["pred_x_m"].iloc[-1], loop_df["pred_y_m"].iloc[-1], color="tab:green", marker="s", s=55, label="Pred end")
     sample_idx = loop_df.index[::10]
     for idx in sample_idx:
-        elapsed = int(round(float(loop_df.loc[idx, "elapsed_s"] - loop_df["elapsed_s"].iloc[0])))
+        pos = int(loop_df.index.get_loc(idx))
+        elapsed = int(round(float(loop_df.iloc[pos]["elapsed_s"] - loop_df["elapsed_s"].iloc[0])))
+        ts_label = pd.to_datetime(loop_df.iloc[pos]["timestamp"]).strftime("%H:%M:%S")
+        pred_label = f"Pred {elapsed}s\nsample {ts_label}"
+        if finalize_lag_steps is not None:
+            final_pos = min(pos + int(finalize_lag_steps), len(loop_df) - 1)
+            final_ts_label = pd.to_datetime(loop_df.iloc[final_pos]["timestamp"]).strftime("%H:%M:%S")
+            pred_label = f"Pred {elapsed}s\nsample {ts_label}\nfinal~{final_ts_label}"
         ax.scatter(gt_x.loc[idx], gt_y.loc[idx], color="tab:blue", s=18, alpha=0.6)
-        ax.scatter(loop_df.loc[idx, "pred_x_m"], loop_df.loc[idx, "pred_y_m"], color="tab:green", s=18, alpha=0.6)
-        ax.text(gt_x.loc[idx], gt_y.loc[idx], f"{elapsed}s", fontsize=7, color="tab:blue", ha="right", va="bottom")
+        ax.scatter(loop_df.iloc[pos]["pred_x_m"], loop_df.iloc[pos]["pred_y_m"], color="tab:green", s=18, alpha=0.6)
+        ax.text(gt_x.loc[idx], gt_y.loc[idx], f"GT {elapsed}s\n{ts_label}", fontsize=7, color="tab:blue", ha="right", va="bottom")
+        ax.text(
+            loop_df.iloc[pos]["pred_x_m"],
+            loop_df.iloc[pos]["pred_y_m"],
+            pred_label,
+            fontsize=7,
+            color="tab:green",
+            ha="left",
+            va="top",
+        )
     for row, sx, sy in zip(sensor_geometry.itertuples(index=False), sensor_x, sensor_y):
         ax.text(sx, sy, row.node, fontsize=8, ha="left", va="bottom")
-    ax.set_title(f"run{run_id} one-loop GT vs smoothed continuity")
+    ax.set_title(f"run{run_id} one-loop GT vs {plot_label}\n{timing_meaning}")
     ax.set_xlabel("Local X (m)")
     ax.set_ylabel("Local Y (m)")
     ax.axis("equal")
@@ -878,14 +899,16 @@ def plot_loop_clean(
 
 
 def plot_loop_timing(
-    smooth_df: pd.DataFrame,
+    track_df: pd.DataFrame,
     sensor_geometry: pd.DataFrame,
     run_id: int,
     out_path: Path,
     loop_selection: str,
+    plot_label: str,
+    timing_meaning: str,
 ) -> dict[str, float]:
     _ = sensor_geometry
-    run_df = smooth_df[smooth_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
+    run_df = track_df[track_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
     start_idx, end_idx = _select_loop_bounds(run_df, mode=loop_selection)
     loop_df = run_df.iloc[start_idx : end_idx + 1].copy().reset_index(drop=True)
     n_nodes = int(max(loop_df["gt_loop_node_index"].max(), loop_df["pred_loop_node_index"].max()) + 1)
@@ -900,9 +923,8 @@ def plot_loop_timing(
     ax = axes[0]
     elapsed = loop_df["elapsed_s"] - loop_df["elapsed_s"].iloc[0]
     ax.plot(elapsed, gt_progress, color="tab:blue", linewidth=2.0, label="GT progress")
-    ax.plot(elapsed, pred_progress, color="tab:green", linewidth=1.0, alpha=0.45, label="pred progress raw")
     ax.plot(elapsed, pred_aligned, color="tab:green", linewidth=2.0, label="pred progress aligned")
-    ax.set_title(f"run{run_id} loop progress vs time (estimated runtime delay {delay_s:+.0f}s)")
+    ax.set_title(f"run{run_id} {plot_label} progress vs time (estimated delay {delay_s:+.0f}s)\n{timing_meaning}")
     ax.set_ylabel("Unwrapped loop node progress")
     ax.legend(loc="best")
     ax_res = axes[1]
@@ -1033,22 +1055,48 @@ def main() -> None:
             )
         )
         plot_loop_clean(
-            smooth_df=smooth_df,
+            track_df=smooth_df,
             sensor_geometry=sensor_geometry,
             run_id=run_id,
             out_path=args.out_dir / f"run{run_id}_smoothed_continuity_clean_xy.png",
             loop_selection=args.loop_selection,
+            plot_label="smoothed continuity",
+            timing_meaning="Offline smoother aligned to sample timestamps; may use future evidence.",
         )
         timing = plot_loop_timing(
-            smooth_df=smooth_df,
+            track_df=smooth_df,
             sensor_geometry=sensor_geometry,
             run_id=run_id,
             out_path=args.out_dir / f"run{run_id}_smoothed_continuity_timing.png",
             loop_selection=args.loop_selection,
+            plot_label="smoothed continuity",
+            timing_meaning="Offline smoother aligned to sample timestamps; delay is not causal wall-clock availability.",
         )
         loop_rows[-1].update(timing)
         loop_rows[-1]["clean_xy_path"] = f"run{run_id}_smoothed_continuity_clean_xy.png"
         loop_rows[-1]["timing_path"] = f"run{run_id}_smoothed_continuity_timing.png"
+        plot_loop_clean(
+            track_df=runtime_df,
+            sensor_geometry=sensor_geometry,
+            run_id=run_id,
+            out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png",
+            loop_selection=args.loop_selection,
+            plot_label=f"fixedlag{args.lag_steps} continuity",
+            timing_meaning=f"Bounded-lag runtime-style estimate; sample k is typically finalized when sample k+{args.lag_steps} arrives.",
+            finalize_lag_steps=args.lag_steps,
+        )
+        runtime_timing = plot_loop_timing(
+            track_df=runtime_df,
+            sensor_geometry=sensor_geometry,
+            run_id=run_id,
+            out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png",
+            loop_selection=args.loop_selection,
+            plot_label=f"fixedlag{args.lag_steps} continuity",
+            timing_meaning="Bounded-lag runtime-style estimate; timestamps reflect aligned samples, not zero-lookahead causality.",
+        )
+        loop_rows[-1]["runtime_clean_xy_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png"
+        loop_rows[-1]["runtime_timing_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png"
+        loop_rows[-1]["runtime_estimated_delay_s"] = runtime_timing["estimated_delay_s"]
         loop_rows[-1]["loop_selection"] = args.loop_selection
     if loop_rows:
         pd.DataFrame(loop_rows).to_csv(args.out_dir / "loop_comparison_summary.csv", index=False)
