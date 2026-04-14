@@ -55,13 +55,16 @@ def _on_disconnect(_client: mqtt.Client, _userdata: dict[str, Any], rc: int) -> 
 def _on_message(_client: mqtt.Client, userdata: dict[str, Any], msg: mqtt.MQTTMessage) -> None:
     q: queue.Queue[dict[str, Any]] = userdata['queue']
     try:
+        if 'orin_' in msg.topic:
+            return
         payload = json.loads(msg.payload.decode('utf-8'))
-        # topic is e.g. /ATV2/gps -> vehicle_id = ATV2
+        logger.debug('>>> topic=%s, payload=%s', msg.topic, payload)
         parts = msg.topic.split('/')
+        # topic is e.g. /ATV2/gps -> vehicle_id = ATV2
         vehicle_id = parts[1] if len(parts) >= 2 else 'unknown'
-        q.put_nowait(
-            {'vehicle_id': vehicle_id, 'lat': float(payload.get('lt', 0.0)), 'lon': float(payload.get('ln', 0.0))}
-        )
+        gt_msg = {'vehicle_id': vehicle_id, 'lat': float(payload.get('lt', 0.0)), 'lon': float(payload.get('ln', 0.0))}
+        logger.debug('gt: %s', gt_msg)
+        q.put_nowait(gt_msg)
     except Exception:
         logger.exception('failed to parse MQTT message on %s: %r', msg.topic, msg.payload)
 
@@ -112,21 +115,21 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
     client: mqtt.Client = ctx.app['client']
     broker: str = ctx.app['broker']
     port: int = ctx.app['port']
-    topic: str = ctx.ns.topic('truth', 'gps')
+    topic: str = ctx.ns.topic('truth')
 
     while not stop.is_set():
         # --- reconnect if needed ---
-        if not client.is_connected():
-            logger.info('MQTT not connected; retrying in %.1fs', _RECONNECT_DELAY_S)
-            _ = stop.wait(timeout=_RECONNECT_DELAY_S)
-            if stop.is_set():
-                return
-            try:
-                err_code = client.reconnect()
-                logger.debug('MQTT reconnect attempt returned code %d', err_code)
-            except Exception:
-                logger.exception('MQTT reconnect to %s:%d failed', broker, port)
-            continue
+        # if not client.is_connected():
+        #     logger.info('MQTT not connected; retrying in %.1fs', _RECONNECT_DELAY_S)
+        #     _ = stop.wait(timeout=_RECONNECT_DELAY_S)
+        #     if stop.is_set():
+        #         return
+        #     try:
+        #         err_code = client.reconnect()
+        #         logger.debug('MQTT reconnect attempt returned code %d', err_code)
+        #     except Exception:
+        #         logger.exception('MQTT reconnect to %s:%d failed', broker, port)
+        #     continue
 
         # --- drain incoming GPS fixes ---
         try:
@@ -134,8 +137,10 @@ def publish(ctx: AciesContext, stop: threading.Event) -> None:
         except queue.Empty:
             continue
 
-        ctx.publish(topic, fix)
-        logger.debug('gps fix: vehicle=%s lat=%.6f lon=%.6f', fix['vehicle_id'], fix['lat'], fix['lon'])
+        fix_msg = {fix['vehicle_id']: {'lat': fix['lat'], 'lon': fix['lon']}}
+
+        ctx.publish(topic, fix_msg)
+        logger.debug('gps fix to "%s": vehicle=%s lat=%.6f lon=%.6f', topic, fix['vehicle_id'], fix['lat'], fix['lon'])
 
 
 @app.cli()
