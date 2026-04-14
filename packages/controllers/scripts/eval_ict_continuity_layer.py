@@ -17,6 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.cluster import KMeans
 
 from acies.controller.ict_continuity import (
     ContinuityLatticeConfig,
@@ -65,8 +66,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loop-selection", choices=["first", "best_smoothed"], default="best_smoothed")
     parser.add_argument("--runs", type=int, nargs="*", default=None)
     parser.add_argument("--plot-runs", type=int, nargs="*", default=[0, 1, 3])
+    parser.add_argument("--skip-plots", action="store_true")
     parser.add_argument("--train-manifest", type=Path, default=None)
     parser.add_argument("--experiment-name", type=str, default="default")
+    parser.add_argument(
+        "--observation-model",
+        choices=["pooled_mean", "pooled_median", "diagvar_mean", "kmeans2_min"],
+        default="pooled_mean",
+    )
+    parser.add_argument("--loop-manifest", type=Path, default=None)
+    parser.add_argument("--eval-fold", type=int, default=None)
     return parser.parse_args()
 
 
@@ -111,6 +120,58 @@ def load_train_manifest(
             "scope_name": str(group["scope_name"].iloc[0]),
         }
     return train_runs_by_eval, meta_by_eval
+
+
+def load_loop_manifest(path: Path | None, eval_fold: int | None) -> pd.DataFrame | None:
+    if path is None:
+        return None
+    if eval_fold is None:
+        raise ValueError("--eval-fold is required when --loop-manifest is set")
+    manifest = pd.read_csv(path).copy()
+    required = {
+        "run_id",
+        "label",
+        "loop_id",
+        "loop_rank_in_run",
+        "start_timestamp",
+        "end_timestamp",
+        "start_elapsed_s",
+        "end_elapsed_s",
+        "n_points",
+        "fold_id",
+    }
+    missing = required - set(manifest.columns)
+    if missing:
+        raise ValueError(f"Loop manifest missing columns: {sorted(missing)}")
+    manifest["run_id"] = pd.to_numeric(manifest["run_id"], errors="raise").astype(int)
+    manifest["loop_id"] = pd.to_numeric(manifest["loop_id"], errors="raise").astype(int)
+    manifest["fold_id"] = pd.to_numeric(manifest["fold_id"], errors="raise").astype(int)
+    manifest["start_timestamp"] = pd.to_datetime(manifest["start_timestamp"], utc=True, errors="coerce").dt.tz_convert(None)
+    manifest["end_timestamp"] = pd.to_datetime(manifest["end_timestamp"], utc=True, errors="coerce").dt.tz_convert(None)
+    manifest = manifest[manifest["fold_id"] == int(eval_fold)].copy()
+    if manifest.empty:
+        raise ValueError(f"No loop-manifest rows found for eval_fold={eval_fold}")
+    return manifest
+
+
+def annotate_eval_loops(hybrid_df: pd.DataFrame, loop_manifest: pd.DataFrame | None) -> pd.DataFrame:
+    out = hybrid_df.copy()
+    out["loop_id"] = -1
+    out["fold_id"] = np.nan
+    out["eval_split"] = "train"
+    if loop_manifest is None:
+        return out
+
+    for row in loop_manifest.itertuples(index=False):
+        mask = (
+            (out["run_id"] == int(row.run_id))
+            & (out["timestamp"] >= row.start_timestamp)
+            & (out["timestamp"] <= row.end_timestamp)
+        )
+        out.loc[mask, "loop_id"] = int(row.loop_id)
+        out.loc[mask, "fold_id"] = int(row.fold_id)
+        out.loc[mask, "eval_split"] = "test"
+    return out
 
 
 def _select_train_group(df: pd.DataFrame, run_id: int, train_runs_by_eval: dict[int, list[int]] | None) -> pd.DataFrame:
@@ -324,11 +385,79 @@ def _base_xy_metrics(df: pd.DataFrame, sensor_geometry: pd.DataFrame) -> pd.Data
     return base
 
 
-def _build_run_templates(train_group: pd.DataFrame, lattice_df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
+def _node_feature_stat(
+    train_group: pd.DataFrame,
+    lattice_df: pd.DataFrame,
+    feature_cols: list[str],
+    stat: str,
+) -> pd.DataFrame:
     template_cols = ["gt_loop_node_index"] + feature_cols
-    train_templates = train_group[template_cols].groupby("gt_loop_node_index")[feature_cols].mean()
-    train_templates = train_templates.reindex(lattice_df["loop_node_index"]).interpolate(limit_direction="both").fillna(0.0)
-    return train_templates.to_numpy(dtype=float)
+    grouped = train_group[template_cols].groupby("gt_loop_node_index")[feature_cols]
+    if stat == "mean":
+        node_df = grouped.mean()
+    elif stat == "median":
+        node_df = grouped.median()
+    elif stat == "var":
+        node_df = grouped.var(ddof=0)
+    else:
+        raise ValueError(f"Unsupported node stat {stat}")
+    return node_df.reindex(lattice_df["loop_node_index"]).interpolate(limit_direction="both").fillna(0.0)
+
+
+def _build_observation_model(
+    train_group: pd.DataFrame,
+    lattice_df: pd.DataFrame,
+    feature_cols: list[str],
+    observation_model: str,
+) -> dict[str, object]:
+    base_mean = _node_feature_stat(train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat="mean").to_numpy(dtype=float)
+    if observation_model == "pooled_mean":
+        return {"name": observation_model, "templates": base_mean}
+    if observation_model == "pooled_median":
+        templates = _node_feature_stat(train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat="median").to_numpy(dtype=float)
+        return {"name": observation_model, "templates": templates}
+    if observation_model == "diagvar_mean":
+        node_var = _node_feature_stat(train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat="var").to_numpy(dtype=float)
+        global_var = np.nanvar(train_group[feature_cols].to_numpy(dtype=float), axis=0)
+        global_var = np.where(np.isfinite(global_var), global_var, 0.0)
+        var_floor = np.maximum(0.25 * global_var, 1e-6)
+        return {"name": observation_model, "templates": base_mean, "variances": np.maximum(node_var, var_floor[None, :])}
+    if observation_model == "kmeans2_min":
+        centers = np.repeat(base_mean[:, None, :], 2, axis=1)
+        for node_idx in lattice_df["loop_node_index"].astype(int):
+            node_rows = train_group[train_group["gt_loop_node_index"] == int(node_idx)][feature_cols].copy()
+            if node_rows.empty:
+                continue
+            node_rows = node_rows.fillna(node_rows.mean()).fillna(0.0)
+            x = node_rows.to_numpy(dtype=float)
+            if len(x) < 24 or np.unique(x, axis=0).shape[0] < 2:
+                continue
+            kmeans = KMeans(n_clusters=2, n_init=10, random_state=0)
+            centers[int(node_idx)] = kmeans.fit(x).cluster_centers_
+        return {"name": observation_model, "centers": centers}
+    raise ValueError(f"Unsupported observation model {observation_model}")
+
+
+def _score_observation_model(sample: np.ndarray, model: dict[str, object]) -> np.ndarray:
+    if model["name"] in {"pooled_mean", "pooled_median"}:
+        templates = np.asarray(model["templates"], dtype=float)
+        return _template_scores(sample, templates)
+    if model["name"] == "diagvar_mean":
+        templates = np.asarray(model["templates"], dtype=float)
+        variances = np.asarray(model["variances"], dtype=float)
+        residual = templates - sample[None, :]
+        weighted = np.square(residual) / variances
+        dists = np.nanmean(weighted, axis=1)
+        dists = np.where(np.isnan(dists), np.nanmax(dists[np.isfinite(dists)]) + 1.0 if np.isfinite(dists).any() else 1.0, dists)
+        return -dists
+    if model["name"] == "kmeans2_min":
+        centers = np.asarray(model["centers"], dtype=float)
+        residual = centers - sample[None, None, :]
+        dists = np.nanmean(np.square(residual), axis=2)
+        best = np.nanmin(dists, axis=1)
+        best = np.where(np.isnan(best), np.nanmax(best[np.isfinite(best)]) + 1.0 if np.isfinite(best).any() else 1.0, best)
+        return -best
+    raise ValueError(f"Unsupported observation model {model['name']}")
 
 
 def _build_emission_array(
@@ -336,7 +465,7 @@ def _build_emission_array(
     lattice_df: pd.DataFrame,
     sensor_geometry: pd.DataFrame,
     feature_cols: list[str],
-    template_arr: np.ndarray,
+    observation_model_spec: dict[str, object],
     template_weight: float,
     anchor_weight: float,
     neighbor_anchor_weight: float,
@@ -347,7 +476,7 @@ def _build_emission_array(
     template_margins = []
     for row in ordered.itertuples(index=False):
         sample = np.array([getattr(row, col) for col in feature_cols], dtype=float)
-        template_raw = _template_scores(sample, template_arr)
+        template_raw = _score_observation_model(sample, observation_model_spec)
         template_score = _zscore_array(template_raw)
         anchor_sensor = station_side_to_sensor[(int(row.pred_station), str(row.pred_side))]
         anchor_rank = sensor_to_rank[anchor_sensor]
@@ -361,7 +490,8 @@ def _build_emission_array(
         )
         emissions.append(template_weight * template_score + anchor_raw)
         sorted_template = np.sort(template_raw)[::-1]
-        template_margins.append(float(sorted_template[0] - sorted_template[1]))
+        second_best = sorted_template[1] if len(sorted_template) > 1 else sorted_template[0]
+        template_margins.append(float(sorted_template[0] - second_best))
     return np.vstack(emissions), np.array(template_margins, dtype=float)
 
 
@@ -399,13 +529,24 @@ def decode_continuity(
     stay_penalty: float,
     reset_penalty: float,
     margin_scale: float,
+    observation_model: str = "pooled_mean",
     train_runs_by_eval: dict[int, list[int]] | None = None,
     meta_by_eval: dict[int, dict[str, str]] | None = None,
+    template_train_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     frames = []
     for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = _select_train_group(hybrid_df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
-        template_arr = _build_run_templates(train_group, lattice_df=lattice_df, feature_cols=feature_cols)
+        train_group = template_train_df if template_train_df is not None else _select_train_group(
+            hybrid_df,
+            run_id=int(run_id),
+            train_runs_by_eval=train_runs_by_eval,
+        )
+        observation_model_spec = _build_observation_model(
+            train_group,
+            lattice_df=lattice_df,
+            feature_cols=feature_cols,
+            observation_model=observation_model,
+        )
 
         ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
         emit_arr, template_margin_arr = _build_emission_array(
@@ -413,7 +554,7 @@ def decode_continuity(
             lattice_df=lattice_df,
             sensor_geometry=sensor_geometry,
             feature_cols=feature_cols,
-            template_arr=template_arr,
+            observation_model_spec=observation_model_spec,
             template_weight=template_weight,
             anchor_weight=anchor_weight,
             neighbor_anchor_weight=neighbor_anchor_weight,
@@ -493,14 +634,25 @@ def decode_smoothed_continuity(
     reset_penalty: float,
     margin_scale: float,
     lock_run_direction: bool = False,
+    observation_model: str = "pooled_mean",
     train_runs_by_eval: dict[int, list[int]] | None = None,
     meta_by_eval: dict[int, dict[str, str]] | None = None,
+    template_train_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     frames = []
     n_nodes = len(lattice_df)
     for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = _select_train_group(hybrid_df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
-        template_arr = _build_run_templates(train_group, lattice_df=lattice_df, feature_cols=feature_cols)
+        train_group = template_train_df if template_train_df is not None else _select_train_group(
+            hybrid_df,
+            run_id=int(run_id),
+            train_runs_by_eval=train_runs_by_eval,
+        )
+        observation_model_spec = _build_observation_model(
+            train_group,
+            lattice_df=lattice_df,
+            feature_cols=feature_cols,
+            observation_model=observation_model,
+        )
         ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
         run_sign = _infer_run_direction_sign(ordered) if lock_run_direction else 0
         emit_arr, template_margin_arr = _build_emission_array(
@@ -508,7 +660,7 @@ def decode_smoothed_continuity(
             lattice_df=lattice_df,
             sensor_geometry=sensor_geometry,
             feature_cols=feature_cols,
-            template_arr=template_arr,
+            observation_model_spec=observation_model_spec,
             template_weight=template_weight,
             anchor_weight=anchor_weight,
             neighbor_anchor_weight=neighbor_anchor_weight,
@@ -592,8 +744,10 @@ def decode_fixed_lag_smoothed_continuity(
     margin_scale: float,
     lag_steps: int,
     lock_run_direction: bool = False,
+    observation_model: str = "pooled_mean",
     train_runs_by_eval: dict[int, list[int]] | None = None,
     meta_by_eval: dict[int, dict[str, str]] | None = None,
+    template_train_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     if lag_steps <= 0:
         return decode_continuity(
@@ -611,13 +765,26 @@ def decode_fixed_lag_smoothed_continuity(
             stay_penalty=stay_penalty,
             reset_penalty=reset_penalty,
             margin_scale=margin_scale,
+            observation_model=observation_model,
+            train_runs_by_eval=train_runs_by_eval,
+            meta_by_eval=meta_by_eval,
+            template_train_df=template_train_df,
         )
 
     frames = []
     n_nodes = len(lattice_df)
     for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = _select_train_group(hybrid_df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
-        template_arr = _build_run_templates(train_group, lattice_df=lattice_df, feature_cols=feature_cols)
+        train_group = template_train_df if template_train_df is not None else _select_train_group(
+            hybrid_df,
+            run_id=int(run_id),
+            train_runs_by_eval=train_runs_by_eval,
+        )
+        observation_model_spec = _build_observation_model(
+            train_group,
+            lattice_df=lattice_df,
+            feature_cols=feature_cols,
+            observation_model=observation_model,
+        )
         ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
         run_sign = _infer_run_direction_sign(ordered) if lock_run_direction else 0
         emit_arr, template_margin_arr = _build_emission_array(
@@ -625,7 +792,7 @@ def decode_fixed_lag_smoothed_continuity(
             lattice_df=lattice_df,
             sensor_geometry=sensor_geometry,
             feature_cols=feature_cols,
-            template_arr=template_arr,
+            observation_model_spec=observation_model_spec,
             template_weight=template_weight,
             anchor_weight=anchor_weight,
             neighbor_anchor_weight=neighbor_anchor_weight,
@@ -794,6 +961,7 @@ def summarize(*frames: pd.DataFrame) -> pd.DataFrame:
                 "p95_xy_error_m": float(group["pred_xy_error_m"].quantile(0.95)),
                 "mean_step_m": float(group["pred_step_m"].dropna().mean()),
                 "p95_step_m": float(group["pred_step_m"].dropna().quantile(0.95)),
+                "jump_rate_20m": float((group["pred_step_m"].dropna() > 20.0).mean()),
                 "reset_rate": reset_rate,
                 "n_samples": len(group),
             }
@@ -838,10 +1006,77 @@ def per_run_summary(*frames: pd.DataFrame) -> pd.DataFrame:
                 "mean_xy_error_m": float(group["pred_xy_error_m"].mean()),
                 "p95_xy_error_m": float(group["pred_xy_error_m"].quantile(0.95)),
                 "mean_step_m": float(group["pred_step_m"].dropna().mean()),
+                "p95_step_m": float(group["pred_step_m"].dropna().quantile(0.95)),
+                "jump_rate_20m": float((group["pred_step_m"].dropna() > 20.0).mean()),
                 "reset_rate": float(group["cc_reset"].mean()) if "cc_reset" in group.columns else float("nan"),
             }
         )
     return pd.DataFrame(rows).sort_values(["tracker_mode", "run_id"]).reset_index(drop=True)
+
+
+def per_loop_summary(*frames: pd.DataFrame) -> pd.DataFrame:
+    compare = pd.concat(list(frames), ignore_index=True, sort=False)
+    if "loop_id" not in compare.columns:
+        return pd.DataFrame()
+    compare = compare[compare["loop_id"] >= 0].copy()
+    if compare.empty:
+        return pd.DataFrame()
+
+    rows = []
+    group_cols = ["tracker_mode", "run_id", "loop_id"]
+    if "fold_id" in compare.columns:
+        group_cols.append("fold_id")
+    if "experiment_name" in compare.columns:
+        group_cols.append("experiment_name")
+    if "scope_name" in compare.columns:
+        group_cols.append("scope_name")
+    for group_key, group in compare.groupby(group_cols):
+        idx = 0
+        mode = group_key[idx]
+        idx += 1
+        run_id = int(group_key[idx])
+        idx += 1
+        loop_id = int(group_key[idx])
+        idx += 1
+        fold_id = float("nan")
+        if "fold_id" in group_cols:
+            fold_id = int(group_key[idx])
+            idx += 1
+        experiment_name = "default"
+        if "experiment_name" in group_cols:
+            experiment_name = str(group_key[idx])
+            idx += 1
+        scope_name = "default"
+        if "scope_name" in group_cols:
+            scope_name = str(group_key[idx])
+        non_amb = group[group["direction"] != "ambiguous"]
+        rows.append(
+            {
+                "tracker_mode": mode,
+                "run_id": run_id,
+                "label": str(group["label"].iloc[0]),
+                "loop_id": loop_id,
+                "fold_id": fold_id,
+                "experiment_name": experiment_name,
+                "scope_name": scope_name,
+                "station_accuracy": float((group["pred_station"] == group["nearest_station"]).mean()),
+                "side_accuracy": float((group["pred_side"] == group["side_label"]).mean()),
+                "joint_station_side_accuracy": float(
+                    ((group["pred_station"] == group["nearest_station"]) & (group["pred_side"] == group["side_label"])).mean()
+                ),
+                "direction_accuracy_non_ambiguous": float((non_amb["pred_direction"] == non_amb["direction"]).mean())
+                if not non_amb.empty
+                else float("nan"),
+                "mean_xy_error_m": float(group["pred_xy_error_m"].mean()),
+                "p95_xy_error_m": float(group["pred_xy_error_m"].quantile(0.95)),
+                "mean_step_m": float(group["pred_step_m"].dropna().mean()),
+                "p95_step_m": float(group["pred_step_m"].dropna().quantile(0.95)),
+                "jump_rate_20m": float((group["pred_step_m"].dropna() > 20.0).mean()),
+                "reset_rate": float(group["cc_reset"].mean()) if "cc_reset" in group.columns else float("nan"),
+                "n_samples": len(group),
+            }
+        )
+    return pd.DataFrame(rows).sort_values(["tracker_mode", "run_id", "loop_id"]).reset_index(drop=True)
 
 
 def plot_lattice(lattice_df: pd.DataFrame, sensor_geometry: pd.DataFrame, out_path: Path) -> None:
@@ -1035,6 +1270,7 @@ def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     train_runs_by_eval, meta_by_eval = load_train_manifest(args.train_manifest, args.experiment_name)
+    loop_manifest = load_loop_manifest(args.loop_manifest, args.eval_fold)
 
     pred_df = pd.read_csv(args.predictions)
     pred_df["timestamp"] = pd.to_datetime(pred_df["timestamp"], utc=True, errors="coerce").dt.tz_convert(None)
@@ -1043,6 +1279,7 @@ def main() -> None:
     if args.runs:
         hybrid_df = hybrid_df[hybrid_df["run_id"].isin(args.runs)].copy()
     hybrid_df = hybrid_df.sort_values(["run_id", "timestamp"]).reset_index(drop=True)
+    hybrid_df = annotate_eval_loops(hybrid_df, loop_manifest)
 
     cfg = ContinuityLatticeConfig(point_count=args.point_count, center_quantile=args.center_quantile)
     lattice_df = build_point_lattice(hybrid_df, sensor_geometry=sensor_geometry, config=cfg)
@@ -1056,6 +1293,7 @@ def main() -> None:
         ref_lat=float(sensor_geometry["ref_latitude"].iloc[0]),
         ref_lon=float(sensor_geometry["ref_longitude"].iloc[0]),
     )
+    template_train_df = labeled_df[labeled_df["eval_split"] == "train"].copy() if loop_manifest is not None else None
 
     feature_cols = _feature_columns(labeled_df)
     base_df = _base_xy_metrics(labeled_df, sensor_geometry=sensor_geometry)
@@ -1068,7 +1306,7 @@ def main() -> None:
     base_df["cc_reset"] = False
     base_df["cc_confidence"] = np.nan
     base_df["experiment_name"] = args.experiment_name
-    base_df["scope_name"] = args.experiment_name
+    base_df["scope_name"] = args.observation_model
 
     cont_df = decode_continuity(
         hybrid_df=labeled_df,
@@ -1085,9 +1323,13 @@ def main() -> None:
         stay_penalty=args.stay_penalty,
         reset_penalty=args.reset_penalty,
         margin_scale=args.margin_scale,
+        observation_model=args.observation_model,
         train_runs_by_eval=train_runs_by_eval,
         meta_by_eval=meta_by_eval,
+        template_train_df=template_train_df,
     )
+    cont_df["experiment_name"] = cont_df.get("experiment_name", pd.Series(args.experiment_name, index=cont_df.index))
+    cont_df["scope_name"] = args.observation_model
     smooth_df = decode_smoothed_continuity(
         hybrid_df=labeled_df,
         lattice_df=lattice_df,
@@ -1103,12 +1345,16 @@ def main() -> None:
         stay_penalty=args.stay_penalty,
         reset_penalty=args.reset_penalty,
         margin_scale=args.margin_scale,
+        observation_model=args.observation_model,
         train_runs_by_eval=train_runs_by_eval,
         meta_by_eval=meta_by_eval,
+        template_train_df=template_train_df,
     )
+    smooth_df["experiment_name"] = smooth_df.get("experiment_name", pd.Series(args.experiment_name, index=smooth_df.index))
+    smooth_df["scope_name"] = args.observation_model
     lag_df = apply_fixed_lag_smoother(cont_df, lattice_df=lattice_df, lag_steps=args.lag_steps)
     lag_df["experiment_name"] = args.experiment_name
-    lag_df["scope_name"] = args.experiment_name
+    lag_df["scope_name"] = args.observation_model
     runtime_df = decode_fixed_lag_smoothed_continuity(
         hybrid_df=labeled_df,
         lattice_df=lattice_df,
@@ -1126,83 +1372,93 @@ def main() -> None:
         margin_scale=args.margin_scale,
         lag_steps=args.lag_steps,
         lock_run_direction=args.lock_run_direction,
+        observation_model=args.observation_model,
         train_runs_by_eval=train_runs_by_eval,
         meta_by_eval=meta_by_eval,
+        template_train_df=template_train_df,
     )
+    runtime_df["experiment_name"] = runtime_df.get("experiment_name", pd.Series(args.experiment_name, index=runtime_df.index))
+    runtime_df["scope_name"] = args.observation_model
 
     compare_df = pd.concat([base_df, cont_df, smooth_df, runtime_df, lag_df], ignore_index=True, sort=False)
     compare_df.to_csv(args.out_dir / "continuity_predictions.csv", index=False)
 
-    summary_df = summarize(base_df, cont_df, smooth_df, runtime_df, lag_df)
-    per_run_df = per_run_summary(base_df, cont_df, smooth_df, runtime_df, lag_df)
+    eval_frames = [base_df, cont_df, smooth_df, runtime_df, lag_df]
+    if loop_manifest is not None:
+        eval_frames = [frame[frame["eval_split"] == "test"].copy() for frame in eval_frames]
+    summary_df = summarize(*eval_frames)
+    per_run_df = per_run_summary(*eval_frames)
+    per_loop_df = per_loop_summary(*eval_frames)
     summary_df.to_csv(args.out_dir / "continuity_summary.csv", index=False)
     per_run_df.to_csv(args.out_dir / "continuity_per_run_summary.csv", index=False)
+    per_loop_df.to_csv(args.out_dir / "continuity_per_loop_summary.csv", index=False)
 
-    plot_lattice(lattice_df, sensor_geometry=sensor_geometry, out_path=args.out_dir / "lattice_overview.png")
-    plot_summary(summary_df, out_path=args.out_dir / "continuity_summary.png")
+    if not args.skip_plots:
+        plot_lattice(lattice_df, sensor_geometry=sensor_geometry, out_path=args.out_dir / "lattice_overview.png")
+        plot_summary(summary_df, out_path=args.out_dir / "continuity_summary.png")
 
-    loop_rows = []
-    for run_id in args.plot_runs:
-        if run_id not in set(compare_df["run_id"]):
-            continue
-        loop_rows.append(
-            plot_loop_comparison(
-                cont_df=cont_df,
-                smooth_df=smooth_df,
-                runtime_df=runtime_df,
-                lag_df=lag_df,
-                lattice_df=lattice_df,
+        loop_rows = []
+        for run_id in args.plot_runs:
+            if run_id not in set(compare_df["run_id"]):
+                continue
+            loop_rows.append(
+                plot_loop_comparison(
+                    cont_df=cont_df,
+                    smooth_df=smooth_df,
+                    runtime_df=runtime_df,
+                    lag_df=lag_df,
+                    lattice_df=lattice_df,
+                    sensor_geometry=sensor_geometry,
+                    run_id=run_id,
+                    loop_selection=args.loop_selection,
+                )
+            )
+            plot_loop_clean(
+                track_df=smooth_df,
                 sensor_geometry=sensor_geometry,
                 run_id=run_id,
+                out_path=args.out_dir / f"run{run_id}_smoothed_continuity_clean_xy.png",
                 loop_selection=args.loop_selection,
+                plot_label="smoothed continuity",
+                timing_meaning="Offline smoother aligned to sample timestamps; may use future evidence.",
             )
-        )
-        plot_loop_clean(
-            track_df=smooth_df,
-            sensor_geometry=sensor_geometry,
-            run_id=run_id,
-            out_path=args.out_dir / f"run{run_id}_smoothed_continuity_clean_xy.png",
-            loop_selection=args.loop_selection,
-            plot_label="smoothed continuity",
-            timing_meaning="Offline smoother aligned to sample timestamps; may use future evidence.",
-        )
-        timing = plot_loop_timing(
-            track_df=smooth_df,
-            sensor_geometry=sensor_geometry,
-            run_id=run_id,
-            out_path=args.out_dir / f"run{run_id}_smoothed_continuity_timing.png",
-            loop_selection=args.loop_selection,
-            plot_label="smoothed continuity",
-            timing_meaning="Offline smoother aligned to sample timestamps; delay is not causal wall-clock availability.",
-        )
-        loop_rows[-1].update(timing)
-        loop_rows[-1]["clean_xy_path"] = f"run{run_id}_smoothed_continuity_clean_xy.png"
-        loop_rows[-1]["timing_path"] = f"run{run_id}_smoothed_continuity_timing.png"
-        plot_loop_clean(
-            track_df=runtime_df,
-            sensor_geometry=sensor_geometry,
-            run_id=run_id,
-            out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png",
-            loop_selection=args.loop_selection,
-            plot_label=f"fixedlag{args.lag_steps} continuity",
-            timing_meaning=f"Bounded-lag runtime-style estimate; sample k is typically finalized when sample k+{args.lag_steps} arrives.",
-            finalize_lag_steps=args.lag_steps,
-        )
-        runtime_timing = plot_loop_timing(
-            track_df=runtime_df,
-            sensor_geometry=sensor_geometry,
-            run_id=run_id,
-            out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png",
-            loop_selection=args.loop_selection,
-            plot_label=f"fixedlag{args.lag_steps} continuity",
-            timing_meaning="Bounded-lag runtime-style estimate; timestamps reflect aligned samples, not zero-lookahead causality.",
-        )
-        loop_rows[-1]["runtime_clean_xy_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png"
-        loop_rows[-1]["runtime_timing_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png"
-        loop_rows[-1]["runtime_estimated_delay_s"] = runtime_timing["estimated_delay_s"]
-        loop_rows[-1]["loop_selection"] = args.loop_selection
-    if loop_rows:
-        pd.DataFrame(loop_rows).to_csv(args.out_dir / "loop_comparison_summary.csv", index=False)
+            timing = plot_loop_timing(
+                track_df=smooth_df,
+                sensor_geometry=sensor_geometry,
+                run_id=run_id,
+                out_path=args.out_dir / f"run{run_id}_smoothed_continuity_timing.png",
+                loop_selection=args.loop_selection,
+                plot_label="smoothed continuity",
+                timing_meaning="Offline smoother aligned to sample timestamps; delay is not causal wall-clock availability.",
+            )
+            loop_rows[-1].update(timing)
+            loop_rows[-1]["clean_xy_path"] = f"run{run_id}_smoothed_continuity_clean_xy.png"
+            loop_rows[-1]["timing_path"] = f"run{run_id}_smoothed_continuity_timing.png"
+            plot_loop_clean(
+                track_df=runtime_df,
+                sensor_geometry=sensor_geometry,
+                run_id=run_id,
+                out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png",
+                loop_selection=args.loop_selection,
+                plot_label=f"fixedlag{args.lag_steps} continuity",
+                timing_meaning=f"Bounded-lag runtime-style estimate; sample k is typically finalized when sample k+{args.lag_steps} arrives.",
+                finalize_lag_steps=args.lag_steps,
+            )
+            runtime_timing = plot_loop_timing(
+                track_df=runtime_df,
+                sensor_geometry=sensor_geometry,
+                run_id=run_id,
+                out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png",
+                loop_selection=args.loop_selection,
+                plot_label=f"fixedlag{args.lag_steps} continuity",
+                timing_meaning="Bounded-lag runtime-style estimate; timestamps reflect aligned samples, not zero-lookahead causality.",
+            )
+            loop_rows[-1]["runtime_clean_xy_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png"
+            loop_rows[-1]["runtime_timing_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png"
+            loop_rows[-1]["runtime_estimated_delay_s"] = runtime_timing["estimated_delay_s"]
+            loop_rows[-1]["loop_selection"] = args.loop_selection
+        if loop_rows:
+            pd.DataFrame(loop_rows).to_csv(args.out_dir / "loop_comparison_summary.csv", index=False)
 
 
 if __name__ == "__main__":
