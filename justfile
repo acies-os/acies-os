@@ -10,3 +10,9 @@ import 'just/edge.just'
 [private]
 default:
     @just -f {{ justfile() }} --list
+
+# WP exp additioanl routes
+add-routes:
+    sudo route -n add -net 10.7.0.0/24 192.168.68.77
+    sudo route -n add -net 10.7.1.0/24 192.168.68.78
+    netstat -nr
