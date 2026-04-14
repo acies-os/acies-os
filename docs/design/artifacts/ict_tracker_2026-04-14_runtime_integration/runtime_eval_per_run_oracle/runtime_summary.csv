@@ -1,0 +1,2 @@
+tracker_mode,joint_station_side_accuracy,direction_accuracy_non_ambiguous,point_accuracy,mean_xy_error_m,p95_xy_error_m,mean_step_m,p95_step_m,reset_rate,n_samples
+runtime_fixedlag5_per_run_oracle,0.43794579172610554,0.35904920767306087,0.16316826302560966,45.18543237112066,157.22961975560276,10.876835294423863,32.93849093924439,0.0,14721

@@ -1,0 +1,44 @@
+{
+  "deployment_name": "assets",
+  "topology": "loop",
+  "modality": "mic",
+  "feature_names": [
+    "rs10__mic",
+    "rs1__mic",
+    "rs2__mic",
+    "rs3__mic",
+    "rs5__mic",
+    "rs6__mic",
+    "rs7__mic",
+    "rs8__mic"
+  ],
+  "sensor_order": [
+    "rs10",
+    "rs7",
+    "rs5",
+    "rs2",
+    "rs1",
+    "rs3",
+    "rs6",
+    "rs8"
+  ],
+  "runtime": {
+    "lag_steps": 5,
+    "template_weight": 1.8,
+    "anchor_weight": 1.0,
+    "neighbor_anchor_weight": 0.55,
+    "max_step_nodes": 2,
+    "hop_penalty": 0.7,
+    "direction_bonus": 0.35,
+    "direction_penalty": 0.25,
+    "stay_penalty": 0.05,
+    "reset_penalty": 4.0,
+    "margin_scale": 1.0,
+    "change_margin_threshold": 0.75,
+    "hybrid_margin_threshold": 0.7,
+    "direction_window": 5,
+    "direction_threshold": 0.08,
+    "anchor_temperature": 1.25,
+    "lock_run_direction": false
+  }
+}

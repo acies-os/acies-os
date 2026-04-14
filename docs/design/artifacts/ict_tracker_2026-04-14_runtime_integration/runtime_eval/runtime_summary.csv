@@ -1,0 +1,2 @@
+tracker_mode,joint_station_side_accuracy,direction_accuracy_non_ambiguous,point_accuracy,mean_xy_error_m,p95_xy_error_m,mean_step_m,p95_step_m,reset_rate,n_samples
+runtime_fixedlag5_global,0.4229332246450649,0.34702529886016126,0.15827729094490864,45.9832663927969,154.2747141591683,10.56694975794202,32.93849093924439,0.0,14721

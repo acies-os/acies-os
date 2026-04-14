@@ -32,6 +32,7 @@ import math
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, TypeAlias
 
 import click
@@ -41,6 +42,7 @@ import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange
+from acies.controller.ict_tracker_runtime import DeploymentAssets, FixedLagContinuityRuntime
 from numpy.random import Generator
 
 logger = logging.getLogger(__name__)
@@ -384,10 +386,36 @@ def _build_particle_filter(ctx: AciesContext) -> RoadParticleFilter:
     return pf
 
 
+def _build_continuity_runtime(ctx: AciesContext) -> FixedLagContinuityRuntime:
+    asset_dir = ctx.app['tracker_cfg'].get('asset_dir')
+    if not asset_dir:
+        raise ValueError('tracker.asset_dir is required for continuity_fixedlag mode')
+    assets = DeploymentAssets.load(Path(asset_dir))
+    ctx.app['continuity_assets'] = assets
+    return FixedLagContinuityRuntime(assets)
+
+
 def _reload_config(ctx: AciesContext) -> None:
     """Read the toml config and update app state derived from it."""
     with open(ctx.cfg['config_path'], 'rb') as f:
         config = tomllib.load(f)
+
+    tracker_cfg = config.get('tracker', {})
+    tracker_mode = tracker_cfg.get('mode', 'particle_filter')
+    ctx.app['tracker_cfg'] = tracker_cfg
+    ctx.app['tracker_mode'] = tracker_mode
+    ctx.app['node_mapping'] = config.get('map_node_mapping', {})
+    ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
+    logger.info('tracker mode: %s', tracker_mode)
+    logger.info('tracker cfg: %s', tracker_cfg)
+
+    if tracker_mode == 'continuity_fixedlag':
+        continuity_assets = DeploymentAssets.load(Path(tracker_cfg['asset_dir']))
+        ctx.app['continuity_assets'] = continuity_assets
+        ctx.app['sensor_order'] = list(continuity_assets.sensor_order)
+        logger.info('continuity asset dir: %s', tracker_cfg['asset_dir'])
+        logger.info('continuity sensors: %s', ctx.app['sensor_order'])
+        return
 
     road_coords: list[list[float]] = config['road']['coordinates']
     road = _build_road(road_coords)
@@ -395,7 +423,6 @@ def _reload_config(ctx: AciesContext) -> None:
     ctx.app['is_loop'] = _is_loop(road)
     logger.info('road: %d segments, %.1f m total, loop=%s', len(road) - 1, road[-1][2], ctx.app['is_loop'])
 
-    # compute local XY for road polyline (reference = first road point)
     ref_lat, ref_lon = road[0][0], road[0][1]
     ctx.app['ref_latlon'] = (ref_lat, ref_lon)
     road_arcs = np.array([p[2] for p in road], dtype=np.float64)
@@ -403,9 +430,6 @@ def _reload_config(ctx: AciesContext) -> None:
     ctx.app['road_arcs'] = road_arcs
     ctx.app['road_xy'] = road_xy
 
-    ctx.app['node_mapping'] = config.get('map_node_mapping', {})
-
-    # project sensor nodes onto road and compute their XY
     gps_table: dict[str, list[float]] = config.get('gps', {})
     node_arcs: dict[str, Metres] = {}
     node_xy: dict[str, tuple[float, float]] = {}
@@ -423,14 +447,8 @@ def _reload_config(ctx: AciesContext) -> None:
         )
     ctx.app['node_arcs'] = node_arcs
     ctx.app['node_xy'] = node_xy
-
-    # sorted sensor order for consistent energy vector indexing
     ctx.app['sensor_order'] = sorted(node_arcs.keys())
     logger.info('sensor order: %s', ctx.app['sensor_order'])
-
-    ctx.app['tracker_cfg'] = config.get('tracker', {})
-    ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
-    logger.info('tracker cfg: %s', ctx.app['tracker_cfg'])
 
 
 # --- app ---
@@ -447,8 +465,10 @@ def setup(ctx: AciesContext) -> None:
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
     ctx.app['energy'] = TimeWindow(window_ns=10 * _NS_PER_S, data_clock=True)
-
-    ctx.app['pf'] = _build_particle_filter(ctx)
+    if ctx.app['tracker_mode'] == 'continuity_fixedlag':
+        ctx.app['continuity_runtime'] = _build_continuity_runtime(ctx)
+    else:
+        ctx.app['pf'] = _build_particle_filter(ctx)
 
 
 @app.schedule(5.0)
@@ -461,7 +481,10 @@ def check_config(ctx: AciesContext) -> None:
     if mtime != ctx.app['config_mtime']:
         logger.info('config file changed on disk; reloading %s', ctx.cfg['config_path'])
         _reload_config(ctx)
-        ctx.app['pf'] = _build_particle_filter(ctx)
+        if ctx.app['tracker_mode'] == 'continuity_fixedlag':
+            ctx.app['continuity_runtime'] = _build_continuity_runtime(ctx)
+        else:
+            ctx.app['pf'] = _build_particle_filter(ctx)
 
 
 @app.subscribe('**/energy')
@@ -487,7 +510,10 @@ def on_start_at(ctx: AciesContext, msg: AciesKvChange) -> None:
     ctx.app['energy'] = TimeWindow(window_ns=10 * _NS_PER_S, data_clock=True)
     ensemble_win = ctx.cfg.get('ensemble_win', 30)
     ctx.app['predictions'] = TimeWindow(window_ns=ensemble_win * _NS_PER_S, data_clock=True)
-    ctx.app['pf'] = _build_particle_filter(ctx)
+    if ctx.app['tracker_mode'] == 'continuity_fixedlag':
+        ctx.app['continuity_runtime'] = _build_continuity_runtime(ctx)
+    else:
+        ctx.app['pf'] = _build_particle_filter(ctx)
     ctx.app.data.pop('prev_output_arc', None)
 
 
@@ -542,6 +568,58 @@ def _get_energy_vector(
     return np.array(energies, dtype=np.float64)
 
 
+def _get_runtime_feature_vector(
+    energy_win: TimeWindow,
+    feature_names: tuple[str, ...],
+) -> npt.NDArray[np.float64]:
+    values: list[float] = []
+    for feature_name in feature_names:
+        sensor_name, _sep, modality = feature_name.partition('__')
+        key = f'{sensor_name}/{modality}'
+        entry = energy_win.latest(key)
+        if entry is None:
+            values.append(float('nan'))
+            continue
+        _ts, energy = entry
+        values.append(float(np.log10(max(float(energy), 1e-12))))
+    return np.array(values, dtype=np.float64)
+
+
+def _publish_continuity_output(
+    ctx: AciesContext,
+    committed,
+    label: str,
+) -> None:
+    ctx.publish(
+        ctx.ns.topic('gps'),
+        {
+            label: {'lat': committed.latitude, 'lon': committed.longitude, 'elevation': 0.0},
+            'timestamp': committed.sample_timestamp_ns,
+        },
+    )
+    if ctx.app['tracker_cfg'].get('publish_debug', True):
+        ctx.publish(
+            ctx.ns.topic('tracker_debug'),
+            {
+                'timestamp': committed.sample_timestamp_ns,
+                'finalize_timestamp': committed.finalize_timestamp_ns,
+                'tracker_mode': 'continuity_fixedlag',
+                'loop_node_index': committed.loop_node_index,
+                'station_id': committed.station_id,
+                'side_label': committed.side_label,
+                'direction_label': committed.direction_label,
+                'station_margin': committed.station_margin,
+                'confidence': committed.confidence,
+                'reset': committed.reset,
+                'label': label,
+                'lat': committed.latitude,
+                'lon': committed.longitude,
+                'x_m': committed.x_m,
+                'y_m': committed.y_m,
+            },
+        )
+
+
 @app.schedule(1.0)
 def estimate(ctx: AciesContext) -> None:
     energy_win: TimeWindow = ctx.app['energy']
@@ -554,15 +632,44 @@ def estimate(ctx: AciesContext) -> None:
     for k in sorted(energy_win.keys()):
         logger.debug('>>>> %8s: %s', k, ' '.join([f'{x[1]:7.2f}' for x in energy_win.get(k)]))
 
+    label = _ensemble_label(ctx.app['predictions']) or 'unknown'
+    if ctx.app['tracker_mode'] == 'continuity_fixedlag':
+        runtime: FixedLagContinuityRuntime = ctx.app['continuity_runtime']
+        assets: DeploymentAssets = ctx.app['continuity_assets']
+        energy_threshold: float = ctx.app['tracker_cfg'].get('energy_threshold', 0.0)
+        feature_vec = _get_runtime_feature_vector(energy_win, assets.config.feature_names)
+        finite = feature_vec[np.isfinite(feature_vec)]
+        if finite.size == 0:
+            return
+        if float(np.max(np.power(10.0, finite))) <= energy_threshold:
+            logger.debug('continuity skip: max energy below threshold %.1f', energy_threshold)
+            return
+        outputs = runtime.step(
+            raw_features=feature_vec,
+            sample_timestamp_ns=now_ns,
+            finalize_timestamp_ns=now_ns,
+            label=label,
+        )
+        for committed in outputs:
+            _publish_continuity_output(ctx, committed, label)
+            logger.debug(
+                'continuity estimate: node=%d station=%d side=%s lat=%.6f lon=%.6f conf=%.3f',
+                committed.loop_node_index,
+                committed.station_id,
+                committed.side_label,
+                committed.latitude,
+                committed.longitude,
+                committed.confidence,
+            )
+        return
+
     road: Road = ctx.app['road']
     pf: RoadParticleFilter = ctx.app['pf']
     rng: Generator = ctx.app['rng']
     sensor_order: list[str] = ctx.app['sensor_order']
 
-    # --- predict ---
     pf.predict(rng=rng)
 
-    # --- update (if we have energy from all sensors and a vehicle is detected) ---
     modality: str | None = ctx.app['tracker_cfg'].get('modality')
     energy_threshold: float = ctx.app['tracker_cfg'].get('energy_threshold', 0.0)
     energy_vec = _get_energy_vector(energy_win, sensor_order, modality=modality)
@@ -577,17 +684,14 @@ def estimate(ctx: AciesContext) -> None:
     elif energy_vec is not None:
         logger.debug('pf skip: max energy %.1f below threshold %.1f', np.max(energy_vec), energy_threshold)
 
-    # --- estimate with output clamping ---
     total = road[-1][2]
     s_hat, v_hat = pf.estimate()
     arc = _wrap_arc(s_hat, total, ctx.app['is_loop'])
 
-    # clamp output: don't move more than v_max * dt from previous position
     prev_arc: float = ctx.app.get('prev_output_arc', arc)
     max_step = pf.v_max * pf.dt
     delta = arc - prev_arc
     if ctx.app['is_loop']:
-        # shortest path on loop
         if delta > total / 2:
             delta -= total
         elif delta < -total / 2:
@@ -596,7 +700,6 @@ def estimate(ctx: AciesContext) -> None:
     arc = _wrap_arc(prev_arc + clamped_delta, total, ctx.app['is_loop'])
     ctx.app['prev_output_arc'] = arc
 
-    label = _ensemble_label(ctx.app['predictions']) or 'unknown'
     lat, lon = _arc_to_latlon(road, arc)
     ctx.publish(ctx.ns.topic('gps'), {label: {'lat': lat, 'lon': lon, 'elevation': 0.0}, 'timestamp': now_ns})
     logger.debug(
