@@ -65,6 +65,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loop-selection", choices=["first", "best_smoothed"], default="best_smoothed")
     parser.add_argument("--runs", type=int, nargs="*", default=None)
     parser.add_argument("--plot-runs", type=int, nargs="*", default=[0, 1, 3])
+    parser.add_argument("--train-manifest", type=Path, default=None)
+    parser.add_argument("--experiment-name", type=str, default="default")
     return parser.parse_args()
 
 
@@ -77,6 +79,49 @@ def _zscore_array(values: np.ndarray) -> np.ndarray:
 
 def _feature_columns(df: pd.DataFrame) -> list[str]:
     return sorted([col for col in df.columns if col.endswith("__mic")])
+
+
+def load_train_manifest(
+    path: Path | None,
+    experiment_name: str,
+) -> tuple[dict[int, list[int]] | None, dict[int, dict[str, str]]]:
+    if path is None:
+        return None, {}
+    manifest = pd.read_csv(path).copy()
+    required = {"experiment_name", "eval_run_id", "eval_label", "train_run_id", "train_label", "scope_name"}
+    missing = required - set(manifest.columns)
+    if missing:
+        raise ValueError(f"Train manifest missing columns: {sorted(missing)}")
+    manifest = manifest[manifest["experiment_name"] == experiment_name].copy()
+    if manifest.empty:
+        raise ValueError(f"No train-manifest rows found for experiment_name={experiment_name!r}")
+
+    manifest["eval_run_id"] = pd.to_numeric(manifest["eval_run_id"], errors="raise").astype(int)
+    manifest["train_run_id"] = pd.to_numeric(manifest["train_run_id"], errors="raise").astype(int)
+
+    train_runs_by_eval: dict[int, list[int]] = {}
+    meta_by_eval: dict[int, dict[str, str]] = {}
+    for eval_run_id, group in manifest.groupby("eval_run_id"):
+        train_runs = sorted(set(int(v) for v in group["train_run_id"]))
+        if not train_runs:
+            raise ValueError(f"No train runs listed for eval run {eval_run_id}")
+        train_runs_by_eval[int(eval_run_id)] = train_runs
+        meta_by_eval[int(eval_run_id)] = {
+            "experiment_name": str(group["experiment_name"].iloc[0]),
+            "scope_name": str(group["scope_name"].iloc[0]),
+        }
+    return train_runs_by_eval, meta_by_eval
+
+
+def _select_train_group(df: pd.DataFrame, run_id: int, train_runs_by_eval: dict[int, list[int]] | None) -> pd.DataFrame:
+    if train_runs_by_eval is None:
+        return df[df["run_id"] != run_id].copy()
+    if run_id not in train_runs_by_eval:
+        raise ValueError(f"No manifest-defined train runs for eval run {run_id}")
+    train_group = df[df["run_id"].isin(train_runs_by_eval[run_id])].copy()
+    if train_group.empty:
+        raise ValueError(f"Manifest-selected train group is empty for eval run {run_id}")
+    return train_group
 
 
 def _loop_sensor_mapping(sensor_geometry: pd.DataFrame) -> tuple[list[str], dict[tuple[int, str], str], dict[str, int]]:
@@ -354,10 +399,12 @@ def decode_continuity(
     stay_penalty: float,
     reset_penalty: float,
     margin_scale: float,
+    train_runs_by_eval: dict[int, list[int]] | None = None,
+    meta_by_eval: dict[int, dict[str, str]] | None = None,
 ) -> pd.DataFrame:
     frames = []
     for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = hybrid_df[hybrid_df["run_id"] != run_id].copy()
+        train_group = _select_train_group(hybrid_df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
         template_arr = _build_run_templates(train_group, lattice_df=lattice_df, feature_cols=feature_cols)
 
         ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
@@ -422,6 +469,9 @@ def decode_continuity(
         ordered["pred_station_margin"] = template_margin_arr
         ordered["cc_confidence"] = pred_confidence
         ordered["cc_reset"] = pred_reset
+        if meta_by_eval is not None and int(run_id) in meta_by_eval:
+            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
+            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
         frames.append(ordered)
 
     return _attach_prediction_geometry(pd.concat(frames, ignore_index=True), lattice_df=lattice_df, tracker_mode="causal_hybrid_mic")
@@ -443,11 +493,13 @@ def decode_smoothed_continuity(
     reset_penalty: float,
     margin_scale: float,
     lock_run_direction: bool = False,
+    train_runs_by_eval: dict[int, list[int]] | None = None,
+    meta_by_eval: dict[int, dict[str, str]] | None = None,
 ) -> pd.DataFrame:
     frames = []
     n_nodes = len(lattice_df)
     for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = hybrid_df[hybrid_df["run_id"] != run_id].copy()
+        train_group = _select_train_group(hybrid_df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
         template_arr = _build_run_templates(train_group, lattice_df=lattice_df, feature_cols=feature_cols)
         ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
         run_sign = _infer_run_direction_sign(ordered) if lock_run_direction else 0
@@ -515,6 +567,9 @@ def decode_smoothed_continuity(
         ordered["cc_confidence"] = margins
         ordered["cc_reset"] = [bool(used_reset[t, state_seq[t]]) for t in range(n_steps)]
         ordered["cc_run_direction_sign"] = run_sign
+        if meta_by_eval is not None and int(run_id) in meta_by_eval:
+            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
+            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
         frames.append(ordered)
 
     return _attach_prediction_geometry(pd.concat(frames, ignore_index=True), lattice_df=lattice_df, tracker_mode="smoothed_hybrid_mic")
@@ -537,6 +592,8 @@ def decode_fixed_lag_smoothed_continuity(
     margin_scale: float,
     lag_steps: int,
     lock_run_direction: bool = False,
+    train_runs_by_eval: dict[int, list[int]] | None = None,
+    meta_by_eval: dict[int, dict[str, str]] | None = None,
 ) -> pd.DataFrame:
     if lag_steps <= 0:
         return decode_continuity(
@@ -559,7 +616,7 @@ def decode_fixed_lag_smoothed_continuity(
     frames = []
     n_nodes = len(lattice_df)
     for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = hybrid_df[hybrid_df["run_id"] != run_id].copy()
+        train_group = _select_train_group(hybrid_df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
         template_arr = _build_run_templates(train_group, lattice_df=lattice_df, feature_cols=feature_cols)
         ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
         run_sign = _infer_run_direction_sign(ordered) if lock_run_direction else 0
@@ -646,6 +703,9 @@ def decode_fixed_lag_smoothed_continuity(
         ordered["cc_confidence"] = margins
         ordered["cc_reset"] = resets
         ordered["cc_run_direction_sign"] = run_sign
+        if meta_by_eval is not None and int(run_id) in meta_by_eval:
+            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
+            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
         frames.append(ordered)
 
     return _attach_prediction_geometry(
@@ -699,12 +759,28 @@ def apply_fixed_lag_smoother(cont_df: pd.DataFrame, lattice_df: pd.DataFrame, la
 def summarize(*frames: pd.DataFrame) -> pd.DataFrame:
     compare = pd.concat(list(frames), ignore_index=True, sort=False)
     rows = []
-    for mode, group in compare.groupby("tracker_mode"):
+    group_cols = ["tracker_mode"]
+    if "experiment_name" in compare.columns:
+        group_cols.append("experiment_name")
+    if "scope_name" in compare.columns:
+        group_cols.append("scope_name")
+    for group_key, group in compare.groupby(group_cols):
+        if len(group_cols) == 3:
+            mode, experiment_name, scope_name = group_key
+        elif len(group_cols) == 2:
+            mode, experiment_name = group_key
+            scope_name = "default"
+        else:
+            mode = group_key
+            experiment_name = "default"
+            scope_name = "default"
         non_amb = group[group["direction"] != "ambiguous"]
         reset_rate = float(group["cc_reset"].mean()) if "cc_reset" in group.columns else float("nan")
         rows.append(
             {
                 "tracker_mode": mode,
+                "experiment_name": str(experiment_name),
+                "scope_name": str(scope_name),
                 "station_accuracy": float((group["pred_station"] == group["nearest_station"]).mean()),
                 "side_accuracy": float((group["pred_side"] == group["side_label"]).mean()),
                 "joint_station_side_accuracy": float(
@@ -728,13 +804,29 @@ def summarize(*frames: pd.DataFrame) -> pd.DataFrame:
 def per_run_summary(*frames: pd.DataFrame) -> pd.DataFrame:
     compare = pd.concat(list(frames), ignore_index=True, sort=False)
     rows = []
-    for (mode, run_id), group in compare.groupby(["tracker_mode", "run_id"]):
+    group_cols = ["tracker_mode", "run_id"]
+    if "experiment_name" in compare.columns:
+        group_cols.append("experiment_name")
+    if "scope_name" in compare.columns:
+        group_cols.append("scope_name")
+    for group_key, group in compare.groupby(group_cols):
+        if len(group_cols) == 4:
+            mode, run_id, experiment_name, scope_name = group_key
+        elif len(group_cols) == 3:
+            mode, run_id, experiment_name = group_key
+            scope_name = "default"
+        else:
+            mode, run_id = group_key
+            experiment_name = "default"
+            scope_name = "default"
         non_amb = group[group["direction"] != "ambiguous"]
         rows.append(
             {
                 "tracker_mode": mode,
                 "run_id": int(run_id),
                 "label": str(group["label"].iloc[0]),
+                "experiment_name": str(experiment_name),
+                "scope_name": str(scope_name),
                 "station_accuracy": float((group["pred_station"] == group["nearest_station"]).mean()),
                 "side_accuracy": float((group["pred_side"] == group["side_label"]).mean()),
                 "joint_station_side_accuracy": float(
@@ -942,6 +1034,7 @@ def plot_loop_timing(
 def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    train_runs_by_eval, meta_by_eval = load_train_manifest(args.train_manifest, args.experiment_name)
 
     pred_df = pd.read_csv(args.predictions)
     pred_df["timestamp"] = pd.to_datetime(pred_df["timestamp"], utc=True, errors="coerce").dt.tz_convert(None)
@@ -974,6 +1067,8 @@ def main() -> None:
     )
     base_df["cc_reset"] = False
     base_df["cc_confidence"] = np.nan
+    base_df["experiment_name"] = args.experiment_name
+    base_df["scope_name"] = args.experiment_name
 
     cont_df = decode_continuity(
         hybrid_df=labeled_df,
@@ -990,6 +1085,8 @@ def main() -> None:
         stay_penalty=args.stay_penalty,
         reset_penalty=args.reset_penalty,
         margin_scale=args.margin_scale,
+        train_runs_by_eval=train_runs_by_eval,
+        meta_by_eval=meta_by_eval,
     )
     smooth_df = decode_smoothed_continuity(
         hybrid_df=labeled_df,
@@ -1006,8 +1103,12 @@ def main() -> None:
         stay_penalty=args.stay_penalty,
         reset_penalty=args.reset_penalty,
         margin_scale=args.margin_scale,
+        train_runs_by_eval=train_runs_by_eval,
+        meta_by_eval=meta_by_eval,
     )
     lag_df = apply_fixed_lag_smoother(cont_df, lattice_df=lattice_df, lag_steps=args.lag_steps)
+    lag_df["experiment_name"] = args.experiment_name
+    lag_df["scope_name"] = args.experiment_name
     runtime_df = decode_fixed_lag_smoothed_continuity(
         hybrid_df=labeled_df,
         lattice_df=lattice_df,
@@ -1025,6 +1126,8 @@ def main() -> None:
         margin_scale=args.margin_scale,
         lag_steps=args.lag_steps,
         lock_run_direction=args.lock_run_direction,
+        train_runs_by_eval=train_runs_by_eval,
+        meta_by_eval=meta_by_eval,
     )
 
     compare_df = pd.concat([base_df, cont_df, smooth_df, runtime_df, lag_df], ignore_index=True, sort=False)

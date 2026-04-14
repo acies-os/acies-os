@@ -45,6 +45,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--direction-threshold", type=float, default=0.08)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--runs", type=int, nargs="*", default=None)
+    parser.add_argument("--train-manifest", type=Path, default=None)
+    parser.add_argument("--experiment-name", type=str, default="default")
     return parser.parse_args()
 
 
@@ -215,6 +217,49 @@ def load_all_labels(labels_dir: Path, runs: list[int] | None) -> pd.DataFrame:
     if not frames:
         raise ValueError("No label CSVs found")
     return pd.concat(frames, ignore_index=True)
+
+
+def load_train_manifest(
+    path: Path | None,
+    experiment_name: str,
+) -> tuple[dict[int, list[int]] | None, dict[int, dict[str, str]]]:
+    if path is None:
+        return None, {}
+    manifest = pd.read_csv(path).copy()
+    required = {"experiment_name", "eval_run_id", "eval_label", "train_run_id", "train_label", "scope_name"}
+    missing = required - set(manifest.columns)
+    if missing:
+        raise ValueError(f"Train manifest missing columns: {sorted(missing)}")
+    manifest = manifest[manifest["experiment_name"] == experiment_name].copy()
+    if manifest.empty:
+        raise ValueError(f"No train-manifest rows found for experiment_name={experiment_name!r}")
+
+    manifest["eval_run_id"] = pd.to_numeric(manifest["eval_run_id"], errors="raise").astype(int)
+    manifest["train_run_id"] = pd.to_numeric(manifest["train_run_id"], errors="raise").astype(int)
+
+    train_runs_by_eval: dict[int, list[int]] = {}
+    meta_by_eval: dict[int, dict[str, str]] = {}
+    for eval_run_id, group in manifest.groupby("eval_run_id"):
+        train_runs = sorted(set(int(v) for v in group["train_run_id"]))
+        if not train_runs:
+            raise ValueError(f"No train runs listed for eval run {eval_run_id}")
+        train_runs_by_eval[int(eval_run_id)] = train_runs
+        meta_by_eval[int(eval_run_id)] = {
+            "experiment_name": str(group["experiment_name"].iloc[0]),
+            "scope_name": str(group["scope_name"].iloc[0]),
+        }
+    return train_runs_by_eval, meta_by_eval
+
+
+def _select_train_group(df: pd.DataFrame, run_id: int, train_runs_by_eval: dict[int, list[int]] | None) -> pd.DataFrame:
+    if train_runs_by_eval is None:
+        return df[df["run_id"] != run_id].copy()
+    if run_id not in train_runs_by_eval:
+        raise ValueError(f"No manifest-defined train runs for eval run {run_id}")
+    train_group = df[df["run_id"].isin(train_runs_by_eval[run_id])].copy()
+    if train_group.empty:
+        raise ValueError(f"Manifest-selected train group is empty for eval run {run_id}")
+    return train_group
 
 
 def build_aligned_dataset(labels_df: pd.DataFrame, features_df: pd.DataFrame, runs: list[int] | None) -> pd.DataFrame:
@@ -394,6 +439,8 @@ def build_template_tracker_predictions(
     mode: str,
     direction_window: int,
     direction_threshold: float,
+    train_runs_by_eval: dict[int, list[int]] | None = None,
+    meta_by_eval: dict[int, dict[str, str]] | None = None,
 ) -> pd.DataFrame:
     feature_cols = _mode_feature_columns(df, mode)
     if not feature_cols:
@@ -401,7 +448,7 @@ def build_template_tracker_predictions(
 
     frames = []
     for run_id, test_group in df.groupby("run_id"):
-        train_group = df[df["run_id"] != run_id].copy()
+        train_group = _select_train_group(df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
         if train_group.empty:
             continue
         templates = (
@@ -448,6 +495,9 @@ def build_template_tracker_predictions(
         ordered.loc[centroid_delta >= direction_threshold, "pred_direction"] = "toward_S4"
         ordered.loc[centroid_delta <= -direction_threshold, "pred_direction"] = "toward_S1"
         ordered["tracker_mode"] = f"template_{mode}"
+        if meta_by_eval is not None and int(run_id) in meta_by_eval:
+            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
+            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
         frames.append(ordered)
 
     if not frames:
@@ -468,6 +518,8 @@ def build_viterbi_tracker_predictions(
     df: pd.DataFrame,
     mode: str,
     direction_window: int,
+    train_runs_by_eval: dict[int, list[int]] | None = None,
+    meta_by_eval: dict[int, dict[str, str]] | None = None,
 ) -> pd.DataFrame:
     feature_cols = _mode_feature_columns(df, mode)
     if not feature_cols:
@@ -479,7 +531,7 @@ def build_viterbi_tracker_predictions(
 
     frames = []
     for run_id, raw_test_group in df.groupby("run_id"):
-        raw_train_group = df[df["run_id"] != run_id].copy()
+        raw_train_group = _select_train_group(df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
         if raw_train_group.empty:
             continue
 
@@ -553,6 +605,9 @@ def build_viterbi_tracker_predictions(
         ordered["pred_station_centroid"] = ordered["pred_station"].astype(float)
         ordered["pred_direction"] = _direction_from_station_series(ordered["pred_station"], window=direction_window)
         ordered["tracker_mode"] = f"viterbi_{mode}"
+        if meta_by_eval is not None and int(run_id) in meta_by_eval:
+            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
+            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
         frames.append(ordered)
 
     if not frames:
@@ -635,6 +690,8 @@ def build_linear_regression_predictions(
     mode: str,
     direction_window: int,
     ridge_alpha: float = 1.0,
+    train_runs_by_eval: dict[int, list[int]] | None = None,
+    meta_by_eval: dict[int, dict[str, str]] | None = None,
 ) -> pd.DataFrame:
     feature_cols = _mode_feature_columns(df, mode)
     if not feature_cols:
@@ -645,7 +702,7 @@ def build_linear_regression_predictions(
 
     frames = []
     for run_id, raw_test_group in df.groupby("run_id"):
-        raw_train_group = df[df["run_id"] != run_id].copy()
+        raw_train_group = _select_train_group(df, run_id=int(run_id), train_runs_by_eval=train_runs_by_eval)
         if raw_train_group.empty:
             continue
         train_group, test_group = apply_train_normalization(raw_train_group, raw_test_group.copy(), feature_cols)
@@ -675,6 +732,9 @@ def build_linear_regression_predictions(
         ordered.loc[centroid_delta > 0, "pred_direction"] = "toward_S4"
         ordered.loc[centroid_delta < 0, "pred_direction"] = "toward_S1"
         ordered["tracker_mode"] = f"linear_{mode}"
+        if meta_by_eval is not None and int(run_id) in meta_by_eval:
+            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
+            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
         frames.append(ordered)
 
     if not frames:
@@ -684,7 +744,21 @@ def build_linear_regression_predictions(
 
 def summarize_predictions(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for mode, group in df.groupby("tracker_mode"):
+    group_cols = ["tracker_mode"]
+    if "experiment_name" in df.columns:
+        group_cols.append("experiment_name")
+    if "scope_name" in df.columns:
+        group_cols.append("scope_name")
+    for group_key, group in df.groupby(group_cols):
+        if len(group_cols) == 3:
+            mode, experiment_name, scope_name = group_key
+        elif len(group_cols) == 2:
+            mode, experiment_name = group_key
+            scope_name = "default"
+        else:
+            mode = group_key
+            experiment_name = "default"
+            scope_name = "default"
         station_acc = float((group["pred_station"] == group["nearest_station"]).mean())
         side_acc = float((group["pred_side"] == group["side_label"]).mean())
         joint_acc = float(((group["pred_station"] == group["nearest_station"]) & (group["pred_side"] == group["side_label"])).mean())
@@ -693,6 +767,8 @@ def summarize_predictions(df: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "tracker_mode": mode,
+                "experiment_name": str(experiment_name),
+                "scope_name": str(scope_name),
                 "station_accuracy": station_acc,
                 "side_accuracy": side_acc,
                 "joint_station_side_accuracy": joint_acc,
@@ -705,13 +781,29 @@ def summarize_predictions(df: pd.DataFrame) -> pd.DataFrame:
 
 def per_run_summary(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for (mode, run_id), group in df.groupby(["tracker_mode", "run_id"]):
+    group_cols = ["tracker_mode", "run_id"]
+    if "experiment_name" in df.columns:
+        group_cols.append("experiment_name")
+    if "scope_name" in df.columns:
+        group_cols.append("scope_name")
+    for group_key, group in df.groupby(group_cols):
+        if len(group_cols) == 4:
+            mode, run_id, experiment_name, scope_name = group_key
+        elif len(group_cols) == 3:
+            mode, run_id, experiment_name = group_key
+            scope_name = "default"
+        else:
+            mode, run_id = group_key
+            experiment_name = "default"
+            scope_name = "default"
         non_amb = group[group["direction"] != "ambiguous"]
         rows.append(
             {
                 "tracker_mode": mode,
                 "run_id": int(run_id),
                 "label": str(group["label"].iloc[0]),
+                "experiment_name": str(experiment_name),
+                "scope_name": str(scope_name),
                 "station_accuracy": float((group["pred_station"] == group["nearest_station"]).mean()),
                 "side_accuracy": float((group["pred_side"] == group["side_label"]).mean()),
                 "joint_station_side_accuracy": float(
@@ -798,6 +890,7 @@ def main() -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     selected_runs = set(args.runs) if args.runs else None
+    train_runs_by_eval, meta_by_eval = load_train_manifest(args.train_manifest, args.experiment_name)
     labels_df = load_all_labels(args.labels_dir, runs=list(selected_runs) if selected_runs else None)
     sensor_locations = load_sensor_locations(args.data_dir)
     sensor_geometry = build_sensor_geometry(sensor_locations)
@@ -830,32 +923,38 @@ def main() -> None:
 
     prediction_frames = []
     for mode in ["mic", "geo", "fused"]:
-        prediction_frames.append(
-            build_tracker_predictions(
-                aligned_df,
-                sensor_geometry=sensor_geometry,
-                modality_mode=mode,
-                temperature=args.temperature,
-                change_margin_threshold=args.change_margin_threshold,
-                direction_window=args.direction_window,
-                direction_threshold=args.direction_threshold,
-            )
+        frame = build_tracker_predictions(
+            aligned_df,
+            sensor_geometry=sensor_geometry,
+            modality_mode=mode,
+            temperature=args.temperature,
+            change_margin_threshold=args.change_margin_threshold,
+            direction_window=args.direction_window,
+            direction_threshold=args.direction_threshold,
         )
-        prediction_frames.append(
-            build_sensor_centroid_predictions(
-                aligned_df,
-                sensor_geometry=sensor_geometry,
-                modality_mode=mode,
-                temperature=args.temperature,
-                direction_window=args.direction_window,
-            )
+        frame["experiment_name"] = args.experiment_name
+        frame["scope_name"] = args.experiment_name
+        prediction_frames.append(frame)
+
+        frame = build_sensor_centroid_predictions(
+            aligned_df,
+            sensor_geometry=sensor_geometry,
+            modality_mode=mode,
+            temperature=args.temperature,
+            direction_window=args.direction_window,
         )
+        frame["experiment_name"] = args.experiment_name
+        frame["scope_name"] = args.experiment_name
+        prediction_frames.append(frame)
+
         prediction_frames.append(
             build_template_tracker_predictions(
                 aligned_df,
                 mode=mode,
                 direction_window=args.direction_window,
                 direction_threshold=args.direction_threshold,
+                train_runs_by_eval=train_runs_by_eval,
+                meta_by_eval=meta_by_eval,
             )
         )
         prediction_frames.append(
@@ -864,6 +963,8 @@ def main() -> None:
                 sensor_geometry=sensor_geometry,
                 mode=mode,
                 direction_window=args.direction_window,
+                train_runs_by_eval=train_runs_by_eval,
+                meta_by_eval=meta_by_eval,
             )
         )
         prediction_frames.append(
@@ -871,11 +972,15 @@ def main() -> None:
                 aligned_df_raw,
                 mode=mode,
                 direction_window=args.direction_window,
+                train_runs_by_eval=train_runs_by_eval,
+                meta_by_eval=meta_by_eval,
             )
         )
     pred_df = pd.concat(prediction_frames, ignore_index=True)
     hybrid_df = build_hybrid_mic_predictions(pred_df)
     if not hybrid_df.empty:
+        hybrid_df["experiment_name"] = args.experiment_name
+        hybrid_df["scope_name"] = args.experiment_name
         pred_df = pd.concat([pred_df, hybrid_df], ignore_index=True)
     pred_df.to_csv(args.out_dir / "tracker_predictions.csv", index=False)
 
