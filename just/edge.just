@@ -3,6 +3,9 @@ acies_namespace := env("ACIES_NAMESPACE", `hostname -s`)
 edge_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
 edge_zenoh_bridge := env("ZENOH_BRIDGE", "")
 pi_hosts := env("PI_HOSTS", "")
+mqtt_broker := env("MQTT_BROKER")
+mqtt_port := env("MQTT_PORT")
+mqtt_topic := env("MQTT_TOPIC")
 
 [private]
 default:
@@ -57,6 +60,19 @@ edge-replay-gps-local *args:
     ACIES_LOG={{ acies_log }} \
     uv run acies-gps --acies-namespace {{ acies_namespace }}/infra --acies-name gps \
         --acies-connect {{ edge_zenoh_connect }} {{ args }}
+
+# MQTT
+edge-mqtt-local *args:
+    @mkdir -p ~/.acies/logs
+    ACIES_LISTEN="" \
+    ACIES_LOG={{ acies_log }} \
+        uv run acies-mqtt \
+        --acies-namespace {{ acies_namespace }}/infra \
+        --acies-name gps \
+        --acies-connect {{ edge_zenoh_connect }} \
+        --broker {{ mqtt_broker }} \
+        --port {{ mqtt_port }} \
+        --mqtt-topic {{ mqtt_topic }}
 
 # Start infra for an edge replay
 edge-up-infra *args:
