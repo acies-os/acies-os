@@ -41,7 +41,7 @@ services:
 
   gateway:
     image: acies-server:latest
-    command: acies-gateway --config /config/${ACIES_CONFIG:-ict.toml}
+    command: acies-gateway --config /config/${ACIES_CONFIG:-wp.toml}
     network_mode: host
     environment:
       - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
