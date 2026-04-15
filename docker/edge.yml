@@ -113,7 +113,7 @@ services:
       - PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
       - ACIES_LOG=${ACIES_LOG:-}
       - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}/infra
-      - ACIES_NAME=mqtt-gps
+      - ACIES_NAME=gps
       - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     volumes:
       - ~/.acies:/root/.acies
