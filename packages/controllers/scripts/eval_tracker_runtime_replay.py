@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-_SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+_SRC_ROOT = Path(__file__).resolve().parents[1] / 'src'
 if str(_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRC_ROOT))
 
@@ -32,29 +32,33 @@ from eval_ict_simple_tracker import (
     maybe_load_or_compute,
 )
 
-EVAL_SCRIPT_PATH = Path(__file__).resolve().parent / "eval_ict_continuity_layer.py"
-EVAL_SPEC = importlib.util.spec_from_file_location("eval_ict_continuity_layer_script", EVAL_SCRIPT_PATH)
+EVAL_SCRIPT_PATH = Path(__file__).resolve().parent / 'eval_ict_continuity_layer.py'
+EVAL_SPEC = importlib.util.spec_from_file_location('eval_ict_continuity_layer_script', EVAL_SCRIPT_PATH)
 assert EVAL_SPEC is not None and EVAL_SPEC.loader is not None
 EVAL_SCRIPT = importlib.util.module_from_spec(EVAL_SPEC)
 EVAL_SPEC.loader.exec_module(EVAL_SCRIPT)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Replay ICT data through the integrated controller continuity runtime.")
-    parser.add_argument("--asset-dir", type=Path, required=True)
-    parser.add_argument("--data-dir", type=Path, default=Path("/home/tkimura4/data/2024-03-29-ICT"))
-    parser.add_argument("--labels-dir", type=Path, default=Path("docs/design/artifacts/ict_tracker_2026-04-11/labels"))
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--cache-dir", type=Path, default=Path("docs/design/artifacts/ict_tracker_2026-04-14_runtime_integration/cache"))
-    parser.add_argument("--window-seconds", type=float, default=1.0)
-    parser.add_argument("--stride-seconds", type=float, default=1.0)
-    parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--runs", type=int, nargs="*", default=None)
-    parser.add_argument("--plot-runs", type=int, nargs="*", default=[2, 3, 6, 7])
-    parser.add_argument("--loop-selection", choices=["first", "best_smoothed"], default="best_smoothed")
-    parser.add_argument("--normalization-mode", choices=["global", "per_run_oracle"], default="global")
-    parser.add_argument("--heldout-by-run", action="store_true")
-    parser.add_argument("--max-nearest-sensor-distance-m", type=float, default=None)
+    parser = argparse.ArgumentParser(
+        description='Replay ICT data through the integrated controller continuity runtime.'
+    )
+    parser.add_argument('--asset-dir', type=Path, required=True)
+    parser.add_argument('--data-dir', type=Path, default=Path('/home/tkimura4/data/2024-03-29-ICT'))
+    parser.add_argument('--labels-dir', type=Path, default=Path('docs/design/artifacts/ict_tracker_2026-04-11/labels'))
+    parser.add_argument('--out-dir', type=Path, required=True)
+    parser.add_argument(
+        '--cache-dir', type=Path, default=Path('docs/design/artifacts/ict_tracker_2026-04-14_runtime_integration/cache')
+    )
+    parser.add_argument('--window-seconds', type=float, default=1.0)
+    parser.add_argument('--stride-seconds', type=float, default=1.0)
+    parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--runs', type=int, nargs='*', default=None)
+    parser.add_argument('--plot-runs', type=int, nargs='*', default=[2, 3, 6, 7])
+    parser.add_argument('--loop-selection', choices=['first', 'best_smoothed'], default='best_smoothed')
+    parser.add_argument('--normalization-mode', choices=['global', 'per_run_oracle'], default='global')
+    parser.add_argument('--heldout-by-run', action='store_true')
+    parser.add_argument('--max-nearest-sensor-distance-m', type=float, default=None)
     return parser.parse_args()
 
 
@@ -73,14 +77,17 @@ def _load_aligned_rows(
         run_set = set(runs)
         items = [item for item in items if item.run in run_set]
     features_df = maybe_load_or_compute(
-        cache_dir / f"signal_features_w{window_seconds:g}_s{stride_seconds:g}.parquet",
+        cache_dir / f'signal_features_w{window_seconds:g}_s{stride_seconds:g}.parquet',
         lambda: pd.concat(
-            [compute_feature_file(item, window_seconds=window_seconds, stride_seconds=stride_seconds) for item in items],
+            [
+                compute_feature_file(item, window_seconds=window_seconds, stride_seconds=stride_seconds)
+                for item in items
+            ],
             ignore_index=True,
         ),
     )
     aligned_df = maybe_load_or_compute(
-        cache_dir / "aligned_energy_labels.parquet",
+        cache_dir / 'aligned_energy_labels.parquet',
         lambda: build_aligned_dataset(labels_df, features_df, runs=runs),
     )
     aligned_df = apply_corridor_filter(aligned_df, max_nearest_sensor_distance_m)
@@ -93,16 +100,18 @@ def _normalizer_for_run(run_df: pd.DataFrame, feature_names: tuple[str, ...]) ->
     return FeatureNormalizer(feature_names=feature_names, mean=mean, std=std)
 
 
-def _node_feature_stat(train_group: pd.DataFrame, lattice_df: pd.DataFrame, feature_names: tuple[str, ...], stat: str) -> pd.DataFrame:
-    template_cols = ["gt_loop_node_index"] + list(feature_names)
-    grouped = train_group[template_cols].groupby("gt_loop_node_index")[list(feature_names)]
-    if stat == "mean":
+def _node_feature_stat(
+    train_group: pd.DataFrame, lattice_df: pd.DataFrame, feature_names: tuple[str, ...], stat: str
+) -> pd.DataFrame:
+    template_cols = ['gt_loop_node_index'] + list(feature_names)
+    grouped = train_group[template_cols].groupby('gt_loop_node_index')[list(feature_names)]
+    if stat == 'mean':
         node_df = grouped.mean()
-    elif stat == "median":
+    elif stat == 'median':
         node_df = grouped.median()
     else:
         raise ValueError(stat)
-    return node_df.reindex(lattice_df["loop_node_index"]).interpolate(limit_direction="both").fillna(0.0)
+    return node_df.reindex(lattice_df['loop_node_index']).interpolate(limit_direction='both').fillna(0.0)
 
 
 def _build_heldout_assets(
@@ -114,15 +123,15 @@ def _build_heldout_assets(
     normalizer = _normalizer_for_run(train_df, feature_names=feature_names)
     normalized_train = train_df.copy()
     for idx, feature_name in enumerate(feature_names):
-        normalized_train[feature_name] = (
-            normalized_train[feature_name] - float(normalizer.mean[idx])
-        ) / float(normalizer.std[idx])
+        normalized_train[feature_name] = (normalized_train[feature_name] - float(normalizer.mean[idx])) / float(
+            normalizer.std[idx]
+        )
 
     station_side_template_df = (
-        normalized_train.groupby(["nearest_station", "side_label"])[list(feature_names)]
+        normalized_train.groupby(['nearest_station', 'side_label'])[list(feature_names)]
         .mean()
         .reset_index()
-        .rename(columns={"nearest_station": "station_id"})
+        .rename(columns={'nearest_station': 'station_id'})
     )
     station_side_templates = tuple(
         StationTemplate(
@@ -136,7 +145,7 @@ def _build_heldout_assets(
         normalized_train,
         lattice_df=lattice_df,
         feature_names=feature_names,
-        stat="median",
+        stat='median',
     ).to_numpy(dtype=np.float64)
 
     heldout_assets = DeploymentAssets(
@@ -164,24 +173,27 @@ def _to_timestamp_ns(value: pd.Timestamp) -> int:
 
 def _summarize_runtime(pred_df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for tracker_mode, group in pred_df.groupby("tracker_mode"):
-        non_amb = group[group["direction"] != "ambiguous"]
+    for tracker_mode, group in pred_df.groupby('tracker_mode'):
+        non_amb = group[group['direction'] != 'ambiguous']
         rows.append(
             {
-                "tracker_mode": tracker_mode,
-                "joint_station_side_accuracy": float(
-                    ((group["pred_station"] == group["nearest_station"]) & (group["pred_side"] == group["side_label"])).mean()
+                'tracker_mode': tracker_mode,
+                'joint_station_side_accuracy': float(
+                    (
+                        (group['pred_station'] == group['nearest_station'])
+                        & (group['pred_side'] == group['side_label'])
+                    ).mean()
                 ),
-                "direction_accuracy_non_ambiguous": float((non_amb["pred_direction"] == non_amb["direction"]).mean())
+                'direction_accuracy_non_ambiguous': float((non_amb['pred_direction'] == non_amb['direction']).mean())
                 if not non_amb.empty
-                else float("nan"),
-                "point_accuracy": float((group["pred_loop_node_index"] == group["gt_loop_node_index"]).mean()),
-                "mean_xy_error_m": float(group["pred_xy_error_m"].mean()),
-                "p95_xy_error_m": float(group["pred_xy_error_m"].quantile(0.95)),
-                "mean_step_m": float(group["pred_step_m"].dropna().mean()),
-                "p95_step_m": float(group["pred_step_m"].dropna().quantile(0.95)),
-                "reset_rate": float(group["cc_reset"].mean()),
-                "n_samples": int(len(group)),
+                else float('nan'),
+                'point_accuracy': float((group['pred_loop_node_index'] == group['gt_loop_node_index']).mean()),
+                'mean_xy_error_m': float(group['pred_xy_error_m'].mean()),
+                'p95_xy_error_m': float(group['pred_xy_error_m'].quantile(0.95)),
+                'mean_step_m': float(group['pred_step_m'].dropna().mean()),
+                'p95_step_m': float(group['pred_step_m'].dropna().quantile(0.95)),
+                'reset_rate': float(group['cc_reset'].mean()),
+                'n_samples': int(len(group)),
             }
         )
     return pd.DataFrame(rows)
@@ -192,9 +204,8 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     args.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    sensor_locations = load_sensor_locations(args.data_dir)
-    sensor_geometry = build_sensor_geometry(sensor_locations)
-    sensor_geometry.to_csv(args.out_dir / "sensor_geometry.csv", index=False)
+    sensor_geometry = pd.read_csv(args.asset_dir / 'sensor_geometry.csv')
+    sensor_geometry.to_csv(args.out_dir / 'sensor_geometry.csv', index=False)
 
     _labels_df, aligned_df = _load_aligned_rows(
         data_dir=args.data_dir,
@@ -207,28 +218,28 @@ def main() -> None:
     )
 
     assets = DeploymentAssets.load(args.asset_dir)
-    lattice_df = pd.read_csv(args.asset_dir / "lattice_points.csv")
+    lattice_df = pd.read_csv(args.asset_dir / 'lattice_points.csv')
     replay_df = assign_ground_truth_loop_nodes(aligned_df.copy(), lattice_df)
-    replay_df["gt_x_m"], replay_df["gt_y_m"] = latlon_to_xy_m(
-        replay_df["latitude"],
-        replay_df["longitude"],
-        ref_lat=float(sensor_geometry["ref_latitude"].iloc[0]),
-        ref_lon=float(sensor_geometry["ref_longitude"].iloc[0]),
+    replay_df['gt_x_m'], replay_df['gt_y_m'] = latlon_to_xy_m(
+        replay_df['latitude'],
+        replay_df['longitude'],
+        ref_lat=float(sensor_geometry['ref_latitude'].iloc[0]),
+        ref_lon=float(sensor_geometry['ref_longitude'].iloc[0]),
     )
 
     outputs: list[dict[str, object]] = []
     feature_names = assets.config.feature_names
-    mode_suffix = f"{args.normalization_mode}{'_heldout' if args.heldout_by_run else ''}"
-    tracker_mode = f"runtime_fixedlag{assets.config.lag_steps}_{mode_suffix}"
+    mode_suffix = f'{args.normalization_mode}{"_heldout" if args.heldout_by_run else ""}'
+    tracker_mode = f'runtime_fixedlag{assets.config.lag_steps}_{mode_suffix}'
 
-    for run_id, run_df in replay_df.groupby("run_id"):
+    for run_id, run_df in replay_df.groupby('run_id'):
         runtime_assets = assets
         runtime = FixedLagContinuityRuntime(runtime_assets)
         runtime.reset()
-        ordered = run_df.sort_values("timestamp").reset_index(drop=True).copy()
+        ordered = run_df.sort_values('timestamp').reset_index(drop=True).copy()
         normalizer_override = None
         if args.heldout_by_run:
-            train_df = replay_df[replay_df["run_id"] != int(run_id)].copy()
+            train_df = replay_df[replay_df['run_id'] != int(run_id)].copy()
             runtime_assets, normalizer_override = _build_heldout_assets(
                 base_assets=assets,
                 train_df=train_df,
@@ -236,7 +247,7 @@ def main() -> None:
                 feature_names=feature_names,
             )
             runtime = FixedLagContinuityRuntime(runtime_assets)
-        elif args.normalization_mode == "per_run_oracle":
+        elif args.normalization_mode == 'per_run_oracle':
             normalizer_override = _normalizer_for_run(ordered, feature_names=feature_names)
 
         for row in ordered.itertuples(index=False):
@@ -250,99 +261,107 @@ def main() -> None:
             ):
                 outputs.append(
                     {
-                        "run_id": int(run_id),
-                        "timestamp": pd.Timestamp(committed.sample_timestamp_ns),
-                        "finalize_timestamp": pd.Timestamp(committed.finalize_timestamp_ns),
-                        "pred_loop_node_index": int(committed.loop_node_index),
-                        "pred_station": int(committed.station_id),
-                        "pred_side": str(committed.side_label),
-                        "pred_direction": str(committed.direction_label),
-                        "pred_station_margin": float(committed.station_margin),
-                        "cc_confidence": float(committed.confidence),
-                        "cc_reset": bool(committed.reset),
-                        "pred_latitude": float(committed.latitude),
-                        "pred_longitude": float(committed.longitude),
-                        "pred_x_m": float(committed.x_m),
-                        "pred_y_m": float(committed.y_m),
+                        'run_id': int(run_id),
+                        'timestamp': pd.Timestamp(committed.sample_timestamp_ns),
+                        'finalize_timestamp': pd.Timestamp(committed.finalize_timestamp_ns),
+                        'pred_loop_node_index': int(committed.loop_node_index),
+                        'pred_station': int(committed.station_id),
+                        'pred_side': str(committed.side_label),
+                        'pred_direction': str(committed.direction_label),
+                        'pred_station_margin': float(committed.station_margin),
+                        'cc_confidence': float(committed.confidence),
+                        'cc_reset': bool(committed.reset),
+                        'pred_latitude': float(committed.latitude),
+                        'pred_longitude': float(committed.longitude),
+                        'pred_x_m': float(committed.x_m),
+                        'pred_y_m': float(committed.y_m),
                     }
                 )
 
-        final_ts = _to_timestamp_ns(pd.Timestamp(ordered["timestamp"].iloc[-1]))
-        for committed in runtime.flush(finalize_timestamp_ns=final_ts, label=str(ordered["label"].iloc[0])):
+        final_ts = _to_timestamp_ns(pd.Timestamp(ordered['timestamp'].iloc[-1]))
+        for committed in runtime.flush(finalize_timestamp_ns=final_ts, label=str(ordered['label'].iloc[0])):
             outputs.append(
                 {
-                    "run_id": int(run_id),
-                    "timestamp": pd.Timestamp(committed.sample_timestamp_ns),
-                    "finalize_timestamp": pd.Timestamp(committed.finalize_timestamp_ns),
-                    "pred_loop_node_index": int(committed.loop_node_index),
-                    "pred_station": int(committed.station_id),
-                    "pred_side": str(committed.side_label),
-                    "pred_direction": str(committed.direction_label),
-                    "pred_station_margin": float(committed.station_margin),
-                    "cc_confidence": float(committed.confidence),
-                    "cc_reset": bool(committed.reset),
-                    "pred_latitude": float(committed.latitude),
-                    "pred_longitude": float(committed.longitude),
-                    "pred_x_m": float(committed.x_m),
-                    "pred_y_m": float(committed.y_m),
+                    'run_id': int(run_id),
+                    'timestamp': pd.Timestamp(committed.sample_timestamp_ns),
+                    'finalize_timestamp': pd.Timestamp(committed.finalize_timestamp_ns),
+                    'pred_loop_node_index': int(committed.loop_node_index),
+                    'pred_station': int(committed.station_id),
+                    'pred_side': str(committed.side_label),
+                    'pred_direction': str(committed.direction_label),
+                    'pred_station_margin': float(committed.station_margin),
+                    'cc_confidence': float(committed.confidence),
+                    'cc_reset': bool(committed.reset),
+                    'pred_latitude': float(committed.latitude),
+                    'pred_longitude': float(committed.longitude),
+                    'pred_x_m': float(committed.x_m),
+                    'pred_y_m': float(committed.y_m),
                 }
             )
 
-    pred_only = pd.DataFrame(outputs).sort_values(["run_id", "timestamp"]).reset_index(drop=True)
-    compare_df = replay_df.merge(pred_only, on=["run_id", "timestamp"], how="inner")
-    compare_df["tracker_mode"] = tracker_mode
-    compare_df["pred_xy_error_m"] = np.sqrt(
-        np.square(compare_df["pred_x_m"] - compare_df["gt_x_m"]) + np.square(compare_df["pred_y_m"] - compare_df["gt_y_m"])
+    pred_only = pd.DataFrame(outputs).sort_values(['run_id', 'timestamp']).reset_index(drop=True)
+    compare_df = replay_df.merge(pred_only, on=['run_id', 'timestamp'], how='inner')
+    compare_df['tracker_mode'] = tracker_mode
+    compare_df['pred_xy_error_m'] = np.sqrt(
+        np.square(compare_df['pred_x_m'] - compare_df['gt_x_m'])
+        + np.square(compare_df['pred_y_m'] - compare_df['gt_y_m'])
     )
-    compare_df["pred_step_m"] = compare_df.groupby("run_id").apply(
-        lambda group: np.sqrt(np.square(group["pred_x_m"].diff()) + np.square(group["pred_y_m"].diff()))
-    ).reset_index(level=0, drop=True)
+    compare_df['pred_step_m'] = np.sqrt(
+        np.square(compare_df.groupby('run_id')['pred_x_m'].diff())
+        + np.square(compare_df.groupby('run_id')['pred_y_m'].diff())
+    )
 
-    compare_df.to_csv(args.out_dir / "runtime_predictions.csv", index=False)
+    compare_df.to_csv(args.out_dir / 'runtime_predictions.csv', index=False)
     summary_df = _summarize_runtime(compare_df)
-    summary_df.to_csv(args.out_dir / "runtime_summary.csv", index=False)
+    summary_df.to_csv(args.out_dir / 'runtime_summary.csv', index=False)
 
     per_run_df = EVAL_SCRIPT.per_run_summary(compare_df)
-    per_run_df.to_csv(args.out_dir / "runtime_per_run_summary.csv", index=False)
+    per_run_df.to_csv(args.out_dir / 'runtime_per_run_summary.csv', index=False)
 
     loop_rows: list[dict[str, object]] = []
     for run_id in args.plot_runs:
-        if run_id not in set(compare_df["run_id"]):
+        if run_id not in set(compare_df['run_id']):
             continue
-        EVAL_SCRIPT.plot_loop_clean(
-            track_df=compare_df,
-            sensor_geometry=sensor_geometry,
-            run_id=int(run_id),
-            out_path=args.out_dir / f"run{run_id}_controller_runtime_clean_xy.png",
-            loop_selection=args.loop_selection,
-            topology=assets.config.topology,
-            plot_label=f"controller runtime fixedlag{assets.config.lag_steps}",
-            timing_meaning="Integrated controller continuity runtime replayed from ICT 1 s inputs.",
-            finalize_lag_steps=assets.config.lag_steps,
-        )
-        timing = EVAL_SCRIPT.plot_loop_timing(
-            track_df=compare_df,
-            sensor_geometry=sensor_geometry,
-            run_id=int(run_id),
-            out_path=args.out_dir / f"run{run_id}_controller_runtime_timing.png",
-            loop_selection=args.loop_selection,
-            topology=assets.config.topology,
-            plot_label=f"controller runtime fixedlag{assets.config.lag_steps}",
-            timing_meaning="Integrated controller continuity runtime replayed from ICT 1 s inputs.",
-        )
-        loop_rows.append(
-            {
-                "run_id": int(run_id),
-                "clean_xy_path": f"run{run_id}_controller_runtime_clean_xy.png",
-                "timing_path": f"run{run_id}_controller_runtime_timing.png",
-                "estimated_delay_s": timing["estimated_delay_s"],
-                "loop_selection": args.loop_selection,
-            }
-        )
+        for pass_idx in range(2):
+            mode = f'pass_{pass_idx}'
+            clean_xy_path = f'run{run_id}_pass{pass_idx}_controller_runtime_clean_xy.png'
+            timing_path = f'run{run_id}_pass{pass_idx}_controller_runtime_timing.png'
+
+            EVAL_SCRIPT.plot_loop_clean(
+                track_df=compare_df,
+                sensor_geometry=sensor_geometry,
+                run_id=int(run_id),
+                out_path=args.out_dir / clean_xy_path,
+                loop_selection=mode,
+                topology=assets.config.topology,
+                plot_label=f'controller runtime fixedlag{assets.config.lag_steps}',
+                timing_meaning='Integrated controller continuity runtime replayed from ICT 1 s inputs.',
+                finalize_lag_steps=assets.config.lag_steps,
+            )
+            timing = EVAL_SCRIPT.plot_loop_timing(
+                track_df=compare_df,
+                sensor_geometry=sensor_geometry,
+                run_id=int(run_id),
+                out_path=args.out_dir / timing_path,
+                loop_selection=mode,
+                topology=assets.config.topology,
+                plot_label=f'controller runtime fixedlag{assets.config.lag_steps}',
+                timing_meaning='Integrated controller continuity runtime replayed from ICT 1 s inputs.',
+            )
+            loop_rows.append(
+                {
+                    'run_id': int(run_id),
+                    'pass_idx': pass_idx,
+                    'clean_xy_path': clean_xy_path,
+                    'timing_path': timing_path,
+                    'estimated_delay_s': timing['estimated_delay_s'],
+                    'loop_selection': mode,
+                }
+            )
 
     if loop_rows:
-        pd.DataFrame(loop_rows).to_csv(args.out_dir / "runtime_loop_plot_manifest.csv", index=False)
+        pd.DataFrame(loop_rows).to_csv(args.out_dir / 'runtime_loop_plot_manifest.csv', index=False)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -19,6 +19,8 @@ rs7 = [41.3543438, -74.0547298]
 rs10 = [41.3546901, -74.0531513]
 
 [tracker]
+mode = "continuity_fixedlag"
+
 # ------------------------- particle filter parameters -------------------------
 #
 # Tuning:

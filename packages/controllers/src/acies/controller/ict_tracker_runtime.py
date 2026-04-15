@@ -13,8 +13,8 @@ import numpy.typing as npt
 
 
 def _parse_float(value: str) -> float:
-    if value == "" or value.lower() == "nan":
-        return float("nan")
+    if value == '' or value.lower() == 'nan':
+        return float('nan')
     return float(value)
 
 
@@ -125,7 +125,7 @@ class ContinuityRuntimeConfig:
 
     @property
     def is_loop(self) -> bool:
-        return self.topology == "loop"
+        return self.topology == 'loop'
 
 
 @dataclass(frozen=True)
@@ -148,71 +148,68 @@ class DeploymentAssets:
     @classmethod
     def load(cls, asset_dir: str | Path) -> DeploymentAssets:
         root = Path(asset_dir)
-        metadata = json.loads((root / "metadata.json").read_text())
-        feature_names = [str(name) for name in metadata["feature_names"]]
-        runtime_cfg = metadata.get("runtime", {})
+        metadata = json.loads((root / 'metadata.json').read_text())
+        feature_names = [str(name) for name in metadata['feature_names']]
+        runtime_cfg = metadata.get('runtime', {})
         config = ContinuityRuntimeConfig(
-            topology=str(metadata.get("topology", "loop")),
-            modality=str(metadata.get("modality", "mic")),
+            topology=str(metadata.get('topology', 'loop')),
+            modality=str(metadata.get('modality', 'mic')),
             feature_names=tuple(feature_names),
-            lag_steps=int(runtime_cfg.get("lag_steps", 5)),
-            template_weight=float(runtime_cfg.get("template_weight", 1.8)),
-            anchor_weight=float(runtime_cfg.get("anchor_weight", 1.0)),
-            neighbor_anchor_weight=float(runtime_cfg.get("neighbor_anchor_weight", 0.55)),
-            max_step_nodes=int(runtime_cfg.get("max_step_nodes", 2)),
-            hop_penalty=float(runtime_cfg.get("hop_penalty", 0.7)),
-            direction_bonus=float(runtime_cfg.get("direction_bonus", 0.35)),
-            direction_penalty=float(runtime_cfg.get("direction_penalty", 0.25)),
-            stay_penalty=float(runtime_cfg.get("stay_penalty", 0.05)),
-            reset_penalty=float(runtime_cfg.get("reset_penalty", 4.0)),
-            margin_scale=float(runtime_cfg.get("margin_scale", 1.0)),
-            change_margin_threshold=float(runtime_cfg.get("change_margin_threshold", 0.75)),
-            hybrid_margin_threshold=float(runtime_cfg.get("hybrid_margin_threshold", 0.70)),
-            direction_window=int(runtime_cfg.get("direction_window", 5)),
-            direction_threshold=float(runtime_cfg.get("direction_threshold", 0.08)),
-            anchor_temperature=float(runtime_cfg.get("anchor_temperature", 1.25)),
-            lock_run_direction=bool(runtime_cfg.get("lock_run_direction", False)),
+            lag_steps=int(runtime_cfg.get('lag_steps', 5)),
+            template_weight=float(runtime_cfg.get('template_weight', 1.8)),
+            anchor_weight=float(runtime_cfg.get('anchor_weight', 1.0)),
+            neighbor_anchor_weight=float(runtime_cfg.get('neighbor_anchor_weight', 0.55)),
+            max_step_nodes=int(runtime_cfg.get('max_step_nodes', 2)),
+            hop_penalty=float(runtime_cfg.get('hop_penalty', 0.7)),
+            direction_bonus=float(runtime_cfg.get('direction_bonus', 0.35)),
+            direction_penalty=float(runtime_cfg.get('direction_penalty', 0.25)),
+            stay_penalty=float(runtime_cfg.get('stay_penalty', 0.05)),
+            reset_penalty=float(runtime_cfg.get('reset_penalty', 4.0)),
+            margin_scale=float(runtime_cfg.get('margin_scale', 1.0)),
+            change_margin_threshold=float(runtime_cfg.get('change_margin_threshold', 0.75)),
+            hybrid_margin_threshold=float(runtime_cfg.get('hybrid_margin_threshold', 0.70)),
+            direction_window=int(runtime_cfg.get('direction_window', 5)),
+            direction_threshold=float(runtime_cfg.get('direction_threshold', 0.08)),
+            anchor_temperature=float(runtime_cfg.get('anchor_temperature', 1.25)),
+            lock_run_direction=bool(runtime_cfg.get('lock_run_direction', False)),
         )
 
-        normalizer = cls._load_normalizer(root / "feature_stats.csv", feature_names)
-        sensor_rows = cls._load_rows(root / "sensor_geometry.csv")
-        lattice_rows = cls._load_rows(root / "lattice_points.csv")
-        template_rows = cls._load_rows(root / "station_side_templates.csv")
-        continuity_rows = cls._load_rows(root / "continuity_templates.csv")
-        edge_rows = cls._load_rows(root / "lattice_edges.csv")
+        normalizer = cls._load_normalizer(root / 'feature_stats.csv', feature_names)
+        sensor_rows = cls._load_rows(root / 'sensor_geometry.csv')
+        lattice_rows = cls._load_rows(root / 'lattice_points.csv')
+        template_rows = cls._load_rows(root / 'station_side_templates.csv')
+        continuity_rows = cls._load_rows(root / 'continuity_templates.csv')
+        edge_rows = cls._load_rows(root / 'lattice_edges.csv')
 
-        sensor_order = tuple(str(node) for node in metadata.get("sensor_order", []))
+        sensor_order = tuple(str(node) for node in metadata.get('sensor_order', []))
         if not sensor_order:
             sensor_order = tuple(
-                str(row["node"])
-                for row in sorted(sensor_rows, key=lambda row: (_parse_int(row["station_id"]), _parse_float(row["cross_m"])))
+                str(row['node'])
+                for row in sorted(
+                    sensor_rows, key=lambda row: (_parse_int(row['station_id']), _parse_float(row['cross_m']))
+                )
             )
 
-        sensor_to_station = {str(row["node"]): _parse_int(row["station_id"]) for row in sensor_rows}
-        sensor_to_cross = {str(row["node"]): _parse_float(row["cross_m"]) for row in sensor_rows}
+        sensor_to_station = {str(row['node']): _parse_int(row['station_id']) for row in sensor_rows}
+        sensor_to_cross = {str(row['node']): _parse_float(row['cross_m']) for row in sensor_rows}
         station_nodes_dict: dict[int, list[tuple[float, str]]] = defaultdict(list)
         for row in sensor_rows:
-            station_nodes_dict[_parse_int(row["station_id"])].append((_parse_float(row["cross_m"]), str(row["node"])))
+            station_nodes_dict[_parse_int(row['station_id'])].append((_parse_float(row['cross_m']), str(row['node'])))
         station_nodes = {
-            station_id: tuple(node for _cross, node in sorted(rows))
-            for station_id, rows in station_nodes_dict.items()
+            station_id: tuple(node for _cross, node in sorted(rows)) for station_id, rows in station_nodes_dict.items()
         }
         station_side_to_sensor = {
-            (station_id, "negative_cross"): nodes[0]
-            for station_id, nodes in station_nodes.items()
+            (station_id, 'negative_cross'): nodes[0] for station_id, nodes in station_nodes.items()
         }
         station_side_to_sensor.update(
-            {
-                (station_id, "positive_cross"): nodes[-1]
-                for station_id, nodes in station_nodes.items()
-            }
+            {(station_id, 'positive_cross'): nodes[-1] for station_id, nodes in station_nodes.items()}
         )
         sensor_to_rank = {sensor: idx for idx, sensor in enumerate(sensor_order)}
 
         station_side_templates = tuple(
             StationTemplate(
-                station_id=_parse_int(row["station_id"]),
-                side_label=str(row["side_label"]),
+                station_id=_parse_int(row['station_id']),
+                side_label=str(row['side_label']),
                 features=np.array([_parse_float(row[name]) for name in feature_names], dtype=np.float64),
             )
             for row in template_rows
@@ -220,32 +217,29 @@ class DeploymentAssets:
         station_side_states = tuple((template.station_id, template.side_label) for template in station_side_templates)
         station_side_template_matrix = np.vstack([template.features for template in station_side_templates])
 
-        continuity_rows = sorted(continuity_rows, key=lambda row: _parse_int(row["loop_node_index"]))
+        continuity_rows = sorted(continuity_rows, key=lambda row: _parse_int(row['loop_node_index']))
         continuity_templates = np.vstack(
-            [
-                np.array([_parse_float(row[name]) for name in feature_names], dtype=np.float64)
-                for row in continuity_rows
-            ]
+            [np.array([_parse_float(row[name]) for name in feature_names], dtype=np.float64) for row in continuity_rows]
         )
 
         lattice_nodes = tuple(
             NodeRecord(
-                node_index=_parse_int(row["loop_node_index"]),
-                sensor_node=str(row["sensor_node"]),
-                point_index=_parse_int(row["point_index"]),
-                station_id=_parse_int(row["station_id"]),
-                side_label=str(row["side_label"]),
-                sensor_rank=_parse_int(row["sensor_rank"]),
-                latitude=_parse_float(row["latitude"]),
-                longitude=_parse_float(row["longitude"]),
-                x_m=_parse_float(row["x_m"]),
-                y_m=_parse_float(row["y_m"]),
+                node_index=_parse_int(row['loop_node_index']),
+                sensor_node=str(row['sensor_node']),
+                point_index=_parse_int(row['point_index']),
+                station_id=_parse_int(row['station_id']),
+                side_label=str(row['side_label']),
+                sensor_rank=_parse_int(row['sensor_rank']),
+                latitude=_parse_float(row['latitude']),
+                longitude=_parse_float(row['longitude']),
+                x_m=_parse_float(row['x_m']),
+                y_m=_parse_float(row['y_m']),
             )
-            for row in sorted(lattice_rows, key=lambda row: _parse_int(row["loop_node_index"]))
+            for row in sorted(lattice_rows, key=lambda row: _parse_int(row['loop_node_index']))
         )
         edges_by_dst: dict[int, list[int]] = defaultdict(list)
         for row in edge_rows:
-            edges_by_dst[_parse_int(row["dst_loop_node_index"])].append(_parse_int(row["src_loop_node_index"]))
+            edges_by_dst[_parse_int(row['dst_loop_node_index'])].append(_parse_int(row['src_loop_node_index']))
         edge_lookup = {dst: tuple(sorted(srcs)) for dst, srcs in edges_by_dst.items()}
         for node_idx in range(len(lattice_nodes)):
             edge_lookup.setdefault(node_idx, tuple())
@@ -269,7 +263,7 @@ class DeploymentAssets:
 
     @staticmethod
     def _load_rows(path: Path) -> list[dict[str, str]]:
-        with path.open("r", encoding="utf-8", newline="") as handle:
+        with path.open('r', encoding='utf-8', newline='') as handle:
             return list(csv.DictReader(handle))
 
     @staticmethod
@@ -277,9 +271,9 @@ class DeploymentAssets:
         if not path.exists():
             return FeatureNormalizer.identity(feature_names)
         stats: dict[str, tuple[float, float]] = {}
-        with path.open("r", encoding="utf-8", newline="") as handle:
+        with path.open('r', encoding='utf-8', newline='') as handle:
             for row in csv.DictReader(handle):
-                stats[str(row["feature"])] = (_parse_float(row["mean"]), max(_parse_float(row["std"]), 1e-9))
+                stats[str(row['feature'])] = (_parse_float(row['mean']), max(_parse_float(row['std']), 1e-9))
         mean = np.array([stats.get(name, (0.0, 1.0))[0] for name in feature_names], dtype=np.float64)
         std = np.array([stats.get(name, (0.0, 1.0))[1] for name in feature_names], dtype=np.float64)
         return FeatureNormalizer(feature_names=tuple(feature_names), mean=mean, std=std)
@@ -344,11 +338,11 @@ class HybridMicRuntime:
         if raw_margin < self.assets.config.hybrid_margin_threshold:
             station_id = template_station
             side_label = template_side
-            source_mode = "template_fallback"
+            source_mode = 'template_fallback'
             station_margin = template_margin
         else:
             side_label = raw_side
-            source_mode = "pair_mic"
+            source_mode = 'pair_mic'
             station_margin = raw_margin
 
         direction_label = self._direction_label(station_centroid)
@@ -403,7 +397,7 @@ class HybridMicRuntime:
             if score > best_score:
                 best_score = score
                 best_sensor = sensor
-        return "positive_cross" if self.assets.sensor_to_cross[best_sensor] >= 0.0 else "negative_cross"
+        return 'positive_cross' if self.assets.sensor_to_cross[best_sensor] >= 0.0 else 'negative_cross'
 
     def _template_fallback(self, features: npt.NDArray[np.float64]) -> tuple[int, str, float]:
         residual = self.assets.station_side_template_matrix - features[None, :]
@@ -427,21 +421,21 @@ class HybridMicRuntime:
         while len(history) > max_len:
             history.popleft()
         if len(history) < 2:
-            return "ambiguous"
+            return 'ambiguous'
         diffs = np.diff(np.array(history, dtype=np.float64))
         median_delta = float(np.median(diffs))
         if median_delta >= self.assets.config.direction_threshold:
-            return "toward_S4"
+            return 'toward_S4'
         if median_delta <= -self.assets.config.direction_threshold:
-            return "toward_S1"
-        return "ambiguous"
+            return 'toward_S1'
+        return 'ambiguous'
 
     def _feature_for_sensor(self, features: npt.NDArray[np.float64], sensor: str) -> float:
         for idx, feature_name in enumerate(self.assets.config.feature_names):
-            sensor_name, _sep, _modality = feature_name.partition("__")
+            sensor_name, _sep, _modality = feature_name.partition('__')
             if sensor_name == sensor:
                 return float(features[idx])
-        return float("nan")
+        return float('nan')
 
 
 class FixedLagContinuityRuntime:
@@ -506,6 +500,7 @@ class FixedLagContinuityRuntime:
     def _anchor_score_vector(self, anchor_sensor_rank: int, margin: float) -> npt.NDArray[np.float64]:
         n_sensors = max(len(self.assets.sensor_order), 1)
         margin_trust = max(0.2, min(1.5, float(margin) / max(self.assets.config.margin_scale, 1e-6)))
+
         scores = np.zeros(len(self.assets.lattice_nodes), dtype=np.float64)
         for idx, node in enumerate(self.assets.lattice_nodes):
             dist = abs(node.sensor_rank - anchor_sensor_rank)
@@ -556,9 +551,7 @@ class FixedLagContinuityRuntime:
                 if self.run_direction_sign != 0 and delta != 0 and int(np.sign(delta)) != self.run_direction_sign:
                     continue
                 candidate = float(
-                    prev_scores[src]
-                    + emission[dst]
-                    + self._transition_score(delta=delta, expected_sign=expected_sign)
+                    prev_scores[src] + emission[dst] + self._transition_score(delta=delta, expected_sign=expected_sign)
                 )
                 if candidate > best_score:
                     best_score = candidate
@@ -582,14 +575,21 @@ class FixedLagContinuityRuntime:
 
     @staticmethod
     def _global_direction_sign(side_label: str, direction_label: str) -> int:
-        if direction_label == "ambiguous":
+        if direction_label == 'ambiguous':
             return 0
-        if side_label == "negative_cross":
-            return 1 if direction_label == "toward_S4" else -1
-        return 1 if direction_label == "toward_S1" else -1
+        if side_label == 'negative_cross':
+            return 1 if direction_label == 'toward_S4' else -1
+        return 1 if direction_label == 'toward_S1' else -1
 
     def _transition_score(self, delta: int, expected_sign: int) -> float:
         if delta == 0:
+            if expected_sign != 0:
+                # When direction is detected, raise the stay cost to 85% of the net
+                # forward hop cost. This removes artificial inertia in dense flat-emission
+                # segments without applying the penalty during ambiguous phases (where
+                # forcing movement with no directional evidence causes erratic jumps).
+                net_forward_cost = self.assets.config.hop_penalty - self.assets.config.direction_bonus
+                return -(net_forward_cost * 0.85)
             return -self.assets.config.stay_penalty
         score = -self.assets.config.hop_penalty * abs(delta)
         if expected_sign != 0:

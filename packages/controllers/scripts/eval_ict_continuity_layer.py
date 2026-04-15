@@ -318,10 +318,15 @@ def _select_loop_bounds(
     if topology == 'line':
         if smooth_run.empty:
             return 0, 0
-        gaps = smooth_run['timestamp'].diff().dt.total_seconds().fillna(1.0) > 1.5
+        gaps = smooth_run['timestamp'].diff().dt.total_seconds().fillna(1.0) > 10.0
         segment_id = gaps.cumsum()
-        seg_sizes = smooth_run.groupby(segment_id).size()
-        best_seg = int(seg_sizes.idxmax())
+        seg_sizes = smooth_run.groupby(segment_id).size().sort_values(ascending=False)
+        pass_idx = 0
+        if mode.startswith('pass_'):
+            pass_idx = int(mode.split('_')[1])
+        if pass_idx >= len(seg_sizes):
+            pass_idx = 0
+        best_seg = int(seg_sizes.index[pass_idx])
         seg_idx = np.flatnonzero(segment_id.to_numpy() == best_seg)
         return int(seg_idx[0]), int(seg_idx[-1])
     loops = _find_all_loop_bounds(smooth_run['axis_m'])
@@ -369,15 +374,19 @@ def _estimate_delay_seconds(
     pred_centered = pred_progress - base_offset
     for lag in range(-max_lag_steps, max_lag_steps + 1):
         if lag < 0:
+            if -lag >= n:
+                continue
             gt = gt_progress[-lag:]
             pred = pred_centered[: n + lag]
         elif lag > 0:
+            if lag >= n:
+                continue
             gt = gt_progress[: n - lag]
             pred = pred_centered[lag:]
         else:
             gt = gt_progress
             pred = pred_centered
-        if len(gt) < 10:
+        if len(gt) < 10 or len(pred) != len(gt):
             continue
         err = float(np.mean(np.abs(gt - pred)))
         if err < best_err:
@@ -1341,14 +1350,14 @@ def plot_loop_clean(
     pred_x = loop_df['pred_x_m'].copy().to_numpy()
     pred_y = loop_df['pred_y_m'].copy().to_numpy()
     diffs = np.sqrt(np.square(np.diff(pred_x)) + np.square(np.diff(pred_y)))
-    
+
     # Also check if cc_reset is available and true
     resets = np.zeros_like(diffs, dtype=bool)
     if 'cc_reset' in loop_df.columns:
         resets = loop_df['cc_reset'].iloc[1:].to_numpy(dtype=bool)
 
     jump_indices = np.where((diffs > 25.0) | resets)[0]
-    
+
     if len(jump_indices) > 0:
         # We need to insert NaNs at jump_indices + 1
         # To do this safely, we construct a new array
