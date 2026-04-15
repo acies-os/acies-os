@@ -120,9 +120,11 @@ def build_point_lattice(
 
     if getattr(cfg, 'road_polyline', None) is not None:
         road_latlon = np.array(cfg.road_polyline, dtype=float)
-        road_x, road_y = latlon_to_xy_m(pd.Series(road_latlon[:, 0]), pd.Series(road_latlon[:, 1]), ref_lat=ref_lat, ref_lon=ref_lon)
+        road_x, road_y = latlon_to_xy_m(
+            pd.Series(road_latlon[:, 0]), pd.Series(road_latlon[:, 1]), ref_lat=ref_lat, ref_lon=ref_lon
+        )
         road_xy = np.column_stack([road_x.to_numpy(), road_y.to_numpy()])
-        
+
         diffs = np.diff(road_xy, axis=0)
         segment_lengths = np.linalg.norm(diffs, axis=1)
         road_dists = np.concatenate(([0.0], np.cumsum(segment_lengths)))
@@ -132,27 +134,27 @@ def build_point_lattice(
             min_dist = float('inf')
             best_dist_along = 0.0
             for i in range(1, len(road_xy)):
-                p1, p2 = road_xy[i-1], road_xy[i]
+                p1, p2 = road_xy[i - 1], road_xy[i]
                 dx = p2[0] - p1[0]
                 dy = p2[1] - p1[1]
-                L2 = dx*dx + dy*dy
-                t = max(0.0, min(1.0, ((xy[0] - p1[0])*dx + (xy[1] - p1[1])*dy) / L2)) if L2 != 0 else 0.0
+                L2 = dx * dx + dy * dy
+                t = max(0.0, min(1.0, ((xy[0] - p1[0]) * dx + (xy[1] - p1[1]) * dy) / L2)) if L2 != 0 else 0.0
                 px = p1[0] + t * dx
                 py = p1[1] + t * dy
-                dist_sq = (xy[0] - px)**2 + (xy[1] - py)**2
+                dist_sq = (xy[0] - px) ** 2 + (xy[1] - py) ** 2
                 if dist_sq < min_dist:
                     min_dist = dist_sq
-                    best_dist_along = road_dists[i-1] + t * segment_lengths[i-1]
+                    best_dist_along = road_dists[i - 1] + t * segment_lengths[i - 1]
             return best_dist_along
 
         def get_polyline_point(d: float) -> tuple[np.ndarray, np.ndarray]:
             d = max(0.0, min(total_len, d))
             for i in range(1, len(road_dists)):
                 if d <= road_dists[i] or i == len(road_dists) - 1:
-                    d0, d1 = road_dists[i-1], road_dists[i]
+                    d0, d1 = road_dists[i - 1], road_dists[i]
                     t = (d - d0) / (d1 - d0) if d1 > d0 else 0.0
-                    pt = road_xy[i-1] + t * diffs[i-1]
-                    tangent = diffs[i-1] / segment_lengths[i-1]
+                    pt = road_xy[i - 1] + t * diffs[i - 1]
+                    tangent = diffs[i - 1] / segment_lengths[i - 1]
                     return pt, tangent
             return road_xy[-1], diffs[-1] / segment_lengths[-1]
 
@@ -162,57 +164,61 @@ def build_point_lattice(
             node_xy = np.array([float(node_row['station_x_m']), float(node_row['station_y_m'])])
             d_along = project_to_polyline(node_xy)
             sensor_dists.append(d_along)
-        
+
         is_forward = sensor_dists[0] < sensor_dists[-1] if len(sensor_dists) > 1 else True
-        
+
         boundaries = []
         if is_forward:
             boundaries.append(0.0)
             for i in range(1, len(sensor_dists)):
-                boundaries.append((sensor_dists[i-1] + sensor_dists[i]) / 2.0)
+                boundaries.append((sensor_dists[i - 1] + sensor_dists[i]) / 2.0)
             boundaries.append(total_len)
         else:
             boundaries.append(total_len)
             for i in range(1, len(sensor_dists)):
-                boundaries.append((sensor_dists[i-1] + sensor_dists[i]) / 2.0)
+                boundaries.append((sensor_dists[i - 1] + sensor_dists[i]) / 2.0)
             boundaries.append(0.0)
 
         for sensor_rank, node in enumerate(loop_order):
             b_start = boundaries[sensor_rank]
             b_end = boundaries[sensor_rank + 1]
-            
+
             length = abs(b_end - b_start)
             num_points = max(1, round(length / cfg.target_point_spacing_m))
-            
+
             station_id = int(sensor_meta.loc[node, 'station_id'])
             side_label = 'positive_cross' if float(sensor_meta.loc[node, 'cross_m']) >= 0.0 else 'negative_cross'
-            
+
             step = (b_end - b_start) / num_points
-            
+
             for i in range(num_points):
                 d_pt = b_start + step * (i + 0.5)
                 pt, tangent = get_polyline_point(d_pt)
-                
+
                 if b_end < b_start:
                     tangent = -tangent
 
-                lat_arr, lon_arr = xy_to_latlon_m(np.array([pt[0]]), np.array([pt[1]]), ref_lat=ref_lat, ref_lon=ref_lon)
-                
-                point_rows.append({
-                    'sensor_node': node,
-                    'station_id': station_id,
-                    'side_label': side_label,
-                    'sensor_rank': sensor_rank,
-                    'point_index': i + 1,
-                    'loop_node_index': loop_node_index,
-                    'x_m': float(pt[0]),
-                    'y_m': float(pt[1]),
-                    'latitude': float(lat_arr[0]),
-                    'longitude': float(lon_arr[0]),
-                    'u_m': float(d_pt),
-                    'tangent_x': float(tangent[0]),
-                    'tangent_y': float(tangent[1]),
-                })
+                lat_arr, lon_arr = xy_to_latlon_m(
+                    np.array([pt[0]]), np.array([pt[1]]), ref_lat=ref_lat, ref_lon=ref_lon
+                )
+
+                point_rows.append(
+                    {
+                        'sensor_node': node,
+                        'station_id': station_id,
+                        'side_label': side_label,
+                        'sensor_rank': sensor_rank,
+                        'point_index': i + 1,
+                        'loop_node_index': loop_node_index,
+                        'x_m': float(pt[0]),
+                        'y_m': float(pt[1]),
+                        'latitude': float(lat_arr[0]),
+                        'longitude': float(lon_arr[0]),
+                        'u_m': float(d_pt),
+                        'tangent_x': float(tangent[0]),
+                        'tangent_y': float(tangent[1]),
+                    }
+                )
                 loop_node_index += 1
 
     else:
@@ -225,10 +231,14 @@ def build_point_lattice(
             center_cut = float(sensor_rows['nearest_sensor_distance_m'].quantile(cfg.center_quantile))
             center_rows = sensor_rows[sensor_rows['nearest_sensor_distance_m'] <= center_cut].copy()
             if center_rows.empty:
-                center_rows = sensor_rows.nsmallest(max(1, min(25, len(sensor_rows))), 'nearest_sensor_distance_m').copy()
+                center_rows = sensor_rows.nsmallest(
+                    max(1, min(25, len(sensor_rows))), 'nearest_sensor_distance_m'
+                ).copy()
             center_xy = center_rows[['x_m', 'y_m']].to_numpy(dtype=float).mean(axis=0)
 
-            sensor_rows['u_m'] = ((sensor_rows[['x_m', 'y_m']].to_numpy(dtype=float) - center_xy) @ tangent).astype(float)
+            sensor_rows['u_m'] = ((sensor_rows[['x_m', 'y_m']].to_numpy(dtype=float) - center_xy) @ tangent).astype(
+                float
+            )
             neg_rows = sensor_rows[sensor_rows['u_m'] < 0.0].sort_values('u_m').reset_index(drop=True)
             pos_rows = sensor_rows[sensor_rows['u_m'] >= 0.0].sort_values('u_m').reset_index(drop=True)
 
@@ -281,11 +291,11 @@ def build_point_lattice(
                         'latitude': float(lat),
                         'longitude': float(lon),
                         'u_m': float(u_m),
-                    'tangent_x': float(tangent[0]),
-                    'tangent_y': float(tangent[1]),
-                }
-            )
-            loop_node_index += 1
+                        'tangent_x': float(tangent[0]),
+                        'tangent_y': float(tangent[1]),
+                    }
+                )
+                loop_node_index += 1
 
     lattice = pd.DataFrame(point_rows).sort_values('loop_node_index').reset_index(drop=True)
     n_nodes = len(lattice)

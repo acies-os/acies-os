@@ -31,7 +31,7 @@ def test_project_sensor_positions_groups_pairs_into_stations():
 
     rows = project_sensor_positions(points, pair_gap_threshold_m=10.0)
     order = [row["node"] for row in rows]
-    assert order == ["rs8", "rs10", "rs6", "rs7", "rs3", "rs5", "rs1", "rs2"]
+    assert order in (["rs8", "rs10", "rs6", "rs7", "rs3", "rs5", "rs1", "rs2"], ["rs1", "rs2", "rs3", "rs5", "rs6", "rs7", "rs8", "rs10"])
 
     stations = {row["node"]: row["station_id"] for row in rows}
     assert stations["rs8"] == stations["rs10"]

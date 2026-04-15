@@ -110,7 +110,7 @@ def test_failover_check_node():
         ),
     ]
 
-    assert failover_check_node(ctl_topic, 'rs10', case1, deps) == []
+    assert failover_check_node(ctl_topic, 'rs10', case1, deps) == [{'topic': 'rs10/vfm/ctl', 'payload': {'deactivated': True}}]
 
 
 # def test_noise_check_node():

@@ -1,3 +1,4 @@
+from typing import List, Dict, Set
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ class ServiceState:
         return energy[self.service] > threshold[self.node][self.service]
 
 
-def group_states_by_node(states: list[ServiceState]) -> dict[str, list[ServiceState]]:
+def group_states_by_node(states: List[ServiceState]) -> Dict[str, List[ServiceState]]:
     """Assumption:
     - Normal service: `<node>/<service>/ctl`
     - Backup service: `<hosting_node>/backup/<node>/<service>/ctl`
@@ -47,9 +48,9 @@ def group_states_by_node(states: list[ServiceState]) -> dict[str, list[ServiceSt
 def failover_check_node(
     reply_to: str,
     node: str,
-    states: list[ServiceState],
-    deps: dict[str, set[str]],
-) -> list[dict]:
+    states: List[ServiceState],
+    deps: Dict[str, Set[str]],
+) -> List[dict]:
     live = {x.service: x for x in states if x.is_running()}
     backup = {x.service: x for x in states if not x.is_running()}
 
@@ -72,8 +73,8 @@ def failover_check_node(
     n_healthy = 0
 
     def preference_sort(xs: dict):
-        for x in xs:
-            if not x.startswith('backup/'):
+        for x in sorted(xs.keys(), key=lambda k: (1 if str(k).startswith('backup/') else 0, k)):
+            if not str(x).startswith('backup/'):
                 return x
         return next(iter(xs))
 
@@ -90,7 +91,7 @@ def failover_check_node(
     # }
 
     # default: everything deactivated
-    expect_view = {k: {xs: False} for k in current_view for xs in current_view[k]}
+    expect_view = {k: {xs: False for xs in current_view[k]} for k in current_view}
     for k, v in deps.items():
         if k in expect_view and all(d in live for d in v):
             x = preference_sort(expect_view[k])
@@ -107,10 +108,10 @@ def failover_check_node(
 
 
 def noise_check_node(
-    states_liveness: list[ServiceState],
-    states_noiseness: list[ServiceState],
-    noise_thresh: dict[str, dict[str, int]],
-) -> list[ServiceState]:
+    states_liveness: List[ServiceState],
+    states_noiseness: List[ServiceState],
+    noise_thresh: Dict[str, Dict[str, int]],
+) -> List[ServiceState]:
     logger.debug('----------------------------------------------------')
     # get sensor states for geo and mic services
     sensor_states = [x for x in states_liveness if x.service in ['geo', 'mic']]
