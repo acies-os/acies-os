@@ -16,6 +16,7 @@ from acies.controller.ict_tracker_runtime import (
     FixedLagContinuityRuntime,
     NodeRecord,
     StationTemplate,
+    signed_path_delta,
 )
 
 
@@ -92,3 +93,49 @@ def test_fixed_lag_runtime_commits_sequence() -> None:
     committed.extend(runtime.flush(finalize_timestamp_ns=10))
 
     assert [row.loop_node_index for row in committed] == [0, 1, 2, 3]
+
+
+def test_signed_path_delta_line_does_not_wrap() -> None:
+    assert signed_path_delta(3, 0, n_nodes=4, is_loop=False) == -3
+    assert signed_path_delta(0, 3, n_nodes=4, is_loop=False) == 3
+    assert signed_path_delta(3, 0, n_nodes=4, is_loop=True) == 1
+
+
+def test_fixed_lag_runtime_line_topology_clamps_boundaries() -> None:
+    assets = _assets()
+    line_assets = DeploymentAssets(
+        config=ContinuityRuntimeConfig(
+            topology="line",
+            modality=assets.config.modality,
+            feature_names=assets.config.feature_names,
+            lag_steps=assets.config.lag_steps,
+            max_step_nodes=1,
+            reset_penalty=100.0,
+        ),
+        feature_normalizer=assets.feature_normalizer,
+        sensor_order=assets.sensor_order,
+        sensor_to_station=assets.sensor_to_station,
+        sensor_to_cross=assets.sensor_to_cross,
+        station_nodes=assets.station_nodes,
+        station_side_templates=assets.station_side_templates,
+        station_side_states=assets.station_side_states,
+        station_side_template_matrix=assets.station_side_template_matrix,
+        continuity_templates=assets.continuity_templates,
+        lattice_nodes=assets.lattice_nodes,
+        edges_by_dst=assets.edges_by_dst,
+        sensor_to_rank=assets.sensor_to_rank,
+        station_side_to_sensor=assets.station_side_to_sensor,
+    )
+    runtime = FixedLagContinuityRuntime(line_assets)
+    feature_rows = [
+        np.array([0.0, 0.0, 0.0, 1.0]),
+        np.array([1.0, 0.0, 0.0, 0.0]),
+        np.array([1.0, 0.0, 0.0, 0.0]),
+    ]
+
+    committed = []
+    for idx, row in enumerate(feature_rows):
+        committed.extend(runtime.step(row, sample_timestamp_ns=idx, finalize_timestamp_ns=idx))
+    committed.extend(runtime.flush(finalize_timestamp_ns=10))
+
+    assert [row.loop_node_index for row in committed] == [1, 0, 0]

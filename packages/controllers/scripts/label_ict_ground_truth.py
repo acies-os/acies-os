@@ -20,6 +20,43 @@ import pandas as pd
 from acies.controller.ict_ground_truth import SensorPoint, parse_gps_run_file, project_sensor_positions
 
 
+def resolve_data_dir(data_dir: Path) -> Path:
+    if (data_dir / "sensor_location.parquet").exists():
+        return data_dir
+    if (data_dir / "raw" / "sensor_location.parquet").exists():
+        return data_dir / "raw"
+    raise FileNotFoundError(f"Could not find sensor_location.parquet under {data_dir}")
+
+
+def normalize_run_label(value: object) -> str:
+    if isinstance(value, pd.Series):
+        if value.empty:
+            return ""
+        return normalize_run_label(value.iloc[0])
+    if hasattr(value, "tolist") and not isinstance(value, str):
+        items = value.tolist()
+        if isinstance(items, list):
+            if not items:
+                return ""
+            return normalize_run_label(items[0])
+    if isinstance(value, list):
+        if not value:
+            return ""
+        return normalize_run_label(value[0])
+    if value is None or pd.isna(value):
+        return ""
+    return str(value)
+
+
+def infer_distance_column(df: pd.DataFrame) -> str:
+    if "distance" in df.columns:
+        return "distance"
+    numeric_cols = [col for col in df.columns if col != "time" and pd.api.types.is_numeric_dtype(df[col])]
+    if len(numeric_cols) == 1:
+        return numeric_cols[0]
+    raise ValueError(f"Unable to infer distance column from {list(df.columns)}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate discrete ICT ground-truth labels for tracker development.")
     parser.add_argument("--data-dir", type=Path, default=Path("/home/tkimura4/data/2024-03-29-ICT"))
@@ -32,6 +69,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_sensor_locations(data_dir: Path) -> pd.DataFrame:
+    data_dir = resolve_data_dir(data_dir)
     df = pd.read_parquet(data_dir / "sensor_location.parquet").copy()
     out = df.rename(columns={"sensor_id": "node", "latitude": "sensor_latitude", "longitude": "sensor_longitude"}).copy()
     out["node"] = out["node"].astype(str)
@@ -39,6 +77,7 @@ def load_sensor_locations(data_dir: Path) -> pd.DataFrame:
 
 
 def inventory_runs(data_dir: Path) -> list[dict[str, object]]:
+    data_dir = resolve_data_dir(data_dir)
     rows: list[dict[str, object]] = []
     for path in sorted(data_dir.glob("run*_gps.parquet")):
         parsed = parse_gps_run_file(path)
@@ -49,7 +88,11 @@ def inventory_runs(data_dir: Path) -> list[dict[str, object]]:
 
 
 def load_run_meta(data_dir: Path) -> pd.DataFrame:
-    return pd.read_parquet(data_dir / "run_ids.parquet").sort_values("run_id").reset_index(drop=True)
+    data_dir = resolve_data_dir(data_dir)
+    meta = pd.read_parquet(data_dir / "run_ids.parquet").sort_values("run_id").reset_index(drop=True)
+    if "label" in meta.columns:
+        meta["label"] = meta["label"].map(normalize_run_label)
+    return meta
 
 
 def load_run_gps(gps_path: Path) -> pd.DataFrame:
@@ -68,11 +111,13 @@ def load_sensor_geometry(sensor_locations: pd.DataFrame, pair_gap_threshold_m: f
 
 
 def load_run_dis_matrix(data_dir: Path, run_id: int, sensor_locations: pd.DataFrame) -> pd.DataFrame:
+    data_dir = resolve_data_dir(data_dir)
     frames: list[pd.DataFrame] = []
     for row in sensor_locations.itertuples(index=False):
         path = data_dir / f"run{run_id}_{row.node}_dis.parquet"
         df = pd.read_parquet(path).copy()
-        out = df.rename(columns={"time": "timestamp", "distance": row.node}).copy()
+        distance_col = infer_distance_column(df)
+        out = df.rename(columns={"time": "timestamp", distance_col: row.node}).copy()
         out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
         out[row.node] = pd.to_numeric(out[row.node], errors="coerce")
         frames.append(out[["timestamp", row.node]].dropna(subset=["timestamp"]))
@@ -180,7 +225,9 @@ def save_run_labels(run_labels: pd.DataFrame, out_dir: Path) -> None:
 
 def plot_run_labels(run_labels: pd.DataFrame, out_dir: Path) -> None:
     run_id = int(run_labels["run_id"].iloc[0])
-    station_colors = {1: "tab:blue", 2: "tab:orange", 3: "tab:green", 4: "tab:red"}
+    palette = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:olive"]
+    station_ids = sorted(int(v) for v in run_labels["nearest_station"].unique())
+    station_colors = {station_id: palette[idx % len(palette)] for idx, station_id in enumerate(station_ids)}
     direction_colors = {"toward_S4": "tab:green", "toward_S1": "tab:red", "ambiguous": "0.5"}
 
     fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
@@ -240,13 +287,14 @@ def write_summary(summary_rows: list[dict[str, object]], out_dir: Path) -> None:
 def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = resolve_data_dir(args.data_dir)
 
-    run_meta = load_run_meta(args.data_dir)
-    sensor_locations = load_sensor_locations(args.data_dir)
+    run_meta = load_run_meta(data_dir)
+    sensor_locations = load_sensor_locations(data_dir)
     sensor_geometry = load_sensor_geometry(sensor_locations, pair_gap_threshold_m=args.pair_gap_threshold_m)
     sensor_geometry.to_csv(args.out_dir / "sensor_geometry.csv", index=False)
 
-    runs = inventory_runs(args.data_dir)
+    runs = inventory_runs(data_dir)
     if args.runs:
         selected = set(args.runs)
         runs = [run for run in runs if int(run["run_id"]) in selected]
@@ -255,11 +303,11 @@ def main() -> None:
     for run in runs:
         run_id = int(run["run_id"])
         label_row = run_meta[run_meta["run_id"] == run_id]
-        run_label = str(label_row.iloc[0]["label"]) if not label_row.empty else str(run.get("label") or f"run{run_id}")
+        run_label = normalize_run_label(label_row.iloc[0]["label"]) if not label_row.empty else normalize_run_label(run.get("label")) or f"run{run_id}"
 
         gps_df = load_run_gps(Path(run["gps_path"]))
         station_trace = compute_station_trace(gps_df, sensor_geometry)
-        dis_df = load_run_dis_matrix(args.data_dir, run_id, sensor_locations)
+        dis_df = load_run_dis_matrix(data_dir, run_id, sensor_locations)
         run_labels = assign_labels(
             run_id=run_id,
             run_label=run_label,

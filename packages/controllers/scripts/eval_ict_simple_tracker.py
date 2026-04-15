@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 _SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC_ROOT) not in sys.path:
@@ -47,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=int, nargs="*", default=None)
     parser.add_argument("--train-manifest", type=Path, default=None)
     parser.add_argument("--experiment-name", type=str, default="default")
+    parser.add_argument("--max-nearest-sensor-distance-m", type=float, default=None)
     return parser.parse_args()
 
 
@@ -60,7 +62,36 @@ def coerce_datetime(series: pd.Series) -> pd.Series:
     return out.dt.tz_convert(None)
 
 
+def resolve_data_dir(data_dir: Path) -> Path:
+    if (data_dir / "sensor_location.parquet").exists():
+        return data_dir
+    if (data_dir / "raw" / "sensor_location.parquet").exists():
+        return data_dir / "raw"
+    raise FileNotFoundError(f"Could not find sensor_location.parquet under {data_dir}")
+
+
+def normalize_run_label(value: Any) -> str:
+    if isinstance(value, np.ndarray):
+        if value.size == 0:
+            return ""
+        return normalize_run_label(value.tolist())
+    if isinstance(value, list):
+        if not value:
+            return ""
+        return normalize_run_label(value[0])
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return ""
+    return str(value)
+
+
+def apply_corridor_filter(df: pd.DataFrame, max_nearest_sensor_distance_m: float | None) -> pd.DataFrame:
+    if max_nearest_sensor_distance_m is None or "nearest_sensor_distance_m" not in df.columns:
+        return df
+    return df[df["nearest_sensor_distance_m"] <= float(max_nearest_sensor_distance_m)].copy()
+
+
 def inventory_signal_files(data_dir: Path) -> list[SensorFile]:
+    data_dir = resolve_data_dir(data_dir)
     rows: list[SensorFile] = []
     for path in sorted(data_dir.glob("run*_rs*_*.parquet")):
         stem = path.stem
@@ -77,6 +108,7 @@ def inventory_signal_files(data_dir: Path) -> list[SensorFile]:
 
 
 def load_sensor_locations(data_dir: Path) -> pd.DataFrame:
+    data_dir = resolve_data_dir(data_dir)
     df = pd.read_parquet(data_dir / "sensor_location.parquet").copy()
     out = df.rename(columns={"sensor_id": "node", "latitude": "sensor_latitude", "longitude": "sensor_longitude"}).copy()
     out["node"] = out["node"].astype(str)
@@ -558,6 +590,8 @@ def build_viterbi_tracker_predictions(
         for _train_run_id, run_group in train_group.groupby("run_id"):
             run_states = list(run_group.sort_values("timestamp")[["nearest_station", "side_label"]].itertuples(index=False, name=None))
             for src, dst in zip(run_states[:-1], run_states[1:]):
+                if src not in state_to_idx or dst not in state_to_idx:
+                    continue
                 trans_counts[state_to_idx[src], state_to_idx[dst]] += 1.0
 
         trans_probs = np.zeros_like(trans_counts)
@@ -917,6 +951,7 @@ def main() -> None:
         cache_dir / "aligned_energy_labels.parquet",
         lambda: build_aligned_dataset(labels_df, features_df, runs=list(selected_runs) if selected_runs else None),
     )
+    aligned_df_raw = apply_corridor_filter(aligned_df_raw, args.max_nearest_sensor_distance_m)
 
     energy_cols = [col for col in aligned_df_raw.columns if "__" in col]
     aligned_df = normalize_energy_columns(aligned_df_raw, energy_cols)

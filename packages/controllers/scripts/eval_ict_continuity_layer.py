@@ -6,76 +6,81 @@ import math
 import sys
 from pathlib import Path
 
-_SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+_SRC_ROOT = Path(__file__).resolve().parents[1] / 'src'
 if str(_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRC_ROOT))
 
 import matplotlib
 
-matplotlib.use("Agg")
+matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 
+from eval_ict_simple_tracker import apply_corridor_filter
+
 from acies.controller.ict_continuity import (
     ContinuityLatticeConfig,
     assign_ground_truth_loop_nodes,
     build_lattice_edges,
     build_point_lattice,
-    infer_loop_sensor_order,
+    infer_sensor_order,
     latlon_to_xy_m,
     sensor_for_station_side,
-    signed_loop_delta,
+    signed_topology_delta,
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate a continuity layer on top of ICT hybrid_mic predictions.")
+    parser = argparse.ArgumentParser(description='Evaluate a continuity layer on top of ICT hybrid_mic predictions.')
     parser.add_argument(
-        "--predictions",
+        '--predictions',
         type=Path,
-        default=Path("docs/design/artifacts/ict_tracker_2026-04-11/simple_tracker/tracker_predictions.csv"),
+        default=Path('docs/design/artifacts/ict_tracker_2026-04-11/simple_tracker/tracker_predictions.csv'),
     )
     parser.add_argument(
-        "--sensor-geometry",
+        '--sensor-geometry',
         type=Path,
-        default=Path("docs/design/artifacts/ict_tracker_2026-04-11/plots/sensor_geometry.csv"),
+        default=Path('docs/design/artifacts/ict_tracker_2026-04-11/plots/sensor_geometry.csv'),
     )
     parser.add_argument(
-        "--out-dir",
+        '--out-dir',
         type=Path,
-        default=Path("docs/design/artifacts/ict_tracker_2026-04-12/continuity_layer"),
+        default=Path('docs/design/artifacts/ict_tracker_2026-04-12/continuity_layer'),
     )
-    parser.add_argument("--base-mode", default="hybrid_mic")
-    parser.add_argument("--point-count", type=int, default=5)
-    parser.add_argument("--center-quantile", type=float, default=0.15)
-    parser.add_argument("--template-weight", type=float, default=1.8)
-    parser.add_argument("--anchor-weight", type=float, default=1.1)
-    parser.add_argument("--neighbor-anchor-weight", type=float, default=0.55)
-    parser.add_argument("--max-step-nodes", type=int, default=3)
-    parser.add_argument("--hop-penalty", type=float, default=0.55)
-    parser.add_argument("--direction-bonus", type=float, default=0.30)
-    parser.add_argument("--direction-penalty", type=float, default=0.45)
-    parser.add_argument("--stay-penalty", type=float, default=0.08)
-    parser.add_argument("--reset-penalty", type=float, default=2.25)
-    parser.add_argument("--margin-scale", type=float, default=1.0)
-    parser.add_argument("--lag-steps", type=int, default=10)
-    parser.add_argument("--lock-run-direction", action="store_true")
-    parser.add_argument("--loop-selection", choices=["first", "best_smoothed"], default="best_smoothed")
-    parser.add_argument("--runs", type=int, nargs="*", default=None)
-    parser.add_argument("--plot-runs", type=int, nargs="*", default=[0, 1, 3])
-    parser.add_argument("--skip-plots", action="store_true")
-    parser.add_argument("--train-manifest", type=Path, default=None)
-    parser.add_argument("--experiment-name", type=str, default="default")
+    parser.add_argument('--base-mode', default='hybrid_mic')
+    parser.add_argument('--point-count', type=int, default=5)
+    parser.add_argument('--center-quantile', type=float, default=0.15)
+    parser.add_argument('--topology', choices=['loop', 'line'], default='loop')
+    parser.add_argument('--template-weight', type=float, default=1.8)
+    parser.add_argument('--anchor-weight', type=float, default=1.1)
+    parser.add_argument('--neighbor-anchor-weight', type=float, default=0.55)
+    parser.add_argument('--max-step-nodes', type=int, default=3)
+    parser.add_argument('--hop-penalty', type=float, default=0.55)
+    parser.add_argument('--direction-bonus', type=float, default=0.30)
+    parser.add_argument('--direction-penalty', type=float, default=0.45)
+    parser.add_argument('--stay-penalty', type=float, default=0.08)
+    parser.add_argument('--reset-penalty', type=float, default=2.25)
+    parser.add_argument('--margin-scale', type=float, default=1.0)
+    parser.add_argument('--lag-steps', type=int, default=10)
+    parser.add_argument('--lock-run-direction', action='store_true')
+    parser.add_argument('--loop-selection', choices=['first', 'best_smoothed'], default='best_smoothed')
+    parser.add_argument('--runs', type=int, nargs='*', default=None)
+    parser.add_argument('--plot-runs', type=int, nargs='*', default=[0, 1, 3])
+    parser.add_argument('--skip-plots', action='store_true')
+    parser.add_argument('--train-manifest', type=Path, default=None)
+    parser.add_argument('--experiment-name', type=str, default='default')
     parser.add_argument(
-        "--observation-model",
-        choices=["pooled_mean", "pooled_median", "diagvar_mean", "kmeans2_min"],
-        default="pooled_mean",
+        '--observation-model',
+        choices=['pooled_mean', 'pooled_median', 'diagvar_mean', 'kmeans2_min'],
+        default='pooled_mean',
     )
-    parser.add_argument("--loop-manifest", type=Path, default=None)
-    parser.add_argument("--eval-fold", type=int, default=None)
+    parser.add_argument('--loop-manifest', type=Path, default=None)
+    parser.add_argument('--eval-fold', type=int, default=None)
+    parser.add_argument('--template-scope', choices=['heldout_by_run', 'fullfit'], default='heldout_by_run')
+    parser.add_argument('--max-nearest-sensor-distance-m', type=float, default=None)
     return parser.parse_args()
 
 
@@ -87,7 +92,7 @@ def _zscore_array(values: np.ndarray) -> np.ndarray:
 
 
 def _feature_columns(df: pd.DataFrame) -> list[str]:
-    return sorted([col for col in df.columns if col.endswith("__mic")])
+    return sorted([col for col in df.columns if col.endswith('__mic')])
 
 
 def load_train_manifest(
@@ -97,27 +102,27 @@ def load_train_manifest(
     if path is None:
         return None, {}
     manifest = pd.read_csv(path).copy()
-    required = {"experiment_name", "eval_run_id", "eval_label", "train_run_id", "train_label", "scope_name"}
+    required = {'experiment_name', 'eval_run_id', 'eval_label', 'train_run_id', 'train_label', 'scope_name'}
     missing = required - set(manifest.columns)
     if missing:
-        raise ValueError(f"Train manifest missing columns: {sorted(missing)}")
-    manifest = manifest[manifest["experiment_name"] == experiment_name].copy()
+        raise ValueError(f'Train manifest missing columns: {sorted(missing)}')
+    manifest = manifest[manifest['experiment_name'] == experiment_name].copy()
     if manifest.empty:
-        raise ValueError(f"No train-manifest rows found for experiment_name={experiment_name!r}")
+        raise ValueError(f'No train-manifest rows found for experiment_name={experiment_name!r}')
 
-    manifest["eval_run_id"] = pd.to_numeric(manifest["eval_run_id"], errors="raise").astype(int)
-    manifest["train_run_id"] = pd.to_numeric(manifest["train_run_id"], errors="raise").astype(int)
+    manifest['eval_run_id'] = pd.to_numeric(manifest['eval_run_id'], errors='raise').astype(int)
+    manifest['train_run_id'] = pd.to_numeric(manifest['train_run_id'], errors='raise').astype(int)
 
     train_runs_by_eval: dict[int, list[int]] = {}
     meta_by_eval: dict[int, dict[str, str]] = {}
-    for eval_run_id, group in manifest.groupby("eval_run_id"):
-        train_runs = sorted(set(int(v) for v in group["train_run_id"]))
+    for eval_run_id, group in manifest.groupby('eval_run_id'):
+        train_runs = sorted(set(int(v) for v in group['train_run_id']))
         if not train_runs:
-            raise ValueError(f"No train runs listed for eval run {eval_run_id}")
+            raise ValueError(f'No train runs listed for eval run {eval_run_id}')
         train_runs_by_eval[int(eval_run_id)] = train_runs
         meta_by_eval[int(eval_run_id)] = {
-            "experiment_name": str(group["experiment_name"].iloc[0]),
-            "scope_name": str(group["scope_name"].iloc[0]),
+            'experiment_name': str(group['experiment_name'].iloc[0]),
+            'scope_name': str(group['scope_name'].iloc[0]),
         }
     return train_runs_by_eval, meta_by_eval
 
@@ -126,81 +131,85 @@ def load_loop_manifest(path: Path | None, eval_fold: int | None) -> pd.DataFrame
     if path is None:
         return None
     if eval_fold is None:
-        raise ValueError("--eval-fold is required when --loop-manifest is set")
+        raise ValueError('--eval-fold is required when --loop-manifest is set')
     manifest = pd.read_csv(path).copy()
     required = {
-        "run_id",
-        "label",
-        "loop_id",
-        "loop_rank_in_run",
-        "start_timestamp",
-        "end_timestamp",
-        "start_elapsed_s",
-        "end_elapsed_s",
-        "n_points",
-        "fold_id",
+        'run_id',
+        'label',
+        'loop_id',
+        'loop_rank_in_run',
+        'start_timestamp',
+        'end_timestamp',
+        'start_elapsed_s',
+        'end_elapsed_s',
+        'n_points',
+        'fold_id',
     }
     missing = required - set(manifest.columns)
     if missing:
-        raise ValueError(f"Loop manifest missing columns: {sorted(missing)}")
-    manifest["run_id"] = pd.to_numeric(manifest["run_id"], errors="raise").astype(int)
-    manifest["loop_id"] = pd.to_numeric(manifest["loop_id"], errors="raise").astype(int)
-    manifest["fold_id"] = pd.to_numeric(manifest["fold_id"], errors="raise").astype(int)
-    manifest["start_timestamp"] = pd.to_datetime(manifest["start_timestamp"], utc=True, errors="coerce").dt.tz_convert(None)
-    manifest["end_timestamp"] = pd.to_datetime(manifest["end_timestamp"], utc=True, errors="coerce").dt.tz_convert(None)
-    manifest = manifest[manifest["fold_id"] == int(eval_fold)].copy()
+        raise ValueError(f'Loop manifest missing columns: {sorted(missing)}')
+    manifest['run_id'] = pd.to_numeric(manifest['run_id'], errors='raise').astype(int)
+    manifest['loop_id'] = pd.to_numeric(manifest['loop_id'], errors='raise').astype(int)
+    manifest['fold_id'] = pd.to_numeric(manifest['fold_id'], errors='raise').astype(int)
+    manifest['start_timestamp'] = pd.to_datetime(manifest['start_timestamp'], utc=True, errors='coerce').dt.tz_convert(
+        None
+    )
+    manifest['end_timestamp'] = pd.to_datetime(manifest['end_timestamp'], utc=True, errors='coerce').dt.tz_convert(None)
+    manifest = manifest[manifest['fold_id'] == int(eval_fold)].copy()
     if manifest.empty:
-        raise ValueError(f"No loop-manifest rows found for eval_fold={eval_fold}")
+        raise ValueError(f'No loop-manifest rows found for eval_fold={eval_fold}')
     return manifest
 
 
 def annotate_eval_loops(hybrid_df: pd.DataFrame, loop_manifest: pd.DataFrame | None) -> pd.DataFrame:
     out = hybrid_df.copy()
-    out["loop_id"] = -1
-    out["fold_id"] = np.nan
-    out["eval_split"] = "train"
+    out['loop_id'] = -1
+    out['fold_id'] = np.nan
+    out['eval_split'] = 'train'
     if loop_manifest is None:
         return out
 
     for row in loop_manifest.itertuples(index=False):
         mask = (
-            (out["run_id"] == int(row.run_id))
-            & (out["timestamp"] >= row.start_timestamp)
-            & (out["timestamp"] <= row.end_timestamp)
+            (out['run_id'] == int(row.run_id))
+            & (out['timestamp'] >= row.start_timestamp)
+            & (out['timestamp'] <= row.end_timestamp)
         )
-        out.loc[mask, "loop_id"] = int(row.loop_id)
-        out.loc[mask, "fold_id"] = int(row.fold_id)
-        out.loc[mask, "eval_split"] = "test"
+        out.loc[mask, 'loop_id'] = int(row.loop_id)
+        out.loc[mask, 'fold_id'] = int(row.fold_id)
+        out.loc[mask, 'eval_split'] = 'test'
     return out
 
 
 def _select_train_group(df: pd.DataFrame, run_id: int, train_runs_by_eval: dict[int, list[int]] | None) -> pd.DataFrame:
     if train_runs_by_eval is None:
-        return df[df["run_id"] != run_id].copy()
+        return df[df['run_id'] != run_id].copy()
     if run_id not in train_runs_by_eval:
-        raise ValueError(f"No manifest-defined train runs for eval run {run_id}")
-    train_group = df[df["run_id"].isin(train_runs_by_eval[run_id])].copy()
+        raise ValueError(f'No manifest-defined train runs for eval run {run_id}')
+    train_group = df[df['run_id'].isin(train_runs_by_eval[run_id])].copy()
     if train_group.empty:
-        raise ValueError(f"Manifest-selected train group is empty for eval run {run_id}")
+        raise ValueError(f'Manifest-selected train group is empty for eval run {run_id}')
     return train_group
 
 
-def _loop_sensor_mapping(sensor_geometry: pd.DataFrame) -> tuple[list[str], dict[tuple[int, str], str], dict[str, int]]:
-    loop_order = infer_loop_sensor_order(sensor_geometry)
+def _loop_sensor_mapping(
+    sensor_geometry: pd.DataFrame, topology: str
+) -> tuple[list[str], dict[tuple[int, str], str], dict[str, int]]:
+    loop_order = infer_sensor_order(sensor_geometry, topology=topology)
     station_side_to_sensor = {}
     for row in sensor_geometry.itertuples(index=False):
-        side = "positive_cross" if float(row.cross_m) >= 0.0 else "negative_cross"
+        side = 'positive_cross' if float(row.cross_m) >= 0.0 else 'negative_cross'
         station_side_to_sensor[(int(row.station_id), side)] = str(row.node)
     sensor_to_rank = {node: idx for idx, node in enumerate(loop_order)}
     return loop_order, station_side_to_sensor, sensor_to_rank
 
 
 def _global_loop_sign(side_label: str, direction: str) -> int:
-    if direction == "ambiguous":
+    if direction == 'ambiguous':
         return 0
-    if side_label == "negative_cross":
-        return 1 if direction == "toward_S4" else -1
-    return 1 if direction == "toward_S1" else -1
+    if side_label == 'negative_cross':
+        return 1 if direction == 'toward_S4' else -1
+    return 1 if direction == 'toward_S1' else -1
 
 
 def _infer_run_direction_sign(ordered: pd.DataFrame) -> int:
@@ -224,13 +233,15 @@ def _anchor_score_vector(
     margin_scale: float,
     same_weight: float,
     neighbor_weight: float,
+    topology: str,
 ) -> np.ndarray:
-    n_sensors = int(lattice_df["sensor_rank"].max()) + 1
+    n_sensors = int(lattice_df['sensor_rank'].max()) + 1
     margin_trust = max(0.2, min(1.5, float(margin) / max(margin_scale, 1e-6)))
     out = []
     for row in lattice_df.itertuples(index=False):
         dist = abs(int(row.sensor_rank) - anchor_sensor_rank)
-        dist = min(dist, n_sensors - dist)
+        if topology == 'loop':
+            dist = min(dist, n_sensors - dist)
         if dist == 0:
             score = same_weight * margin_trust
         elif dist == 1:
@@ -243,11 +254,20 @@ def _anchor_score_vector(
 
 def _template_scores(sample: np.ndarray, templates: np.ndarray) -> np.ndarray:
     dists = np.nanmean(np.square(templates - sample[None, :]), axis=1)
-    dists = np.where(np.isnan(dists), np.nanmax(dists[np.isfinite(dists)]) + 1.0 if np.isfinite(dists).any() else 1.0, dists)
+    dists = np.where(
+        np.isnan(dists), np.nanmax(dists[np.isfinite(dists)]) + 1.0 if np.isfinite(dists).any() else 1.0, dists
+    )
     return -dists
 
 
-def _transition_score(delta: int, expected_sign: int, hop_penalty: float, direction_bonus: float, direction_penalty: float, stay_penalty: float) -> float:
+def _transition_score(
+    delta: int,
+    expected_sign: int,
+    hop_penalty: float,
+    direction_bonus: float,
+    direction_penalty: float,
+    stay_penalty: float,
+) -> float:
     if delta == 0:
         return -stay_penalty
     score = -hop_penalty * abs(delta)
@@ -271,7 +291,7 @@ def _find_loop_bounds(axis_m: pd.Series) -> tuple[int, int]:
     for start, end in zip(minima[:-1], minima[1:]):
         if max(values[start : end + 1]) > 85:
             return start, end
-    raise ValueError("Could not find a full loop segment")
+    raise ValueError('Could not find a full loop segment')
 
 
 def _find_all_loop_bounds(axis_m: pd.Series) -> list[tuple[int, int]]:
@@ -293,37 +313,56 @@ def _find_all_loop_bounds(axis_m: pd.Series) -> list[tuple[int, int]]:
 def _select_loop_bounds(
     smooth_run: pd.DataFrame,
     mode: str,
+    topology: str,
 ) -> tuple[int, int]:
-    loops = _find_all_loop_bounds(smooth_run["axis_m"])
+    if topology == 'line':
+        if smooth_run.empty:
+            return 0, 0
+        gaps = smooth_run['timestamp'].diff().dt.total_seconds().fillna(1.0) > 1.5
+        segment_id = gaps.cumsum()
+        seg_sizes = smooth_run.groupby(segment_id).size()
+        best_seg = int(seg_sizes.idxmax())
+        seg_idx = np.flatnonzero(segment_id.to_numpy() == best_seg)
+        return int(seg_idx[0]), int(seg_idx[-1])
+    loops = _find_all_loop_bounds(smooth_run['axis_m'])
     if not loops:
-        return _find_loop_bounds(smooth_run["axis_m"])
-    if mode == "first":
+        return _find_loop_bounds(smooth_run['axis_m'])
+    if mode == 'first':
         return loops[0]
     best = None
     best_key = None
     for start, end in loops:
         loop = smooth_run.iloc[start : end + 1]
-        key = (float(loop["pred_xy_error_m"].mean()), -float(((loop["pred_station"] == loop["nearest_station"]) & (loop["pred_side"] == loop["side_label"])).mean()))
+        key = (
+            float(loop['pred_xy_error_m'].mean()),
+            -float(
+                ((loop['pred_station'] == loop['nearest_station']) & (loop['pred_side'] == loop['side_label'])).mean()
+            ),
+        )
         if best_key is None or key < best_key:
             best_key = key
             best = (start, end)
     return best
 
 
-def _unwrap_loop_progress(node_series: pd.Series, n_nodes: int) -> np.ndarray:
+def _unwrap_loop_progress(node_series: pd.Series, n_nodes: int, topology: str) -> np.ndarray:
     nodes = node_series.to_numpy(dtype=int)
     out = np.zeros(len(nodes), dtype=float)
     if len(nodes) == 0:
         return out
     out[0] = float(nodes[0])
     for idx in range(1, len(nodes)):
-        out[idx] = out[idx - 1] + float(signed_loop_delta(int(nodes[idx - 1]), int(nodes[idx]), n_nodes=n_nodes))
+        out[idx] = out[idx - 1] + float(
+            signed_topology_delta(int(nodes[idx - 1]), int(nodes[idx]), n_nodes=n_nodes, topology=topology)
+        )
     return out
 
 
-def _estimate_delay_seconds(gt_progress: np.ndarray, pred_progress: np.ndarray, sample_seconds: float = 1.0, max_lag_steps: int = 15) -> float:
+def _estimate_delay_seconds(
+    gt_progress: np.ndarray, pred_progress: np.ndarray, sample_seconds: float = 1.0, max_lag_steps: int = 15
+) -> float:
     best_lag = 0
-    best_err = float("inf")
+    best_err = float('inf')
     n = len(gt_progress)
     # Remove constant offset before estimating temporal lag.
     base_offset = float(np.median(pred_progress - gt_progress))
@@ -353,19 +392,19 @@ def _estimate_progress_offset(gt_progress: np.ndarray, pred_progress: np.ndarray
 
 def _map_sensor_anchor_positions(sensor_geometry: pd.DataFrame) -> dict[tuple[int, str], tuple[float, float]]:
     out = {}
-    for station_id, group in sensor_geometry.groupby("station_id"):
-        ordered = group.sort_values("cross_m").reset_index(drop=True)
+    for station_id, group in sensor_geometry.groupby('station_id'):
+        ordered = group.sort_values('cross_m').reset_index(drop=True)
         neg = ordered.iloc[0]
         pos = ordered.iloc[-1]
-        out[(int(station_id), "negative_cross")] = (float(neg["latitude"]), float(neg["longitude"]))
-        out[(int(station_id), "positive_cross")] = (float(pos["latitude"]), float(pos["longitude"]))
+        out[(int(station_id), 'negative_cross')] = (float(neg['latitude']), float(neg['longitude']))
+        out[(int(station_id), 'positive_cross')] = (float(pos['latitude']), float(pos['longitude']))
     return out
 
 
 def _base_xy_metrics(df: pd.DataFrame, sensor_geometry: pd.DataFrame) -> pd.DataFrame:
     anchor_map = _map_sensor_anchor_positions(sensor_geometry)
-    ref_lat = float(sensor_geometry["ref_latitude"].iloc[0])
-    ref_lon = float(sensor_geometry["ref_longitude"].iloc[0])
+    ref_lat = float(sensor_geometry['ref_latitude'].iloc[0])
+    ref_lon = float(sensor_geometry['ref_longitude'].iloc[0])
 
     base = df.copy()
     pred_lat = []
@@ -374,14 +413,22 @@ def _base_xy_metrics(df: pd.DataFrame, sensor_geometry: pd.DataFrame) -> pd.Data
         lat, lon = anchor_map[(int(row.pred_station), str(row.pred_side))]
         pred_lat.append(lat)
         pred_lon.append(lon)
-    base["pred_latitude"] = pred_lat
-    base["pred_longitude"] = pred_lon
-    base["pred_x_m"], base["pred_y_m"] = latlon_to_xy_m(base["pred_latitude"], base["pred_longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
-    base["gt_x_m"], base["gt_y_m"] = latlon_to_xy_m(base["latitude"], base["longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
-    base["pred_xy_error_m"] = np.sqrt(np.square(base["pred_x_m"] - base["gt_x_m"]) + np.square(base["pred_y_m"] - base["gt_y_m"]))
-    base["pred_step_m"] = base.groupby("run_id").apply(
-        lambda group: np.sqrt(np.square(group["pred_x_m"].diff()) + np.square(group["pred_y_m"].diff()))
-    ).reset_index(level=0, drop=True)
+    base['pred_latitude'] = pred_lat
+    base['pred_longitude'] = pred_lon
+    base['pred_x_m'], base['pred_y_m'] = latlon_to_xy_m(
+        base['pred_latitude'], base['pred_longitude'], ref_lat=ref_lat, ref_lon=ref_lon
+    )
+    base['gt_x_m'], base['gt_y_m'] = latlon_to_xy_m(
+        base['latitude'], base['longitude'], ref_lat=ref_lat, ref_lon=ref_lon
+    )
+    base['pred_xy_error_m'] = np.sqrt(
+        np.square(base['pred_x_m'] - base['gt_x_m']) + np.square(base['pred_y_m'] - base['gt_y_m'])
+    )
+    base['pred_step_m'] = (
+        base.groupby('run_id')
+        .apply(lambda group: np.sqrt(np.square(group['pred_x_m'].diff()) + np.square(group['pred_y_m'].diff())))
+        .reset_index(level=0, drop=True)
+    )
     return base
 
 
@@ -391,17 +438,17 @@ def _node_feature_stat(
     feature_cols: list[str],
     stat: str,
 ) -> pd.DataFrame:
-    template_cols = ["gt_loop_node_index"] + feature_cols
-    grouped = train_group[template_cols].groupby("gt_loop_node_index")[feature_cols]
-    if stat == "mean":
+    template_cols = ['gt_loop_node_index'] + feature_cols
+    grouped = train_group[template_cols].groupby('gt_loop_node_index')[feature_cols]
+    if stat == 'mean':
         node_df = grouped.mean()
-    elif stat == "median":
+    elif stat == 'median':
         node_df = grouped.median()
-    elif stat == "var":
+    elif stat == 'var':
         node_df = grouped.var(ddof=0)
     else:
-        raise ValueError(f"Unsupported node stat {stat}")
-    return node_df.reindex(lattice_df["loop_node_index"]).interpolate(limit_direction="both").fillna(0.0)
+        raise ValueError(f'Unsupported node stat {stat}')
+    return node_df.reindex(lattice_df['loop_node_index']).interpolate(limit_direction='both').fillna(0.0)
 
 
 def _build_observation_model(
@@ -410,22 +457,32 @@ def _build_observation_model(
     feature_cols: list[str],
     observation_model: str,
 ) -> dict[str, object]:
-    base_mean = _node_feature_stat(train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat="mean").to_numpy(dtype=float)
-    if observation_model == "pooled_mean":
-        return {"name": observation_model, "templates": base_mean}
-    if observation_model == "pooled_median":
-        templates = _node_feature_stat(train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat="median").to_numpy(dtype=float)
-        return {"name": observation_model, "templates": templates}
-    if observation_model == "diagvar_mean":
-        node_var = _node_feature_stat(train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat="var").to_numpy(dtype=float)
+    base_mean = _node_feature_stat(train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat='mean').to_numpy(
+        dtype=float
+    )
+    if observation_model == 'pooled_mean':
+        return {'name': observation_model, 'templates': base_mean}
+    if observation_model == 'pooled_median':
+        templates = _node_feature_stat(
+            train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat='median'
+        ).to_numpy(dtype=float)
+        return {'name': observation_model, 'templates': templates}
+    if observation_model == 'diagvar_mean':
+        node_var = _node_feature_stat(
+            train_group, lattice_df=lattice_df, feature_cols=feature_cols, stat='var'
+        ).to_numpy(dtype=float)
         global_var = np.nanvar(train_group[feature_cols].to_numpy(dtype=float), axis=0)
         global_var = np.where(np.isfinite(global_var), global_var, 0.0)
         var_floor = np.maximum(0.25 * global_var, 1e-6)
-        return {"name": observation_model, "templates": base_mean, "variances": np.maximum(node_var, var_floor[None, :])}
-    if observation_model == "kmeans2_min":
+        return {
+            'name': observation_model,
+            'templates': base_mean,
+            'variances': np.maximum(node_var, var_floor[None, :]),
+        }
+    if observation_model == 'kmeans2_min':
         centers = np.repeat(base_mean[:, None, :], 2, axis=1)
-        for node_idx in lattice_df["loop_node_index"].astype(int):
-            node_rows = train_group[train_group["gt_loop_node_index"] == int(node_idx)][feature_cols].copy()
+        for node_idx in lattice_df['loop_node_index'].astype(int):
+            node_rows = train_group[train_group['gt_loop_node_index'] == int(node_idx)][feature_cols].copy()
             if node_rows.empty:
                 continue
             node_rows = node_rows.fillna(node_rows.mean()).fillna(0.0)
@@ -434,30 +491,34 @@ def _build_observation_model(
                 continue
             kmeans = KMeans(n_clusters=2, n_init=10, random_state=0)
             centers[int(node_idx)] = kmeans.fit(x).cluster_centers_
-        return {"name": observation_model, "centers": centers}
-    raise ValueError(f"Unsupported observation model {observation_model}")
+        return {'name': observation_model, 'centers': centers}
+    raise ValueError(f'Unsupported observation model {observation_model}')
 
 
 def _score_observation_model(sample: np.ndarray, model: dict[str, object]) -> np.ndarray:
-    if model["name"] in {"pooled_mean", "pooled_median"}:
-        templates = np.asarray(model["templates"], dtype=float)
+    if model['name'] in {'pooled_mean', 'pooled_median'}:
+        templates = np.asarray(model['templates'], dtype=float)
         return _template_scores(sample, templates)
-    if model["name"] == "diagvar_mean":
-        templates = np.asarray(model["templates"], dtype=float)
-        variances = np.asarray(model["variances"], dtype=float)
+    if model['name'] == 'diagvar_mean':
+        templates = np.asarray(model['templates'], dtype=float)
+        variances = np.asarray(model['variances'], dtype=float)
         residual = templates - sample[None, :]
         weighted = np.square(residual) / variances
         dists = np.nanmean(weighted, axis=1)
-        dists = np.where(np.isnan(dists), np.nanmax(dists[np.isfinite(dists)]) + 1.0 if np.isfinite(dists).any() else 1.0, dists)
+        dists = np.where(
+            np.isnan(dists), np.nanmax(dists[np.isfinite(dists)]) + 1.0 if np.isfinite(dists).any() else 1.0, dists
+        )
         return -dists
-    if model["name"] == "kmeans2_min":
-        centers = np.asarray(model["centers"], dtype=float)
+    if model['name'] == 'kmeans2_min':
+        centers = np.asarray(model['centers'], dtype=float)
         residual = centers - sample[None, None, :]
         dists = np.nanmean(np.square(residual), axis=2)
         best = np.nanmin(dists, axis=1)
-        best = np.where(np.isnan(best), np.nanmax(best[np.isfinite(best)]) + 1.0 if np.isfinite(best).any() else 1.0, best)
+        best = np.where(
+            np.isnan(best), np.nanmax(best[np.isfinite(best)]) + 1.0 if np.isfinite(best).any() else 1.0, best
+        )
         return -best
-    raise ValueError(f"Unsupported observation model {model['name']}")
+    raise ValueError(f'Unsupported observation model {model["name"]}')
 
 
 def _build_emission_array(
@@ -470,8 +531,9 @@ def _build_emission_array(
     anchor_weight: float,
     neighbor_anchor_weight: float,
     margin_scale: float,
+    topology: str,
 ) -> tuple[np.ndarray, np.ndarray]:
-    _loop_order, station_side_to_sensor, sensor_to_rank = _loop_sensor_mapping(sensor_geometry)
+    _loop_order, station_side_to_sensor, sensor_to_rank = _loop_sensor_mapping(sensor_geometry, topology)
     emissions = []
     template_margins = []
     for row in ordered.itertuples(index=False):
@@ -487,6 +549,7 @@ def _build_emission_array(
             margin_scale=margin_scale,
             same_weight=anchor_weight,
             neighbor_weight=neighbor_anchor_weight,
+            topology=topology,
         )
         emissions.append(template_weight * template_score + anchor_raw)
         sorted_template = np.sort(template_raw)[::-1]
@@ -497,20 +560,24 @@ def _build_emission_array(
 
 def _attach_prediction_geometry(df: pd.DataFrame, lattice_df: pd.DataFrame, tracker_mode: str) -> pd.DataFrame:
     out = df.copy()
-    node_lookup = lattice_df.set_index("loop_node_index")
-    out["pred_point_index"] = out["pred_loop_node_index"].map(node_lookup["point_index"])
-    out["pred_sensor_node"] = out["pred_loop_node_index"].map(node_lookup["sensor_node"])
-    out["pred_station"] = out["pred_loop_node_index"].map(node_lookup["station_id"])
-    out["pred_side"] = out["pred_loop_node_index"].map(node_lookup["side_label"])
-    out["pred_latitude"] = out["pred_loop_node_index"].map(node_lookup["latitude"])
-    out["pred_longitude"] = out["pred_loop_node_index"].map(node_lookup["longitude"])
-    out["pred_x_m"] = out["pred_loop_node_index"].map(node_lookup["x_m"])
-    out["pred_y_m"] = out["pred_loop_node_index"].map(node_lookup["y_m"])
-    out["pred_xy_error_m"] = np.sqrt(np.square(out["pred_x_m"] - out["gt_x_m"]) + np.square(out["pred_y_m"] - out["gt_y_m"]))
-    out["pred_step_m"] = out.groupby("run_id").apply(
-        lambda group: np.sqrt(np.square(group["pred_x_m"].diff()) + np.square(group["pred_y_m"].diff()))
-    ).reset_index(level=0, drop=True)
-    out["tracker_mode"] = tracker_mode
+    node_lookup = lattice_df.set_index('loop_node_index')
+    out['pred_point_index'] = out['pred_loop_node_index'].map(node_lookup['point_index'])
+    out['pred_sensor_node'] = out['pred_loop_node_index'].map(node_lookup['sensor_node'])
+    out['pred_station'] = out['pred_loop_node_index'].map(node_lookup['station_id'])
+    out['pred_side'] = out['pred_loop_node_index'].map(node_lookup['side_label'])
+    out['pred_latitude'] = out['pred_loop_node_index'].map(node_lookup['latitude'])
+    out['pred_longitude'] = out['pred_loop_node_index'].map(node_lookup['longitude'])
+    out['pred_x_m'] = out['pred_loop_node_index'].map(node_lookup['x_m'])
+    out['pred_y_m'] = out['pred_loop_node_index'].map(node_lookup['y_m'])
+    out['pred_xy_error_m'] = np.sqrt(
+        np.square(out['pred_x_m'] - out['gt_x_m']) + np.square(out['pred_y_m'] - out['gt_y_m'])
+    )
+    out['pred_step_m'] = (
+        out.groupby('run_id')
+        .apply(lambda group: np.sqrt(np.square(group['pred_x_m'].diff()) + np.square(group['pred_y_m'].diff())))
+        .reset_index(level=0, drop=True)
+    )
+    out['tracker_mode'] = tracker_mode
     return out
 
 
@@ -518,6 +585,7 @@ def decode_continuity(
     hybrid_df: pd.DataFrame,
     lattice_df: pd.DataFrame,
     sensor_geometry: pd.DataFrame,
+    topology: str,
     feature_cols: list[str],
     template_weight: float,
     anchor_weight: float,
@@ -529,17 +597,21 @@ def decode_continuity(
     stay_penalty: float,
     reset_penalty: float,
     margin_scale: float,
-    observation_model: str = "pooled_mean",
+    observation_model: str = 'pooled_mean',
     train_runs_by_eval: dict[int, list[int]] | None = None,
     meta_by_eval: dict[int, dict[str, str]] | None = None,
     template_train_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     frames = []
-    for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = template_train_df if template_train_df is not None else _select_train_group(
-            hybrid_df,
-            run_id=int(run_id),
-            train_runs_by_eval=train_runs_by_eval,
+    for run_id, test_group in hybrid_df.groupby('run_id'):
+        train_group = (
+            template_train_df
+            if template_train_df is not None
+            else _select_train_group(
+                hybrid_df,
+                run_id=int(run_id),
+                train_runs_by_eval=train_runs_by_eval,
+            )
         )
         observation_model_spec = _build_observation_model(
             train_group,
@@ -548,7 +620,7 @@ def decode_continuity(
             observation_model=observation_model,
         )
 
-        ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
+        ordered = test_group.sort_values('timestamp').reset_index(drop=True).copy()
         emit_arr, template_margin_arr = _build_emission_array(
             ordered=ordered,
             lattice_df=lattice_df,
@@ -559,6 +631,7 @@ def decode_continuity(
             anchor_weight=anchor_weight,
             neighbor_anchor_weight=neighbor_anchor_weight,
             margin_scale=margin_scale,
+            topology=topology,
         )
         prev_scores = None
         pred_loop_nodes = []
@@ -579,17 +652,21 @@ def decode_continuity(
                     best_score = emit[dst] - reset_penalty
                     best_reset = True
                     for src in range(n_nodes):
-                        delta = signed_loop_delta(src, dst, n_nodes=n_nodes)
+                        delta = signed_topology_delta(src, dst, n_nodes=n_nodes, topology=topology)
                         if abs(delta) > max_step_nodes:
                             continue
                         expected_sign = _global_loop_sign(str(row.pred_side), str(row.pred_direction))
-                        candidate = prev_scores[src] + emit[dst] + _transition_score(
-                            delta=delta,
-                            expected_sign=expected_sign,
-                            hop_penalty=hop_penalty,
-                            direction_bonus=direction_bonus,
-                            direction_penalty=direction_penalty,
-                            stay_penalty=stay_penalty,
+                        candidate = (
+                            prev_scores[src]
+                            + emit[dst]
+                            + _transition_score(
+                                delta=delta,
+                                expected_sign=expected_sign,
+                                hop_penalty=hop_penalty,
+                                direction_bonus=direction_bonus,
+                                direction_penalty=direction_penalty,
+                                stay_penalty=stay_penalty,
+                            )
                         )
                         if candidate > best_score:
                             best_score = candidate
@@ -599,29 +676,32 @@ def decode_continuity(
 
             scores = scores - float(np.max(scores))
             best_idx = int(np.argmax(scores))
-            pred_loop_nodes.append(int(lattice_df.iloc[best_idx]["loop_node_index"]))
+            pred_loop_nodes.append(int(lattice_df.iloc[best_idx]['loop_node_index']))
             pred_direction.append(str(row.pred_direction))
             pred_confidence.append(float(scores[best_idx] - np.partition(scores, -2)[-2]))
             pred_reset.append(bool(used_reset[best_idx]))
             prev_scores = scores
 
-        ordered["pred_loop_node_index"] = pred_loop_nodes
-        ordered["pred_direction"] = pred_direction
-        ordered["pred_station_margin"] = template_margin_arr
-        ordered["cc_confidence"] = pred_confidence
-        ordered["cc_reset"] = pred_reset
+        ordered['pred_loop_node_index'] = pred_loop_nodes
+        ordered['pred_direction'] = pred_direction
+        ordered['pred_station_margin'] = template_margin_arr
+        ordered['cc_confidence'] = pred_confidence
+        ordered['cc_reset'] = pred_reset
         if meta_by_eval is not None and int(run_id) in meta_by_eval:
-            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
-            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
+            ordered['experiment_name'] = str(meta_by_eval[int(run_id)]['experiment_name'])
+            ordered['scope_name'] = str(meta_by_eval[int(run_id)]['scope_name'])
         frames.append(ordered)
 
-    return _attach_prediction_geometry(pd.concat(frames, ignore_index=True), lattice_df=lattice_df, tracker_mode="causal_hybrid_mic")
+    return _attach_prediction_geometry(
+        pd.concat(frames, ignore_index=True), lattice_df=lattice_df, tracker_mode='causal_hybrid_mic'
+    )
 
 
 def decode_smoothed_continuity(
     hybrid_df: pd.DataFrame,
     lattice_df: pd.DataFrame,
     sensor_geometry: pd.DataFrame,
+    topology: str,
     feature_cols: list[str],
     template_weight: float,
     anchor_weight: float,
@@ -634,18 +714,22 @@ def decode_smoothed_continuity(
     reset_penalty: float,
     margin_scale: float,
     lock_run_direction: bool = False,
-    observation_model: str = "pooled_mean",
+    observation_model: str = 'pooled_mean',
     train_runs_by_eval: dict[int, list[int]] | None = None,
     meta_by_eval: dict[int, dict[str, str]] | None = None,
     template_train_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     frames = []
     n_nodes = len(lattice_df)
-    for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = template_train_df if template_train_df is not None else _select_train_group(
-            hybrid_df,
-            run_id=int(run_id),
-            train_runs_by_eval=train_runs_by_eval,
+    for run_id, test_group in hybrid_df.groupby('run_id'):
+        train_group = (
+            template_train_df
+            if template_train_df is not None
+            else _select_train_group(
+                hybrid_df,
+                run_id=int(run_id),
+                train_runs_by_eval=train_runs_by_eval,
+            )
         )
         observation_model_spec = _build_observation_model(
             train_group,
@@ -653,7 +737,7 @@ def decode_smoothed_continuity(
             feature_cols=feature_cols,
             observation_model=observation_model,
         )
-        ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
+        ordered = test_group.sort_values('timestamp').reset_index(drop=True).copy()
         run_sign = _infer_run_direction_sign(ordered) if lock_run_direction else 0
         emit_arr, template_margin_arr = _build_emission_array(
             ordered=ordered,
@@ -665,6 +749,7 @@ def decode_smoothed_continuity(
             anchor_weight=anchor_weight,
             neighbor_anchor_weight=neighbor_anchor_weight,
             margin_scale=margin_scale,
+            topology=topology,
         )
 
         n_steps = len(ordered)
@@ -675,24 +760,32 @@ def decode_smoothed_continuity(
         used_reset[0, :] = True
 
         for t in range(1, n_steps):
-            expected_sign = run_sign if run_sign != 0 else _global_loop_sign(str(ordered.iloc[t]["pred_side"]), str(ordered.iloc[t]["pred_direction"]))
+            expected_sign = (
+                run_sign
+                if run_sign != 0
+                else _global_loop_sign(str(ordered.iloc[t]['pred_side']), str(ordered.iloc[t]['pred_direction']))
+            )
             for dst in range(n_nodes):
                 best_score = emit_arr[t, dst] - reset_penalty
                 best_src = -1
                 best_reset = True
                 for src in range(n_nodes):
-                    delta = signed_loop_delta(src, dst, n_nodes=n_nodes)
+                    delta = signed_topology_delta(src, dst, n_nodes=n_nodes, topology=topology)
                     if abs(delta) > max_step_nodes:
                         continue
                     if run_sign != 0 and delta != 0 and np.sign(delta) != run_sign:
                         continue
-                    candidate = dp[t - 1, src] + emit_arr[t, dst] + _transition_score(
-                        delta=delta,
-                        expected_sign=expected_sign,
-                        hop_penalty=hop_penalty,
-                        direction_bonus=direction_bonus,
-                        direction_penalty=direction_penalty,
-                        stay_penalty=stay_penalty,
+                    candidate = (
+                        dp[t - 1, src]
+                        + emit_arr[t, dst]
+                        + _transition_score(
+                            delta=delta,
+                            expected_sign=expected_sign,
+                            hop_penalty=hop_penalty,
+                            direction_bonus=direction_bonus,
+                            direction_penalty=direction_penalty,
+                            stay_penalty=stay_penalty,
+                        )
                     )
                     if candidate > best_score:
                         best_score = candidate
@@ -713,24 +806,27 @@ def decode_smoothed_continuity(
             row_scores = dp[t] - np.max(dp[t])
             margins.append(float(row_scores[state_seq[t]] - np.partition(row_scores, -2)[-2]))
 
-        ordered["pred_loop_node_index"] = state_seq
-        ordered["pred_station_margin"] = template_margin_arr
-        ordered["pred_direction"] = ordered["pred_direction"].to_numpy()
-        ordered["cc_confidence"] = margins
-        ordered["cc_reset"] = [bool(used_reset[t, state_seq[t]]) for t in range(n_steps)]
-        ordered["cc_run_direction_sign"] = run_sign
+        ordered['pred_loop_node_index'] = state_seq
+        ordered['pred_station_margin'] = template_margin_arr
+        ordered['pred_direction'] = ordered['pred_direction'].to_numpy()
+        ordered['cc_confidence'] = margins
+        ordered['cc_reset'] = [bool(used_reset[t, state_seq[t]]) for t in range(n_steps)]
+        ordered['cc_run_direction_sign'] = run_sign
         if meta_by_eval is not None and int(run_id) in meta_by_eval:
-            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
-            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
+            ordered['experiment_name'] = str(meta_by_eval[int(run_id)]['experiment_name'])
+            ordered['scope_name'] = str(meta_by_eval[int(run_id)]['scope_name'])
         frames.append(ordered)
 
-    return _attach_prediction_geometry(pd.concat(frames, ignore_index=True), lattice_df=lattice_df, tracker_mode="smoothed_hybrid_mic")
+    return _attach_prediction_geometry(
+        pd.concat(frames, ignore_index=True), lattice_df=lattice_df, tracker_mode='smoothed_hybrid_mic'
+    )
 
 
 def decode_fixed_lag_smoothed_continuity(
     hybrid_df: pd.DataFrame,
     lattice_df: pd.DataFrame,
     sensor_geometry: pd.DataFrame,
+    topology: str,
     feature_cols: list[str],
     template_weight: float,
     anchor_weight: float,
@@ -744,7 +840,7 @@ def decode_fixed_lag_smoothed_continuity(
     margin_scale: float,
     lag_steps: int,
     lock_run_direction: bool = False,
-    observation_model: str = "pooled_mean",
+    observation_model: str = 'pooled_mean',
     train_runs_by_eval: dict[int, list[int]] | None = None,
     meta_by_eval: dict[int, dict[str, str]] | None = None,
     template_train_df: pd.DataFrame | None = None,
@@ -754,6 +850,7 @@ def decode_fixed_lag_smoothed_continuity(
             hybrid_df=hybrid_df,
             lattice_df=lattice_df,
             sensor_geometry=sensor_geometry,
+            topology=topology,
             feature_cols=feature_cols,
             template_weight=template_weight,
             anchor_weight=anchor_weight,
@@ -773,11 +870,15 @@ def decode_fixed_lag_smoothed_continuity(
 
     frames = []
     n_nodes = len(lattice_df)
-    for run_id, test_group in hybrid_df.groupby("run_id"):
-        train_group = template_train_df if template_train_df is not None else _select_train_group(
-            hybrid_df,
-            run_id=int(run_id),
-            train_runs_by_eval=train_runs_by_eval,
+    for run_id, test_group in hybrid_df.groupby('run_id'):
+        train_group = (
+            template_train_df
+            if template_train_df is not None
+            else _select_train_group(
+                hybrid_df,
+                run_id=int(run_id),
+                train_runs_by_eval=train_runs_by_eval,
+            )
         )
         observation_model_spec = _build_observation_model(
             train_group,
@@ -785,7 +886,7 @@ def decode_fixed_lag_smoothed_continuity(
             feature_cols=feature_cols,
             observation_model=observation_model,
         )
-        ordered = test_group.sort_values("timestamp").reset_index(drop=True).copy()
+        ordered = test_group.sort_values('timestamp').reset_index(drop=True).copy()
         run_sign = _infer_run_direction_sign(ordered) if lock_run_direction else 0
         emit_arr, template_margin_arr = _build_emission_array(
             ordered=ordered,
@@ -797,6 +898,7 @@ def decode_fixed_lag_smoothed_continuity(
             anchor_weight=anchor_weight,
             neighbor_anchor_weight=neighbor_anchor_weight,
             margin_scale=margin_scale,
+            topology=topology,
         )
 
         n_steps = len(ordered)
@@ -809,24 +911,32 @@ def decode_fixed_lag_smoothed_continuity(
         committed = np.full(n_steps, -1, dtype=int)
 
         for t in range(1, n_steps):
-            expected_sign = run_sign if run_sign != 0 else _global_loop_sign(str(ordered.iloc[t]["pred_side"]), str(ordered.iloc[t]["pred_direction"]))
+            expected_sign = (
+                run_sign
+                if run_sign != 0
+                else _global_loop_sign(str(ordered.iloc[t]['pred_side']), str(ordered.iloc[t]['pred_direction']))
+            )
             for dst in range(n_nodes):
                 best_score = emit_arr[t, dst] - reset_penalty
                 best_src = -1
                 best_reset = True
                 for src in range(n_nodes):
-                    delta = signed_loop_delta(src, dst, n_nodes=n_nodes)
+                    delta = signed_topology_delta(src, dst, n_nodes=n_nodes, topology=topology)
                     if abs(delta) > max_step_nodes:
                         continue
                     if run_sign != 0 and delta != 0 and np.sign(delta) != run_sign:
                         continue
-                    candidate = dp[t - 1, src] + emit_arr[t, dst] + _transition_score(
-                        delta=delta,
-                        expected_sign=expected_sign,
-                        hop_penalty=hop_penalty,
-                        direction_bonus=direction_bonus,
-                        direction_penalty=direction_penalty,
-                        stay_penalty=stay_penalty,
+                    candidate = (
+                        dp[t - 1, src]
+                        + emit_arr[t, dst]
+                        + _transition_score(
+                            delta=delta,
+                            expected_sign=expected_sign,
+                            hop_penalty=hop_penalty,
+                            direction_bonus=direction_bonus,
+                            direction_penalty=direction_penalty,
+                            stay_penalty=stay_penalty,
+                        )
                     )
                     if candidate > best_score:
                         best_score = candidate
@@ -864,61 +974,71 @@ def decode_fixed_lag_smoothed_continuity(
             margins.append(float(row_scores[state] - np.partition(row_scores, -2)[-2]))
             resets.append(bool(used_reset[min(t + lag_steps, n_steps - 1), state]))
 
-        ordered["pred_loop_node_index"] = state_seq
-        ordered["pred_station_margin"] = template_margin_arr
-        ordered["pred_direction"] = ordered["pred_direction"].to_numpy()
-        ordered["cc_confidence"] = margins
-        ordered["cc_reset"] = resets
-        ordered["cc_run_direction_sign"] = run_sign
+        ordered['pred_loop_node_index'] = state_seq
+        ordered['pred_station_margin'] = template_margin_arr
+        ordered['pred_direction'] = ordered['pred_direction'].to_numpy()
+        ordered['cc_confidence'] = margins
+        ordered['cc_reset'] = resets
+        ordered['cc_run_direction_sign'] = run_sign
         if meta_by_eval is not None and int(run_id) in meta_by_eval:
-            ordered["experiment_name"] = str(meta_by_eval[int(run_id)]["experiment_name"])
-            ordered["scope_name"] = str(meta_by_eval[int(run_id)]["scope_name"])
+            ordered['experiment_name'] = str(meta_by_eval[int(run_id)]['experiment_name'])
+            ordered['scope_name'] = str(meta_by_eval[int(run_id)]['scope_name'])
         frames.append(ordered)
 
     return _attach_prediction_geometry(
         pd.concat(frames, ignore_index=True),
         lattice_df=lattice_df,
-        tracker_mode=f"fixedlag{lag_steps}_smoothed_hybrid_mic",
+        tracker_mode=f'fixedlag{lag_steps}_smoothed_hybrid_mic',
     )
 
 
-def apply_fixed_lag_smoother(cont_df: pd.DataFrame, lattice_df: pd.DataFrame, lag_steps: int) -> pd.DataFrame:
+def apply_fixed_lag_smoother(
+    cont_df: pd.DataFrame, lattice_df: pd.DataFrame, lag_steps: int, topology: str = 'loop'
+) -> pd.DataFrame:
     if lag_steps <= 0:
         out = cont_df.copy()
-        out["tracker_mode"] = "lag0_causal_hybrid_mic"
+        out['tracker_mode'] = 'lag0_causal_hybrid_mic'
         return out
 
-    node_lookup = lattice_df.set_index("loop_node_index")
+    node_lookup = lattice_df.set_index('loop_node_index')
     n_nodes = len(lattice_df)
     frames = []
-    for run_id, group in cont_df.groupby("run_id"):
-        ordered = group.sort_values("timestamp").reset_index(drop=True).copy()
-        node_seq = ordered["pred_loop_node_index"].to_numpy(dtype=int)
+    for run_id, group in cont_df.groupby('run_id'):
+        ordered = group.sort_values('timestamp').reset_index(drop=True).copy()
+        node_seq = ordered['pred_loop_node_index'].to_numpy(dtype=int)
         unwrapped = np.zeros(len(node_seq), dtype=float)
         if len(node_seq) > 0:
             unwrapped[0] = float(node_seq[0])
         for idx in range(1, len(node_seq)):
-            unwrapped[idx] = unwrapped[idx - 1] + float(signed_loop_delta(int(node_seq[idx - 1]), int(node_seq[idx]), n_nodes=n_nodes))
+            unwrapped[idx] = unwrapped[idx - 1] + float(
+                signed_topology_delta(int(node_seq[idx - 1]), int(node_seq[idx]), n_nodes=n_nodes, topology=topology)
+            )
 
         smooth = np.zeros(len(node_seq), dtype=float)
         for idx in range(len(node_seq)):
             end = min(len(node_seq), idx + lag_steps + 1)
             smooth[idx] = float(np.median(unwrapped[idx:end]))
-        smooth_idx = np.mod(np.rint(smooth).astype(int), n_nodes)
+        smooth_idx = np.rint(smooth).astype(int)
+        if topology == 'loop':
+            smooth_idx = np.mod(smooth_idx, n_nodes)
+        else:
+            smooth_idx = np.clip(smooth_idx, 0, max(n_nodes - 1, 0))
 
-        ordered["pred_loop_node_index"] = smooth_idx
-        ordered["pred_point_index"] = ordered["pred_loop_node_index"].map(node_lookup["point_index"])
-        ordered["pred_sensor_node"] = ordered["pred_loop_node_index"].map(node_lookup["sensor_node"])
-        ordered["pred_station"] = ordered["pred_loop_node_index"].map(node_lookup["station_id"])
-        ordered["pred_side"] = ordered["pred_loop_node_index"].map(node_lookup["side_label"])
-        ordered["pred_latitude"] = ordered["pred_loop_node_index"].map(node_lookup["latitude"])
-        ordered["pred_longitude"] = ordered["pred_loop_node_index"].map(node_lookup["longitude"])
-        ordered["pred_x_m"] = ordered["pred_loop_node_index"].map(node_lookup["x_m"])
-        ordered["pred_y_m"] = ordered["pred_loop_node_index"].map(node_lookup["y_m"])
-        ordered["pred_xy_error_m"] = np.sqrt(np.square(ordered["pred_x_m"] - ordered["gt_x_m"]) + np.square(ordered["pred_y_m"] - ordered["gt_y_m"]))
-        ordered["pred_step_m"] = np.sqrt(np.square(ordered["pred_x_m"].diff()) + np.square(ordered["pred_y_m"].diff()))
-        ordered["tracker_mode"] = f"lag{lag_steps}_causal_hybrid_mic"
-        ordered["cc_reset"] = False
+        ordered['pred_loop_node_index'] = smooth_idx
+        ordered['pred_point_index'] = ordered['pred_loop_node_index'].map(node_lookup['point_index'])
+        ordered['pred_sensor_node'] = ordered['pred_loop_node_index'].map(node_lookup['sensor_node'])
+        ordered['pred_station'] = ordered['pred_loop_node_index'].map(node_lookup['station_id'])
+        ordered['pred_side'] = ordered['pred_loop_node_index'].map(node_lookup['side_label'])
+        ordered['pred_latitude'] = ordered['pred_loop_node_index'].map(node_lookup['latitude'])
+        ordered['pred_longitude'] = ordered['pred_loop_node_index'].map(node_lookup['longitude'])
+        ordered['pred_x_m'] = ordered['pred_loop_node_index'].map(node_lookup['x_m'])
+        ordered['pred_y_m'] = ordered['pred_loop_node_index'].map(node_lookup['y_m'])
+        ordered['pred_xy_error_m'] = np.sqrt(
+            np.square(ordered['pred_x_m'] - ordered['gt_x_m']) + np.square(ordered['pred_y_m'] - ordered['gt_y_m'])
+        )
+        ordered['pred_step_m'] = np.sqrt(np.square(ordered['pred_x_m'].diff()) + np.square(ordered['pred_y_m'].diff()))
+        ordered['tracker_mode'] = f'lag{lag_steps}_causal_hybrid_mic'
+        ordered['cc_reset'] = False
         frames.append(ordered)
     return pd.concat(frames, ignore_index=True)
 
@@ -926,110 +1046,118 @@ def apply_fixed_lag_smoother(cont_df: pd.DataFrame, lattice_df: pd.DataFrame, la
 def summarize(*frames: pd.DataFrame) -> pd.DataFrame:
     compare = pd.concat(list(frames), ignore_index=True, sort=False)
     rows = []
-    group_cols = ["tracker_mode"]
-    if "experiment_name" in compare.columns:
-        group_cols.append("experiment_name")
-    if "scope_name" in compare.columns:
-        group_cols.append("scope_name")
+    group_cols = ['tracker_mode']
+    if 'experiment_name' in compare.columns:
+        group_cols.append('experiment_name')
+    if 'scope_name' in compare.columns:
+        group_cols.append('scope_name')
     for group_key, group in compare.groupby(group_cols):
         if len(group_cols) == 3:
             mode, experiment_name, scope_name = group_key
         elif len(group_cols) == 2:
             mode, experiment_name = group_key
-            scope_name = "default"
+            scope_name = 'default'
         else:
             mode = group_key
-            experiment_name = "default"
-            scope_name = "default"
-        non_amb = group[group["direction"] != "ambiguous"]
-        reset_rate = float(group["cc_reset"].mean()) if "cc_reset" in group.columns else float("nan")
+            experiment_name = 'default'
+            scope_name = 'default'
+        non_amb = group[group['direction'] != 'ambiguous']
+        reset_rate = float(group['cc_reset'].mean()) if 'cc_reset' in group.columns else float('nan')
         rows.append(
             {
-                "tracker_mode": mode,
-                "experiment_name": str(experiment_name),
-                "scope_name": str(scope_name),
-                "station_accuracy": float((group["pred_station"] == group["nearest_station"]).mean()),
-                "side_accuracy": float((group["pred_side"] == group["side_label"]).mean()),
-                "joint_station_side_accuracy": float(
-                    ((group["pred_station"] == group["nearest_station"]) & (group["pred_side"] == group["side_label"])).mean()
+                'tracker_mode': mode,
+                'experiment_name': str(experiment_name),
+                'scope_name': str(scope_name),
+                'station_accuracy': float((group['pred_station'] == group['nearest_station']).mean()),
+                'side_accuracy': float((group['pred_side'] == group['side_label']).mean()),
+                'joint_station_side_accuracy': float(
+                    (
+                        (group['pred_station'] == group['nearest_station'])
+                        & (group['pred_side'] == group['side_label'])
+                    ).mean()
                 ),
-                "direction_accuracy_non_ambiguous": float((non_amb["pred_direction"] == non_amb["direction"]).mean())
+                'direction_accuracy_non_ambiguous': float((non_amb['pred_direction'] == non_amb['direction']).mean())
                 if not non_amb.empty
-                else float("nan"),
-                "point_accuracy": float((group["pred_loop_node_index"] == group["gt_loop_node_index"]).mean()) if "pred_loop_node_index" in group.columns else float("nan"),
-                "mean_xy_error_m": float(group["pred_xy_error_m"].mean()),
-                "p95_xy_error_m": float(group["pred_xy_error_m"].quantile(0.95)),
-                "mean_step_m": float(group["pred_step_m"].dropna().mean()),
-                "p95_step_m": float(group["pred_step_m"].dropna().quantile(0.95)),
-                "jump_rate_20m": float((group["pred_step_m"].dropna() > 20.0).mean()),
-                "reset_rate": reset_rate,
-                "n_samples": len(group),
+                else float('nan'),
+                'point_accuracy': float((group['pred_loop_node_index'] == group['gt_loop_node_index']).mean())
+                if 'pred_loop_node_index' in group.columns
+                else float('nan'),
+                'mean_xy_error_m': float(group['pred_xy_error_m'].mean()),
+                'p95_xy_error_m': float(group['pred_xy_error_m'].quantile(0.95)),
+                'mean_step_m': float(group['pred_step_m'].dropna().mean()),
+                'p95_step_m': float(group['pred_step_m'].dropna().quantile(0.95)),
+                'jump_rate_20m': float((group['pred_step_m'].dropna() > 20.0).mean()),
+                'reset_rate': reset_rate,
+                'n_samples': len(group),
             }
         )
-    return pd.DataFrame(rows).sort_values("joint_station_side_accuracy", ascending=False).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values('joint_station_side_accuracy', ascending=False).reset_index(drop=True)
 
 
 def per_run_summary(*frames: pd.DataFrame) -> pd.DataFrame:
     compare = pd.concat(list(frames), ignore_index=True, sort=False)
     rows = []
-    group_cols = ["tracker_mode", "run_id"]
-    if "experiment_name" in compare.columns:
-        group_cols.append("experiment_name")
-    if "scope_name" in compare.columns:
-        group_cols.append("scope_name")
+    group_cols = ['tracker_mode', 'run_id']
+    if 'experiment_name' in compare.columns:
+        group_cols.append('experiment_name')
+    if 'scope_name' in compare.columns:
+        group_cols.append('scope_name')
     for group_key, group in compare.groupby(group_cols):
         if len(group_cols) == 4:
             mode, run_id, experiment_name, scope_name = group_key
         elif len(group_cols) == 3:
             mode, run_id, experiment_name = group_key
-            scope_name = "default"
+            scope_name = 'default'
         else:
             mode, run_id = group_key
-            experiment_name = "default"
-            scope_name = "default"
-        non_amb = group[group["direction"] != "ambiguous"]
+            experiment_name = 'default'
+            scope_name = 'default'
+        non_amb = group[group['direction'] != 'ambiguous']
         rows.append(
             {
-                "tracker_mode": mode,
-                "run_id": int(run_id),
-                "label": str(group["label"].iloc[0]),
-                "experiment_name": str(experiment_name),
-                "scope_name": str(scope_name),
-                "station_accuracy": float((group["pred_station"] == group["nearest_station"]).mean()),
-                "side_accuracy": float((group["pred_side"] == group["side_label"]).mean()),
-                "joint_station_side_accuracy": float(
-                    ((group["pred_station"] == group["nearest_station"]) & (group["pred_side"] == group["side_label"])).mean()
+                'tracker_mode': mode,
+                'run_id': int(run_id),
+                'label': str(group['label'].iloc[0]),
+                'experiment_name': str(experiment_name),
+                'scope_name': str(scope_name),
+                'station_accuracy': float((group['pred_station'] == group['nearest_station']).mean()),
+                'side_accuracy': float((group['pred_side'] == group['side_label']).mean()),
+                'joint_station_side_accuracy': float(
+                    (
+                        (group['pred_station'] == group['nearest_station'])
+                        & (group['pred_side'] == group['side_label'])
+                    ).mean()
                 ),
-                "direction_accuracy_non_ambiguous": float((non_amb["pred_direction"] == non_amb["direction"]).mean())
+                'direction_accuracy_non_ambiguous': float((non_amb['pred_direction'] == non_amb['direction']).mean())
                 if not non_amb.empty
-                else float("nan"),
-                "mean_xy_error_m": float(group["pred_xy_error_m"].mean()),
-                "p95_xy_error_m": float(group["pred_xy_error_m"].quantile(0.95)),
-                "mean_step_m": float(group["pred_step_m"].dropna().mean()),
-                "p95_step_m": float(group["pred_step_m"].dropna().quantile(0.95)),
-                "jump_rate_20m": float((group["pred_step_m"].dropna() > 20.0).mean()),
-                "reset_rate": float(group["cc_reset"].mean()) if "cc_reset" in group.columns else float("nan"),
+                else float('nan'),
+                'mean_xy_error_m': float(group['pred_xy_error_m'].mean()),
+                'p95_xy_error_m': float(group['pred_xy_error_m'].quantile(0.95)),
+                'mean_step_m': float(group['pred_step_m'].dropna().mean()),
+                'p95_step_m': float(group['pred_step_m'].dropna().quantile(0.95)),
+                'jump_rate_20m': float((group['pred_step_m'].dropna() > 20.0).mean()),
+                'reset_rate': float(group['cc_reset'].mean()) if 'cc_reset' in group.columns else float('nan'),
             }
         )
-    return pd.DataFrame(rows).sort_values(["tracker_mode", "run_id"]).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(['tracker_mode', 'run_id']).reset_index(drop=True)
 
 
 def per_loop_summary(*frames: pd.DataFrame) -> pd.DataFrame:
     compare = pd.concat(list(frames), ignore_index=True, sort=False)
-    if "loop_id" not in compare.columns:
+    if 'loop_id' not in compare.columns:
         return pd.DataFrame()
-    compare = compare[compare["loop_id"] >= 0].copy()
+    compare = compare[compare['loop_id'] >= 0].copy()
     if compare.empty:
         return pd.DataFrame()
 
     rows = []
-    group_cols = ["tracker_mode", "run_id", "loop_id"]
-    if "fold_id" in compare.columns:
-        group_cols.append("fold_id")
-    if "experiment_name" in compare.columns:
-        group_cols.append("experiment_name")
-    if "scope_name" in compare.columns:
-        group_cols.append("scope_name")
+    group_cols = ['tracker_mode', 'run_id', 'loop_id']
+    if 'fold_id' in compare.columns:
+        group_cols.append('fold_id')
+    if 'experiment_name' in compare.columns:
+        group_cols.append('experiment_name')
+    if 'scope_name' in compare.columns:
+        group_cols.append('scope_name')
     for group_key, group in compare.groupby(group_cols):
         idx = 0
         mode = group_key[idx]
@@ -1038,79 +1166,84 @@ def per_loop_summary(*frames: pd.DataFrame) -> pd.DataFrame:
         idx += 1
         loop_id = int(group_key[idx])
         idx += 1
-        fold_id = float("nan")
-        if "fold_id" in group_cols:
+        fold_id = float('nan')
+        if 'fold_id' in group_cols:
             fold_id = int(group_key[idx])
             idx += 1
-        experiment_name = "default"
-        if "experiment_name" in group_cols:
+        experiment_name = 'default'
+        if 'experiment_name' in group_cols:
             experiment_name = str(group_key[idx])
             idx += 1
-        scope_name = "default"
-        if "scope_name" in group_cols:
+        scope_name = 'default'
+        if 'scope_name' in group_cols:
             scope_name = str(group_key[idx])
-        non_amb = group[group["direction"] != "ambiguous"]
+        non_amb = group[group['direction'] != 'ambiguous']
         rows.append(
             {
-                "tracker_mode": mode,
-                "run_id": run_id,
-                "label": str(group["label"].iloc[0]),
-                "loop_id": loop_id,
-                "fold_id": fold_id,
-                "experiment_name": experiment_name,
-                "scope_name": scope_name,
-                "station_accuracy": float((group["pred_station"] == group["nearest_station"]).mean()),
-                "side_accuracy": float((group["pred_side"] == group["side_label"]).mean()),
-                "joint_station_side_accuracy": float(
-                    ((group["pred_station"] == group["nearest_station"]) & (group["pred_side"] == group["side_label"])).mean()
+                'tracker_mode': mode,
+                'run_id': run_id,
+                'label': str(group['label'].iloc[0]),
+                'loop_id': loop_id,
+                'fold_id': fold_id,
+                'experiment_name': experiment_name,
+                'scope_name': scope_name,
+                'station_accuracy': float((group['pred_station'] == group['nearest_station']).mean()),
+                'side_accuracy': float((group['pred_side'] == group['side_label']).mean()),
+                'joint_station_side_accuracy': float(
+                    (
+                        (group['pred_station'] == group['nearest_station'])
+                        & (group['pred_side'] == group['side_label'])
+                    ).mean()
                 ),
-                "direction_accuracy_non_ambiguous": float((non_amb["pred_direction"] == non_amb["direction"]).mean())
+                'direction_accuracy_non_ambiguous': float((non_amb['pred_direction'] == non_amb['direction']).mean())
                 if not non_amb.empty
-                else float("nan"),
-                "mean_xy_error_m": float(group["pred_xy_error_m"].mean()),
-                "p95_xy_error_m": float(group["pred_xy_error_m"].quantile(0.95)),
-                "mean_step_m": float(group["pred_step_m"].dropna().mean()),
-                "p95_step_m": float(group["pred_step_m"].dropna().quantile(0.95)),
-                "jump_rate_20m": float((group["pred_step_m"].dropna() > 20.0).mean()),
-                "reset_rate": float(group["cc_reset"].mean()) if "cc_reset" in group.columns else float("nan"),
-                "n_samples": len(group),
+                else float('nan'),
+                'mean_xy_error_m': float(group['pred_xy_error_m'].mean()),
+                'p95_xy_error_m': float(group['pred_xy_error_m'].quantile(0.95)),
+                'mean_step_m': float(group['pred_step_m'].dropna().mean()),
+                'p95_step_m': float(group['pred_step_m'].dropna().quantile(0.95)),
+                'jump_rate_20m': float((group['pred_step_m'].dropna() > 20.0).mean()),
+                'reset_rate': float(group['cc_reset'].mean()) if 'cc_reset' in group.columns else float('nan'),
+                'n_samples': len(group),
             }
         )
-    return pd.DataFrame(rows).sort_values(["tracker_mode", "run_id", "loop_id"]).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(['tracker_mode', 'run_id', 'loop_id']).reset_index(drop=True)
 
 
 def plot_lattice(lattice_df: pd.DataFrame, sensor_geometry: pd.DataFrame, out_path: Path) -> None:
-    ref_lat = float(sensor_geometry["ref_latitude"].iloc[0])
-    ref_lon = float(sensor_geometry["ref_longitude"].iloc[0])
-    sensor_x, sensor_y = latlon_to_xy_m(sensor_geometry["latitude"], sensor_geometry["longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
+    ref_lat = float(sensor_geometry['ref_latitude'].iloc[0])
+    ref_lon = float(sensor_geometry['ref_longitude'].iloc[0])
+    sensor_x, sensor_y = latlon_to_xy_m(
+        sensor_geometry['latitude'], sensor_geometry['longitude'], ref_lat=ref_lat, ref_lon=ref_lon
+    )
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    for node, group in lattice_df.groupby("sensor_node"):
-        ax.plot(group["x_m"], group["y_m"], marker="o", linewidth=1.5, label=node)
-    ax.scatter(sensor_x, sensor_y, color="black", s=70, label="sensors")
+    for node, group in lattice_df.groupby('sensor_node'):
+        ax.plot(group['x_m'], group['y_m'], marker='o', linewidth=1.5, label=node)
+    ax.scatter(sensor_x, sensor_y, color='black', s=70, label='sensors')
     for row, sx, sy in zip(sensor_geometry.itertuples(index=False), sensor_x, sensor_y):
-        ax.text(sx, sy, row.node, fontsize=8, ha="left", va="bottom")
-    ax.set_title("ICT 40-node continuity lattice")
-    ax.set_xlabel("Local X (m)")
-    ax.set_ylabel("Local Y (m)")
-    ax.axis("equal")
-    ax.legend(loc="best", fontsize=8, ncol=2)
+        ax.text(sx, sy, row.node, fontsize=8, ha='left', va='bottom')
+    ax.set_title('ICT 40-node continuity lattice')
+    ax.set_xlabel('Local X (m)')
+    ax.set_ylabel('Local Y (m)')
+    ax.axis('equal')
+    ax.legend(loc='best', fontsize=8, ncol=2)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
 
 
 def plot_summary(summary_df: pd.DataFrame, out_path: Path) -> None:
-    metrics = ["joint_station_side_accuracy", "direction_accuracy_non_ambiguous", "mean_xy_error_m", "p95_step_m"]
+    metrics = ['joint_station_side_accuracy', 'direction_accuracy_non_ambiguous', 'mean_xy_error_m', 'p95_step_m']
     fig, axes = plt.subplots(2, 2, figsize=(10, 7))
     axes = axes.ravel()
     for ax, metric in zip(axes, metrics):
-        colors = ["tab:orange", "tab:green", "tab:red", "tab:blue"][: len(summary_df)]
-        ax.bar(summary_df["tracker_mode"], summary_df[metric], color=colors)
+        colors = ['tab:orange', 'tab:green', 'tab:red', 'tab:blue'][: len(summary_df)]
+        ax.bar(summary_df['tracker_mode'], summary_df[metric], color=colors)
         ax.set_title(metric)
-        ax.tick_params(axis="x", rotation=15)
+        ax.tick_params(axis='x', rotation=15)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
 
 
@@ -1123,45 +1256,60 @@ def plot_loop_comparison(
     sensor_geometry: pd.DataFrame,
     run_id: int,
     loop_selection: str,
+    topology: str,
 ) -> dict[str, object]:
-    ref_lat = float(sensor_geometry["ref_latitude"].iloc[0])
-    ref_lon = float(sensor_geometry["ref_longitude"].iloc[0])
-    cont_run = cont_df[cont_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
-    smooth_run = smooth_df[smooth_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
-    runtime_run = runtime_df[runtime_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
-    lag_run = lag_df[lag_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
-    start_idx, end_idx = _select_loop_bounds(smooth_run, mode=loop_selection)
+    ref_lat = float(sensor_geometry['ref_latitude'].iloc[0])
+    ref_lon = float(sensor_geometry['ref_longitude'].iloc[0])
+    cont_run = cont_df[cont_df['run_id'] == run_id].sort_values('timestamp').reset_index(drop=True)
+    smooth_run = smooth_df[smooth_df['run_id'] == run_id].sort_values('timestamp').reset_index(drop=True)
+    runtime_run = runtime_df[runtime_df['run_id'] == run_id].sort_values('timestamp').reset_index(drop=True)
+    lag_run = lag_df[lag_df['run_id'] == run_id].sort_values('timestamp').reset_index(drop=True)
+    start_idx, end_idx = _select_loop_bounds(smooth_run, mode=loop_selection, topology=topology)
     cont_loop = cont_run.iloc[start_idx : end_idx + 1].copy()
     smooth_loop = smooth_run.iloc[start_idx : end_idx + 1].copy()
     runtime_loop = runtime_run.iloc[start_idx : end_idx + 1].copy()
     lag_loop = lag_run.iloc[start_idx : end_idx + 1].copy()
 
-    gt_x, gt_y = latlon_to_xy_m(cont_loop["latitude"], cont_loop["longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
-    sensor_x, sensor_y = latlon_to_xy_m(sensor_geometry["latitude"], sensor_geometry["longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
+    gt_x, gt_y = latlon_to_xy_m(cont_loop['latitude'], cont_loop['longitude'], ref_lat=ref_lat, ref_lon=ref_lon)
+    sensor_x, sensor_y = latlon_to_xy_m(
+        sensor_geometry['latitude'], sensor_geometry['longitude'], ref_lat=ref_lat, ref_lon=ref_lon
+    )
 
     _ = (gt_x, gt_y, sensor_x, sensor_y, lattice_df)
 
     return {
-        "run_id": int(run_id),
-        "label": str(cont_loop["label"].iloc[0]),
-        "start_elapsed_s": float(cont_loop["elapsed_s"].iloc[0]),
-        "end_elapsed_s": float(cont_loop["elapsed_s"].iloc[-1]),
-        "continuity_joint_acc": float(
-            ((cont_loop["pred_station"] == cont_loop["nearest_station"]) & (cont_loop["pred_side"] == cont_loop["side_label"])).mean()
+        'run_id': int(run_id),
+        'label': str(cont_loop['label'].iloc[0]),
+        'start_elapsed_s': float(cont_loop['elapsed_s'].iloc[0]),
+        'end_elapsed_s': float(cont_loop['elapsed_s'].iloc[-1]),
+        'continuity_joint_acc': float(
+            (
+                (cont_loop['pred_station'] == cont_loop['nearest_station'])
+                & (cont_loop['pred_side'] == cont_loop['side_label'])
+            ).mean()
         ),
-        "smoothed_joint_acc": float(
-            ((smooth_loop["pred_station"] == smooth_loop["nearest_station"]) & (smooth_loop["pred_side"] == smooth_loop["side_label"])).mean()
+        'smoothed_joint_acc': float(
+            (
+                (smooth_loop['pred_station'] == smooth_loop['nearest_station'])
+                & (smooth_loop['pred_side'] == smooth_loop['side_label'])
+            ).mean()
         ),
-        "runtime_joint_acc": float(
-            ((runtime_loop["pred_station"] == runtime_loop["nearest_station"]) & (runtime_loop["pred_side"] == runtime_loop["side_label"])).mean()
+        'runtime_joint_acc': float(
+            (
+                (runtime_loop['pred_station'] == runtime_loop['nearest_station'])
+                & (runtime_loop['pred_side'] == runtime_loop['side_label'])
+            ).mean()
         ),
-        "lagged_joint_acc": float(
-            ((lag_loop["pred_station"] == lag_loop["nearest_station"]) & (lag_loop["pred_side"] == lag_loop["side_label"])).mean()
+        'lagged_joint_acc': float(
+            (
+                (lag_loop['pred_station'] == lag_loop['nearest_station'])
+                & (lag_loop['pred_side'] == lag_loop['side_label'])
+            ).mean()
         ),
-        "continuity_mean_xy_error_m": float(cont_loop["pred_xy_error_m"].mean()),
-        "smoothed_mean_xy_error_m": float(smooth_loop["pred_xy_error_m"].mean()),
-        "runtime_mean_xy_error_m": float(runtime_loop["pred_xy_error_m"].mean()),
-        "lagged_mean_xy_error_m": float(lag_loop["pred_xy_error_m"].mean()),
+        'continuity_mean_xy_error_m': float(cont_loop['pred_xy_error_m'].mean()),
+        'smoothed_mean_xy_error_m': float(smooth_loop['pred_xy_error_m'].mean()),
+        'runtime_mean_xy_error_m': float(runtime_loop['pred_xy_error_m'].mean()),
+        'lagged_mean_xy_error_m': float(lag_loop['pred_xy_error_m'].mean()),
     }
 
 
@@ -1171,57 +1319,111 @@ def plot_loop_clean(
     run_id: int,
     out_path: Path,
     loop_selection: str,
+    topology: str,
     plot_label: str,
     timing_meaning: str,
     finalize_lag_steps: int | None = None,
 ) -> None:
-    ref_lat = float(sensor_geometry["ref_latitude"].iloc[0])
-    ref_lon = float(sensor_geometry["ref_longitude"].iloc[0])
-    run_df = track_df[track_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
-    start_idx, end_idx = _select_loop_bounds(run_df, mode=loop_selection)
+    ref_lat = float(sensor_geometry['ref_latitude'].iloc[0])
+    ref_lon = float(sensor_geometry['ref_longitude'].iloc[0])
+    run_df = track_df[track_df['run_id'] == run_id].sort_values('timestamp').reset_index(drop=True)
+    start_idx, end_idx = _select_loop_bounds(run_df, mode=loop_selection, topology=topology)
     loop_df = run_df.iloc[start_idx : end_idx + 1].copy()
-    gt_x, gt_y = latlon_to_xy_m(loop_df["latitude"], loop_df["longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
-    sensor_x, sensor_y = latlon_to_xy_m(sensor_geometry["latitude"], sensor_geometry["longitude"], ref_lat=ref_lat, ref_lon=ref_lon)
+    gt_x, gt_y = latlon_to_xy_m(loop_df['latitude'], loop_df['longitude'], ref_lat=ref_lat, ref_lon=ref_lon)
+    sensor_x, sensor_y = latlon_to_xy_m(
+        sensor_geometry['latitude'], sensor_geometry['longitude'], ref_lat=ref_lat, ref_lon=ref_lon
+    )
 
     fig, ax = plt.subplots(figsize=(8.5, 8.5))
-    ax.plot(gt_x, gt_y, color="tab:blue", linewidth=2.2, label="ground truth GPS")
-    ax.plot(loop_df["pred_x_m"], loop_df["pred_y_m"], color="tab:green", linewidth=2.0, alpha=0.95, label=plot_label)
-    ax.scatter(sensor_x, sensor_y, color="black", s=70, label="sensors")
-    ax.scatter(gt_x.iloc[0], gt_y.iloc[0], color="tab:blue", marker="o", s=60, label="GT start")
-    ax.scatter(gt_x.iloc[-1], gt_y.iloc[-1], color="tab:blue", marker="s", s=60, label="GT end")
-    ax.scatter(loop_df["pred_x_m"].iloc[0], loop_df["pred_y_m"].iloc[0], color="tab:green", marker="o", s=55, label="Pred start")
-    ax.scatter(loop_df["pred_x_m"].iloc[-1], loop_df["pred_y_m"].iloc[-1], color="tab:green", marker="s", s=55, label="Pred end")
-    sample_idx = loop_df.index[::10]
+    ax.plot(gt_x, gt_y, color='tab:blue', linewidth=2.2, label='ground truth GPS')
+
+    # Insert NaNs to break lines where spatial jumps exceed a threshold (e.g., 15 meters)
+    pred_x = loop_df['pred_x_m'].copy().to_numpy()
+    pred_y = loop_df['pred_y_m'].copy().to_numpy()
+    diffs = np.sqrt(np.square(np.diff(pred_x)) + np.square(np.diff(pred_y)))
+    
+    # Also check if cc_reset is available and true
+    resets = np.zeros_like(diffs, dtype=bool)
+    if 'cc_reset' in loop_df.columns:
+        resets = loop_df['cc_reset'].iloc[1:].to_numpy(dtype=bool)
+
+    jump_indices = np.where((diffs > 25.0) | resets)[0]
+    
+    if len(jump_indices) > 0:
+        # We need to insert NaNs at jump_indices + 1
+        # To do this safely, we construct a new array
+        plot_x = []
+        plot_y = []
+        for i in range(len(pred_x)):
+            plot_x.append(pred_x[i])
+            plot_y.append(pred_y[i])
+            if i in jump_indices:
+                plot_x.append(np.nan)
+                plot_y.append(np.nan)
+    else:
+        plot_x = pred_x
+        plot_y = pred_y
+
+    ax.plot(plot_x, plot_y, color='tab:green', linewidth=2.0, alpha=0.95, label=plot_label)
+    ax.scatter(sensor_x, sensor_y, color='black', s=70, label='sensors')
+    ax.scatter(gt_x.iloc[0], gt_y.iloc[0], color='tab:blue', marker='o', s=60, label='GT start')
+    ax.scatter(gt_x.iloc[-1], gt_y.iloc[-1], color='tab:blue', marker='s', s=60, label='GT end')
+    ax.scatter(
+        loop_df['pred_x_m'].iloc[0],
+        loop_df['pred_y_m'].iloc[0],
+        color='tab:green',
+        marker='o',
+        s=55,
+        label='Pred start',
+    )
+    ax.scatter(
+        loop_df['pred_x_m'].iloc[-1],
+        loop_df['pred_y_m'].iloc[-1],
+        color='tab:green',
+        marker='s',
+        s=55,
+        label='Pred end',
+    )
+    sample_idx = loop_df.index[::5]
     for idx in sample_idx:
         pos = int(loop_df.index.get_loc(idx))
-        elapsed = int(round(float(loop_df.iloc[pos]["elapsed_s"] - loop_df["elapsed_s"].iloc[0])))
-        ts_label = pd.to_datetime(loop_df.iloc[pos]["timestamp"]).strftime("%H:%M:%S")
-        pred_label = f"Pred {elapsed}s\nsample {ts_label}"
+        elapsed = int(round(float(loop_df.iloc[pos]['elapsed_s'] - loop_df['elapsed_s'].iloc[0])))
+        ts_label = pd.to_datetime(loop_df.iloc[pos]['timestamp']).strftime('%H:%M:%S')
+        pred_label = f'Pred {elapsed}s\nsample {ts_label}'
         if finalize_lag_steps is not None:
             final_pos = min(pos + int(finalize_lag_steps), len(loop_df) - 1)
-            final_ts_label = pd.to_datetime(loop_df.iloc[final_pos]["timestamp"]).strftime("%H:%M:%S")
-            pred_label = f"Pred {elapsed}s\nsample {ts_label}\nfinal~{final_ts_label}"
-        ax.scatter(gt_x.loc[idx], gt_y.loc[idx], color="tab:blue", s=18, alpha=0.6)
-        ax.scatter(loop_df.iloc[pos]["pred_x_m"], loop_df.iloc[pos]["pred_y_m"], color="tab:green", s=18, alpha=0.6)
-        ax.text(gt_x.loc[idx], gt_y.loc[idx], f"GT {elapsed}s\n{ts_label}", fontsize=7, color="tab:blue", ha="right", va="bottom")
+            final_ts_label = pd.to_datetime(loop_df.iloc[final_pos]['timestamp']).strftime('%H:%M:%S')
+            pred_label = f'Pred {elapsed}s\nsample {ts_label}\nfinal~{final_ts_label}'
+        ax.scatter(gt_x.loc[idx], gt_y.loc[idx], color='tab:blue', s=18, alpha=0.6)
+        ax.scatter(loop_df.iloc[pos]['pred_x_m'], loop_df.iloc[pos]['pred_y_m'], color='tab:green', s=18, alpha=0.6)
         ax.text(
-            loop_df.iloc[pos]["pred_x_m"],
-            loop_df.iloc[pos]["pred_y_m"],
+            gt_x.loc[idx],
+            gt_y.loc[idx],
+            f'GT {elapsed}s\n{ts_label}',
+            fontsize=7,
+            color='tab:blue',
+            ha='right',
+            va='bottom',
+        )
+        ax.text(
+            loop_df.iloc[pos]['pred_x_m'],
+            loop_df.iloc[pos]['pred_y_m'],
             pred_label,
             fontsize=7,
-            color="tab:green",
-            ha="left",
-            va="top",
+            color='tab:green',
+            ha='left',
+            va='top',
         )
     for row, sx, sy in zip(sensor_geometry.itertuples(index=False), sensor_x, sensor_y):
-        ax.text(sx, sy, row.node, fontsize=8, ha="left", va="bottom")
-    ax.set_title(f"run{run_id} one-loop GT vs {plot_label}\n{timing_meaning}")
-    ax.set_xlabel("Local X (m)")
-    ax.set_ylabel("Local Y (m)")
-    ax.axis("equal")
-    ax.legend(loc="best", fontsize=8)
+        ax.text(sx, sy, row.node, fontsize=8, ha='left', va='bottom')
+    segment_label = 'full-line segment' if topology == 'line' else 'one-loop'
+    ax.set_title(f'run{run_id} {segment_label} GT vs {plot_label}\n{timing_meaning}')
+    ax.set_xlabel('Local X (m)')
+    ax.set_ylabel('Local Y (m)')
+    ax.axis('equal')
+    ax.legend(loc='best', fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
 
 
@@ -1231,39 +1433,42 @@ def plot_loop_timing(
     run_id: int,
     out_path: Path,
     loop_selection: str,
+    topology: str,
     plot_label: str,
     timing_meaning: str,
 ) -> dict[str, float]:
     _ = sensor_geometry
-    run_df = track_df[track_df["run_id"] == run_id].sort_values("timestamp").reset_index(drop=True)
-    start_idx, end_idx = _select_loop_bounds(run_df, mode=loop_selection)
+    run_df = track_df[track_df['run_id'] == run_id].sort_values('timestamp').reset_index(drop=True)
+    start_idx, end_idx = _select_loop_bounds(run_df, mode=loop_selection, topology=topology)
     loop_df = run_df.iloc[start_idx : end_idx + 1].copy().reset_index(drop=True)
-    n_nodes = int(max(loop_df["gt_loop_node_index"].max(), loop_df["pred_loop_node_index"].max()) + 1)
-    gt_progress = _unwrap_loop_progress(loop_df["gt_loop_node_index"], n_nodes=n_nodes)
-    pred_progress = _unwrap_loop_progress(loop_df["pred_loop_node_index"], n_nodes=n_nodes)
+    n_nodes = int(max(loop_df['gt_loop_node_index'].max(), loop_df['pred_loop_node_index'].max()) + 1)
+    gt_progress = _unwrap_loop_progress(loop_df['gt_loop_node_index'], n_nodes=n_nodes, topology=topology)
+    pred_progress = _unwrap_loop_progress(loop_df['pred_loop_node_index'], n_nodes=n_nodes, topology=topology)
     offset_nodes = _estimate_progress_offset(gt_progress, pred_progress)
     pred_aligned = pred_progress - offset_nodes
     residual_nodes = pred_aligned - gt_progress
     delay_s = _estimate_delay_seconds(gt_progress, pred_progress, sample_seconds=1.0, max_lag_steps=15)
 
-    fig, axes = plt.subplots(2, 1, figsize=(9, 6.2), sharex=True, gridspec_kw={"height_ratios": [3.0, 1.2]})
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6.2), sharex=True, gridspec_kw={'height_ratios': [3.0, 1.2]})
     ax = axes[0]
-    elapsed = loop_df["elapsed_s"] - loop_df["elapsed_s"].iloc[0]
-    ax.plot(elapsed, gt_progress, color="tab:blue", linewidth=2.0, label="GT progress")
-    ax.plot(elapsed, pred_aligned, color="tab:green", linewidth=2.0, label="pred progress aligned")
-    ax.set_title(f"run{run_id} {plot_label} progress vs time (estimated delay {delay_s:+.0f}s)\n{timing_meaning}")
-    ax.set_ylabel("Unwrapped loop node progress")
-    ax.legend(loc="best")
+    elapsed = loop_df['elapsed_s'] - loop_df['elapsed_s'].iloc[0]
+    ax.plot(elapsed, gt_progress, color='tab:blue', linewidth=2.0, label='GT progress')
+    ax.plot(elapsed, pred_aligned, color='tab:green', linewidth=2.0, label='pred progress aligned')
+    progress_label = 'Line node progress' if topology == 'line' else 'Unwrapped loop node progress'
+    elapsed_label = 'Elapsed time within segment (s)' if topology == 'line' else 'Elapsed time within loop (s)'
+    ax.set_title(f'run{run_id} {plot_label} progress vs time (estimated delay {delay_s:+.0f}s)\n{timing_meaning}')
+    ax.set_ylabel(progress_label)
+    ax.legend(loc='best')
     ax_res = axes[1]
-    ax_res.axhline(0.0, color="0.4", linewidth=1.0, linestyle="--")
-    ax_res.plot(elapsed, residual_nodes, color="tab:orange", linewidth=1.6, label="aligned progress error")
-    ax_res.set_xlabel("Elapsed time within loop (s)")
-    ax_res.set_ylabel("Residual\n(nodes)")
-    ax_res.legend(loc="best", fontsize=8)
+    ax_res.axhline(0.0, color='0.4', linewidth=1.0, linestyle='--')
+    ax_res.plot(elapsed, residual_nodes, color='tab:orange', linewidth=1.6, label='aligned progress error')
+    ax_res.set_xlabel(elapsed_label)
+    ax_res.set_ylabel('Residual\n(nodes)')
+    ax_res.legend(loc='best', fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
-    return {"estimated_delay_s": delay_s}
+    return {'estimated_delay_s': delay_s}
 
 
 def main() -> None:
@@ -1273,45 +1478,52 @@ def main() -> None:
     loop_manifest = load_loop_manifest(args.loop_manifest, args.eval_fold)
 
     pred_df = pd.read_csv(args.predictions)
-    pred_df["timestamp"] = pd.to_datetime(pred_df["timestamp"], utc=True, errors="coerce").dt.tz_convert(None)
+    pred_df['timestamp'] = pd.to_datetime(pred_df['timestamp'], utc=True, errors='coerce').dt.tz_convert(None)
     sensor_geometry = pd.read_csv(args.sensor_geometry)
-    hybrid_df = pred_df[pred_df["tracker_mode"] == args.base_mode].copy()
+    hybrid_df = pred_df[pred_df['tracker_mode'] == args.base_mode].copy()
     if args.runs:
-        hybrid_df = hybrid_df[hybrid_df["run_id"].isin(args.runs)].copy()
-    hybrid_df = hybrid_df.sort_values(["run_id", "timestamp"]).reset_index(drop=True)
+        hybrid_df = hybrid_df[hybrid_df['run_id'].isin(args.runs)].copy()
+    hybrid_df = hybrid_df.sort_values(['run_id', 'timestamp']).reset_index(drop=True)
     hybrid_df = annotate_eval_loops(hybrid_df, loop_manifest)
+    hybrid_df = apply_corridor_filter(hybrid_df, args.max_nearest_sensor_distance_m)
 
     cfg = ContinuityLatticeConfig(point_count=args.point_count, center_quantile=args.center_quantile)
-    lattice_df = build_point_lattice(hybrid_df, sensor_geometry=sensor_geometry, config=cfg)
-    lattice_df.to_csv(args.out_dir / "lattice_points.csv", index=False)
-    build_lattice_edges(lattice_df).to_csv(args.out_dir / "lattice_edges.csv", index=False)
+    lattice_df = build_point_lattice(hybrid_df, sensor_geometry=sensor_geometry, config=cfg, topology=args.topology)
+    lattice_df.to_csv(args.out_dir / 'lattice_points.csv', index=False)
+    build_lattice_edges(lattice_df, topology=args.topology).to_csv(args.out_dir / 'lattice_edges.csv', index=False)
 
     labeled_df = assign_ground_truth_loop_nodes(hybrid_df, lattice_df)
-    labeled_df["gt_x_m"], labeled_df["gt_y_m"] = latlon_to_xy_m(
-        labeled_df["latitude"],
-        labeled_df["longitude"],
-        ref_lat=float(sensor_geometry["ref_latitude"].iloc[0]),
-        ref_lon=float(sensor_geometry["ref_longitude"].iloc[0]),
+    labeled_df['gt_x_m'], labeled_df['gt_y_m'] = latlon_to_xy_m(
+        labeled_df['latitude'],
+        labeled_df['longitude'],
+        ref_lat=float(sensor_geometry['ref_latitude'].iloc[0]),
+        ref_lon=float(sensor_geometry['ref_longitude'].iloc[0]),
     )
-    template_train_df = labeled_df[labeled_df["eval_split"] == "train"].copy() if loop_manifest is not None else None
+    if args.template_scope == 'fullfit':
+        template_train_df = labeled_df.copy()
+    elif loop_manifest is not None:
+        template_train_df = labeled_df[labeled_df['eval_split'] == 'train'].copy()
+    else:
+        template_train_df = None
 
     feature_cols = _feature_columns(labeled_df)
     base_df = _base_xy_metrics(labeled_df, sensor_geometry=sensor_geometry)
-    base_df["pred_loop_node_index"] = -1
-    base_df["pred_point_index"] = np.nan
-    base_df["pred_sensor_node"] = base_df.apply(
-        lambda row: sensor_for_station_side(sensor_geometry, int(row["pred_station"]), str(row["pred_side"])),
+    base_df['pred_loop_node_index'] = -1
+    base_df['pred_point_index'] = np.nan
+    base_df['pred_sensor_node'] = base_df.apply(
+        lambda row: sensor_for_station_side(sensor_geometry, int(row['pred_station']), str(row['pred_side'])),
         axis=1,
     )
-    base_df["cc_reset"] = False
-    base_df["cc_confidence"] = np.nan
-    base_df["experiment_name"] = args.experiment_name
-    base_df["scope_name"] = args.observation_model
+    base_df['cc_reset'] = False
+    base_df['cc_confidence'] = np.nan
+    base_df['experiment_name'] = args.experiment_name
+    base_df['scope_name'] = args.observation_model
 
     cont_df = decode_continuity(
         hybrid_df=labeled_df,
         lattice_df=lattice_df,
         sensor_geometry=sensor_geometry,
+        topology=args.topology,
         feature_cols=feature_cols,
         template_weight=args.template_weight,
         anchor_weight=args.anchor_weight,
@@ -1328,12 +1540,13 @@ def main() -> None:
         meta_by_eval=meta_by_eval,
         template_train_df=template_train_df,
     )
-    cont_df["experiment_name"] = cont_df.get("experiment_name", pd.Series(args.experiment_name, index=cont_df.index))
-    cont_df["scope_name"] = args.observation_model
+    cont_df['experiment_name'] = cont_df.get('experiment_name', pd.Series(args.experiment_name, index=cont_df.index))
+    cont_df['scope_name'] = args.observation_model
     smooth_df = decode_smoothed_continuity(
         hybrid_df=labeled_df,
         lattice_df=lattice_df,
         sensor_geometry=sensor_geometry,
+        topology=args.topology,
         feature_cols=feature_cols,
         template_weight=args.template_weight,
         anchor_weight=args.anchor_weight,
@@ -1350,15 +1563,18 @@ def main() -> None:
         meta_by_eval=meta_by_eval,
         template_train_df=template_train_df,
     )
-    smooth_df["experiment_name"] = smooth_df.get("experiment_name", pd.Series(args.experiment_name, index=smooth_df.index))
-    smooth_df["scope_name"] = args.observation_model
-    lag_df = apply_fixed_lag_smoother(cont_df, lattice_df=lattice_df, lag_steps=args.lag_steps)
-    lag_df["experiment_name"] = args.experiment_name
-    lag_df["scope_name"] = args.observation_model
+    smooth_df['experiment_name'] = smooth_df.get(
+        'experiment_name', pd.Series(args.experiment_name, index=smooth_df.index)
+    )
+    smooth_df['scope_name'] = args.observation_model
+    lag_df = apply_fixed_lag_smoother(cont_df, lattice_df=lattice_df, lag_steps=args.lag_steps, topology=args.topology)
+    lag_df['experiment_name'] = args.experiment_name
+    lag_df['scope_name'] = args.observation_model
     runtime_df = decode_fixed_lag_smoothed_continuity(
         hybrid_df=labeled_df,
         lattice_df=lattice_df,
         sensor_geometry=sensor_geometry,
+        topology=args.topology,
         feature_cols=feature_cols,
         template_weight=args.template_weight,
         anchor_weight=args.anchor_weight,
@@ -1377,29 +1593,31 @@ def main() -> None:
         meta_by_eval=meta_by_eval,
         template_train_df=template_train_df,
     )
-    runtime_df["experiment_name"] = runtime_df.get("experiment_name", pd.Series(args.experiment_name, index=runtime_df.index))
-    runtime_df["scope_name"] = args.observation_model
+    runtime_df['experiment_name'] = runtime_df.get(
+        'experiment_name', pd.Series(args.experiment_name, index=runtime_df.index)
+    )
+    runtime_df['scope_name'] = args.observation_model
 
     compare_df = pd.concat([base_df, cont_df, smooth_df, runtime_df, lag_df], ignore_index=True, sort=False)
-    compare_df.to_csv(args.out_dir / "continuity_predictions.csv", index=False)
+    compare_df.to_csv(args.out_dir / 'continuity_predictions.csv', index=False)
 
     eval_frames = [base_df, cont_df, smooth_df, runtime_df, lag_df]
     if loop_manifest is not None:
-        eval_frames = [frame[frame["eval_split"] == "test"].copy() for frame in eval_frames]
+        eval_frames = [frame[frame['eval_split'] == 'test'].copy() for frame in eval_frames]
     summary_df = summarize(*eval_frames)
     per_run_df = per_run_summary(*eval_frames)
     per_loop_df = per_loop_summary(*eval_frames)
-    summary_df.to_csv(args.out_dir / "continuity_summary.csv", index=False)
-    per_run_df.to_csv(args.out_dir / "continuity_per_run_summary.csv", index=False)
-    per_loop_df.to_csv(args.out_dir / "continuity_per_loop_summary.csv", index=False)
+    summary_df.to_csv(args.out_dir / 'continuity_summary.csv', index=False)
+    per_run_df.to_csv(args.out_dir / 'continuity_per_run_summary.csv', index=False)
+    per_loop_df.to_csv(args.out_dir / 'continuity_per_loop_summary.csv', index=False)
 
     if not args.skip_plots:
-        plot_lattice(lattice_df, sensor_geometry=sensor_geometry, out_path=args.out_dir / "lattice_overview.png")
-        plot_summary(summary_df, out_path=args.out_dir / "continuity_summary.png")
+        plot_lattice(lattice_df, sensor_geometry=sensor_geometry, out_path=args.out_dir / 'lattice_overview.png')
+        plot_summary(summary_df, out_path=args.out_dir / 'continuity_summary.png')
 
         loop_rows = []
         for run_id in args.plot_runs:
-            if run_id not in set(compare_df["run_id"]):
+            if run_id not in set(compare_df['run_id']):
                 continue
             loop_rows.append(
                 plot_loop_comparison(
@@ -1411,55 +1629,60 @@ def main() -> None:
                     sensor_geometry=sensor_geometry,
                     run_id=run_id,
                     loop_selection=args.loop_selection,
+                    topology=args.topology,
                 )
             )
             plot_loop_clean(
                 track_df=smooth_df,
                 sensor_geometry=sensor_geometry,
                 run_id=run_id,
-                out_path=args.out_dir / f"run{run_id}_smoothed_continuity_clean_xy.png",
+                out_path=args.out_dir / f'run{run_id}_smoothed_continuity_clean_xy.png',
                 loop_selection=args.loop_selection,
-                plot_label="smoothed continuity",
-                timing_meaning="Offline smoother aligned to sample timestamps; may use future evidence.",
+                topology=args.topology,
+                plot_label='smoothed continuity',
+                timing_meaning='Offline smoother aligned to sample timestamps; may use future evidence.',
             )
             timing = plot_loop_timing(
                 track_df=smooth_df,
                 sensor_geometry=sensor_geometry,
                 run_id=run_id,
-                out_path=args.out_dir / f"run{run_id}_smoothed_continuity_timing.png",
+                out_path=args.out_dir / f'run{run_id}_smoothed_continuity_timing.png',
                 loop_selection=args.loop_selection,
-                plot_label="smoothed continuity",
-                timing_meaning="Offline smoother aligned to sample timestamps; delay is not causal wall-clock availability.",
+                topology=args.topology,
+                plot_label='smoothed continuity',
+                timing_meaning='Offline smoother aligned to sample timestamps; delay is not causal wall-clock availability.',
             )
             loop_rows[-1].update(timing)
-            loop_rows[-1]["clean_xy_path"] = f"run{run_id}_smoothed_continuity_clean_xy.png"
-            loop_rows[-1]["timing_path"] = f"run{run_id}_smoothed_continuity_timing.png"
+            loop_rows[-1]['clean_xy_path'] = f'run{run_id}_smoothed_continuity_clean_xy.png'
+            loop_rows[-1]['timing_path'] = f'run{run_id}_smoothed_continuity_timing.png'
             plot_loop_clean(
                 track_df=runtime_df,
                 sensor_geometry=sensor_geometry,
                 run_id=run_id,
-                out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png",
+                out_path=args.out_dir / f'run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png',
                 loop_selection=args.loop_selection,
-                plot_label=f"fixedlag{args.lag_steps} continuity",
-                timing_meaning=f"Bounded-lag runtime-style estimate; sample k is typically finalized when sample k+{args.lag_steps} arrives.",
+                topology=args.topology,
+                plot_label=f'fixedlag{args.lag_steps} continuity',
+                timing_meaning=f'Bounded-lag runtime-style estimate; sample k is typically finalized when sample k+{args.lag_steps} arrives.',
                 finalize_lag_steps=args.lag_steps,
             )
             runtime_timing = plot_loop_timing(
                 track_df=runtime_df,
                 sensor_geometry=sensor_geometry,
                 run_id=run_id,
-                out_path=args.out_dir / f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png",
+                out_path=args.out_dir / f'run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png',
                 loop_selection=args.loop_selection,
-                plot_label=f"fixedlag{args.lag_steps} continuity",
-                timing_meaning="Bounded-lag runtime-style estimate; timestamps reflect aligned samples, not zero-lookahead causality.",
+                topology=args.topology,
+                plot_label=f'fixedlag{args.lag_steps} continuity',
+                timing_meaning='Bounded-lag runtime-style estimate; timestamps reflect aligned samples, not zero-lookahead causality.',
             )
-            loop_rows[-1]["runtime_clean_xy_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png"
-            loop_rows[-1]["runtime_timing_path"] = f"run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png"
-            loop_rows[-1]["runtime_estimated_delay_s"] = runtime_timing["estimated_delay_s"]
-            loop_rows[-1]["loop_selection"] = args.loop_selection
+            loop_rows[-1]['runtime_clean_xy_path'] = f'run{run_id}_fixedlag{args.lag_steps}_continuity_clean_xy.png'
+            loop_rows[-1]['runtime_timing_path'] = f'run{run_id}_fixedlag{args.lag_steps}_continuity_timing.png'
+            loop_rows[-1]['runtime_estimated_delay_s'] = runtime_timing['estimated_delay_s']
+            loop_rows[-1]['loop_selection'] = args.loop_selection
         if loop_rows:
-            pd.DataFrame(loop_rows).to_csv(args.out_dir / "loop_comparison_summary.csv", index=False)
+            pd.DataFrame(loop_rows).to_csv(args.out_dir / 'loop_comparison_summary.csv', index=False)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

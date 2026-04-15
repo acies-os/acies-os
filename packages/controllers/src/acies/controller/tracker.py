@@ -650,7 +650,13 @@ def estimate(ctx: AciesContext) -> None:
             finalize_timestamp_ns=now_ns,
             label=label,
         )
+        confidence_threshold: float = ctx.app['tracker_cfg'].get('confidence_threshold', 0.0)
         for committed in outputs:
+            if committed.confidence < confidence_threshold:
+                logger.debug(
+                    'continuity skip: confidence %.3f below threshold %.1f', committed.confidence, confidence_threshold
+                )
+                continue
             _publish_continuity_output(ctx, committed, label)
             logger.debug(
                 'continuity estimate: node=%d station=%d side=%s lat=%.6f lon=%.6f conf=%.3f',

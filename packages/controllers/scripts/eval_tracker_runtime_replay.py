@@ -22,6 +22,7 @@ from acies.controller.ict_tracker_runtime import (
 )
 
 from eval_ict_simple_tracker import (
+    apply_corridor_filter,
     build_aligned_dataset,
     build_sensor_geometry,
     compute_feature_file,
@@ -53,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loop-selection", choices=["first", "best_smoothed"], default="best_smoothed")
     parser.add_argument("--normalization-mode", choices=["global", "per_run_oracle"], default="global")
     parser.add_argument("--heldout-by-run", action="store_true")
+    parser.add_argument("--max-nearest-sensor-distance-m", type=float, default=None)
     return parser.parse_args()
 
 
@@ -63,6 +65,7 @@ def _load_aligned_rows(
     runs: list[int] | None,
     window_seconds: float,
     stride_seconds: float,
+    max_nearest_sensor_distance_m: float | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     labels_df = load_all_labels(labels_dir, runs=runs)
     items = inventory_signal_files(data_dir)
@@ -80,6 +83,7 @@ def _load_aligned_rows(
         cache_dir / "aligned_energy_labels.parquet",
         lambda: build_aligned_dataset(labels_df, features_df, runs=runs),
     )
+    aligned_df = apply_corridor_filter(aligned_df, max_nearest_sensor_distance_m)
     return labels_df, aligned_df
 
 
@@ -199,6 +203,7 @@ def main() -> None:
         runs=args.runs,
         window_seconds=args.window_seconds,
         stride_seconds=args.stride_seconds,
+        max_nearest_sensor_distance_m=args.max_nearest_sensor_distance_m,
     )
 
     assets = DeploymentAssets.load(args.asset_dir)
@@ -310,6 +315,7 @@ def main() -> None:
             run_id=int(run_id),
             out_path=args.out_dir / f"run{run_id}_controller_runtime_clean_xy.png",
             loop_selection=args.loop_selection,
+            topology=assets.config.topology,
             plot_label=f"controller runtime fixedlag{assets.config.lag_steps}",
             timing_meaning="Integrated controller continuity runtime replayed from ICT 1 s inputs.",
             finalize_lag_steps=assets.config.lag_steps,
@@ -320,6 +326,7 @@ def main() -> None:
             run_id=int(run_id),
             out_path=args.out_dir / f"run{run_id}_controller_runtime_timing.png",
             loop_selection=args.loop_selection,
+            topology=assets.config.topology,
             plot_label=f"controller runtime fixedlag{assets.config.lag_steps}",
             timing_meaning="Integrated controller continuity runtime replayed from ICT 1 s inputs.",
         )

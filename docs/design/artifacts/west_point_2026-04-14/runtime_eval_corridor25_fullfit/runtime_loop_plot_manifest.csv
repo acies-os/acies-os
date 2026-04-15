@@ -1,0 +1,12 @@
+run_id,clean_xy_path,timing_path,estimated_delay_s,loop_selection
+0,run0_controller_runtime_clean_xy.png,run0_controller_runtime_timing.png,4.0,best_smoothed
+1,run1_controller_runtime_clean_xy.png,run1_controller_runtime_timing.png,2.0,best_smoothed
+2,run2_controller_runtime_clean_xy.png,run2_controller_runtime_timing.png,0.0,best_smoothed
+3,run3_controller_runtime_clean_xy.png,run3_controller_runtime_timing.png,0.0,best_smoothed
+4,run4_controller_runtime_clean_xy.png,run4_controller_runtime_timing.png,1.0,best_smoothed
+5,run5_controller_runtime_clean_xy.png,run5_controller_runtime_timing.png,2.0,best_smoothed
+6,run6_controller_runtime_clean_xy.png,run6_controller_runtime_timing.png,3.0,best_smoothed
+7,run7_controller_runtime_clean_xy.png,run7_controller_runtime_timing.png,8.0,best_smoothed
+8,run8_controller_runtime_clean_xy.png,run8_controller_runtime_timing.png,0.0,best_smoothed
+9,run9_controller_runtime_clean_xy.png,run9_controller_runtime_timing.png,-2.0,best_smoothed
+10,run10_controller_runtime_clean_xy.png,run10_controller_runtime_timing.png,1.0,best_smoothed
