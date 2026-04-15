@@ -20,6 +20,7 @@ rs10 = [41.3546901, -74.0531513]
 
 [tracker]
 mode = "continuity_fixedlag"
+asset_dir = "../../../docs/design/artifacts/west_point_2026-04-14/assets_corridor25"
 
 # ------------------------- particle filter parameters -------------------------
 #

@@ -386,11 +386,18 @@ def _build_particle_filter(ctx: AciesContext) -> RoadParticleFilter:
     return pf
 
 
-def _build_continuity_runtime(ctx: AciesContext) -> FixedLagContinuityRuntime:
+def _resolve_asset_dir(ctx: AciesContext) -> Path:
     asset_dir = ctx.app['tracker_cfg'].get('asset_dir')
     if not asset_dir:
         raise ValueError('tracker.asset_dir is required for continuity_fixedlag mode')
-    assets = DeploymentAssets.load(Path(asset_dir))
+    p = Path(asset_dir)
+    if not p.is_absolute():
+        p = Path(ctx.cfg['config_path']).parent / p
+    return p
+
+
+def _build_continuity_runtime(ctx: AciesContext) -> FixedLagContinuityRuntime:
+    assets = DeploymentAssets.load(_resolve_asset_dir(ctx))
     ctx.app['continuity_assets'] = assets
     return FixedLagContinuityRuntime(assets)
 
@@ -410,10 +417,11 @@ def _reload_config(ctx: AciesContext) -> None:
     logger.info('tracker cfg: %s', tracker_cfg)
 
     if tracker_mode == 'continuity_fixedlag':
-        continuity_assets = DeploymentAssets.load(Path(tracker_cfg['asset_dir']))
+        asset_dir = _resolve_asset_dir(ctx)
+        continuity_assets = DeploymentAssets.load(asset_dir)
         ctx.app['continuity_assets'] = continuity_assets
         ctx.app['sensor_order'] = list(continuity_assets.sensor_order)
-        logger.info('continuity asset dir: %s', tracker_cfg['asset_dir'])
+        logger.info('continuity asset dir: %s', asset_dir)
         logger.info('continuity sensors: %s', ctx.app['sensor_order'])
         return
 
