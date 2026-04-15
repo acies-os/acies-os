@@ -96,7 +96,7 @@ gq-4 = "rs10"
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
 wagoneer = 0.60
-kona = 0.70
+kona = 0.65
 miata = 1.1
 cx30 = 1.1
 gle350 = 1.1
