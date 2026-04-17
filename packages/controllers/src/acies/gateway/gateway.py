@@ -19,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import random
@@ -158,18 +159,34 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     reconfig_map = msg['map']
     reconfig_target_list: list[str] = sorted([t.lower() for t in msg['target']])
 
+    logger.debug('ctl msg from UI: %r', msg)
+
+    # Look up the config for the selected map
+    configs: dict[str, dict[str, Any]] = ctx.app['configs']
+    if reconfig_map not in configs:
+        logger.error('unknown map: %s (available: %s)', reconfig_map, list(configs.keys()))
+        return
+    map_cfg = configs[reconfig_map]
+
+    # Swap active config state on map change
+    active_map: str | None = ctx.app.get('active_map')
+    if active_map != reconfig_map:
+        ctx.app['gps'] = map_cfg.get('gps', {})
+        ctx.app['confidence_threshold'] = map_cfg.get('confidence_threshold', {})
+        ctx.app['map_node_mapping'] = map_cfg.get('map_node_mapping', {})
+        ctx.app['active_map'] = reconfig_map
+        logger.info('map changed: %s -> %s', active_map, reconfig_map)
+
     # map selected map and target to the corresponding runID path
     reconfig_target = '_'.join(reconfig_target_list)
-    if reconfig_map not in ctx.cfg['routes']:
-        logger.error('reconfig map %s not found in routes', reconfig_map)
-        return
+    routes = map_cfg.get('routes', {})
 
-    if reconfig_target not in ctx.cfg['routes'][reconfig_map]:
+    if reconfig_target not in routes:
         logger.error('reconfig target %s not found in routes', reconfig_target)
         return
 
     # 2024-08-06-GQ/run29
-    reconfig_route = ctx.cfg['routes'][reconfig_map][reconfig_target]
+    reconfig_route = routes[reconfig_target]
     scene, run_id = tuple(reconfig_route.split('/'))
     run_id = int(run_id.removeprefix('run'))
     scene = str(scene)
@@ -177,7 +194,7 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     # reconfig node states
     reconfig_node_states: list[dict[str, str]] = msg['nodes']
     new_node_states: dict[str, dict[str, str | int]] = {}
-    map_node_mapping = ctx.cfg['map_node_mapping']
+    map_node_mapping = map_cfg.get('map_node_mapping', {})
     for node_state in reconfig_node_states:
         node_id = node_state['nodeId'].lower()
         mapped_node_id: str = map_node_mapping.get(node_id, node_id)
@@ -328,7 +345,10 @@ def system_health(ctx: AciesContext) -> None:
         parts = source.split('/', 1)
         host = parts[0]
         if host not in hosts:
-            coords = gps_table.get(host, [])
+            map_node_mapping: dict[str, str] = ctx.app.get('map_node_mapping', {})
+            reverse_mapping = {v: k for k, v in map_node_mapping.items()}
+            gps_key = reverse_mapping.get(host, host)
+            coords = gps_table.get(gps_key, [])
             hosts[host] = {
                 'services': [],
                 'lat': coords[0] if len(coords) > 0 else None,
@@ -344,7 +364,7 @@ def system_health(ctx: AciesContext) -> None:
         )
 
     logger.debug('system health: %s ', hosts)
-    ctx.publish('ws://health', hosts)
+    ctx.publish('ws://health', {'map': ctx.app.get('active_map'), 'hosts': hosts})
 
 
 @app.schedule(1.0)
@@ -387,10 +407,28 @@ def _reload_config(ctx: AciesContext) -> None:
     ctx.app['confidence_threshold'] = ctx.cfg.get('confidence_threshold', {})
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
 
+    # Refresh the matching entry in the pre-loaded configs dict
+    config_name = os.path.splitext(os.path.basename(ctx.cfg['config_path']))[0]
+    configs: dict[str, dict[str, Any]] | None = ctx.app.data.get('configs')
+    if configs is not None:
+        configs[config_name] = dict(ctx.cfg)  # snapshot current merged config
+
 
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
     _reload_config(ctx)
+
+    # Pre-load all TOML configs from the same directory, keyed by filename stem
+    config_dir = os.path.dirname(ctx.cfg['config_path'])
+    configs: dict[str, dict[str, Any]] = {}
+    for path in sorted(glob.glob(f'{config_dir}/*.toml')):
+        name = os.path.splitext(os.path.basename(path))[0]
+        with open(path, 'rb') as f:
+            configs[name] = tomllib.load(f)
+    ctx.app['configs'] = configs
+    ctx.app['active_map'] = None
+    logger.info('loaded %d config(s): %s', len(configs), list(configs.keys()))
+
     logger.info('confidence thresholds: %d model(s)', len(ctx.app['confidence_threshold']))
     ctx.app['ensemble_buf'] = deque()
     heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)

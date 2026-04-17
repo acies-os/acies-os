@@ -61,7 +61,7 @@ coordinates = [
 
 
 # map selected map and target to the corresponding runID path
-[routes.ict]
+[routes]
 mustang = "2024-03-29-ICT/run0"
 miata = "2024-03-29-ICT/run2"
 gle350 = "2024-03-29-ICT/run4"
@@ -69,12 +69,6 @@ cx30 = "2024-03-29-ICT/run6"
 cx30_mustang = "2024-06-22-ICT/run1"
 miata_mustang = "2024-06-22-ICT/run3"
 cx30_miata = "2024-06-22-ICT/run5"
-
-# map selected map and target to the corresponding runID path
-[routes.gcq]
-polaris = "2024-08-06-GQ/run2"
-warthog = "2024-08-06-GQ/run29"
-polaris_warthog = "2024-08-06-GQ/run75"
 
 # map gq-X to rsY for GCQ
 [map_node_mapping]

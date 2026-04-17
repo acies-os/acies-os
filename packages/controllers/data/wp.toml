@@ -81,7 +81,7 @@ coordinates = [
 
 
 # map selected map and target to the corresponding runID path
-[routes.wp]
+[routes]
 suv = "2026-04-14-WP/run0"
 sedan = "2026-04-14-WP/run1"
 
