@@ -70,14 +70,6 @@ cx30_mustang = "2024-06-22-ICT/run1"
 miata_mustang = "2024-06-22-ICT/run3"
 cx30_miata = "2024-06-22-ICT/run5"
 
-# map gq-X to rsY for GCQ
-[map_node_mapping]
-gq-1 = "rs1"
-gq-2 = "rs3"
-gq-3 = "rs8"
-gq-4 = "rs10"
-
-
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
 miata = 0.85

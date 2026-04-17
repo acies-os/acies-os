@@ -85,13 +85,6 @@ coordinates = [
 suv = "2026-04-14-WP/run0"
 sedan = "2026-04-14-WP/run1"
 
-# map gq-X to rsY for GCQ
-[map_node_mapping]
-gq-1 = "rs1"
-gq-2 = "rs3"
-gq-3 = "rs8"
-gq-4 = "rs10"
-
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]

@@ -344,10 +344,13 @@ def system_health(ctx: AciesContext) -> None:
         # source is "namespace/name" -> group by first segment (host)
         parts = source.split('/', 1)
         host = parts[0]
+        map_node_mapping: dict[str, str] = ctx.app.get('map_node_mapping', {})
+        reverse_mapping = {v: k for k, v in map_node_mapping.items()}
+        gps_key = reverse_mapping.get(host, host)
+        # skip hosts not in the current map's GPS table (only when mapping is defined)
+        if map_node_mapping and gps_key not in gps_table:
+            continue
         if host not in hosts:
-            map_node_mapping: dict[str, str] = ctx.app.get('map_node_mapping', {})
-            reverse_mapping = {v: k for k, v in map_node_mapping.items()}
-            gps_key = reverse_mapping.get(host, host)
             coords = gps_table.get(gps_key, [])
             hosts[host] = {
                 'services': [],
@@ -405,6 +408,7 @@ def _reload_config(ctx: AciesContext) -> None:
         ctx.cfg.update(tomllib.load(f))
     ctx.app['gps'] = ctx.cfg.get('gps', {})
     ctx.app['confidence_threshold'] = ctx.cfg.get('confidence_threshold', {})
+    ctx.app['map_node_mapping'] = ctx.cfg.get('map_node_mapping', {})
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
 
     # Refresh the matching entry in the pre-loaded configs dict
