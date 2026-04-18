@@ -38,7 +38,7 @@ import torch
 from acies.buffers import TemporalBuffer
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
-from acies.FoundationSense.general_utils.weight_utils import load_model_weight  # pyright: ignore[reportMissingTypeStubs]
+from acies.FoundationSense.general_utils.weight_utils import load_model_weight  # pyright: ignore[reportUnknownVariableType]
 from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)
@@ -119,15 +119,17 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 
 @app.subscribe(OnChange('weight'))
 def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
-    """Reload model weights when the weight file changes."""
+    """Reload model weights and update modalities when the weight file changes."""
     new_weight = msg.value
-    logger.info('weight changed to %s; reloading state dict', new_weight)
-    model: ModelForInference = ctx.app['model']
-    _ = load_model_weight(model.args, model.classifier, new_weight)
+    modality_cfg = ctx.cfg.get('modality')
+    logger.info('weight changed to %s (modality=%s); reloading', new_weight, modality_cfg)
+    ctx.app['model'].reload(new_weight, modality_cfg)
+    ctx.app['modalities'] = [_MOD_MAPPING[m] for m in ctx.app['model'].args.dataset_config['modality_names']]
+
     with ctx.app.lock:
         ctx.app['buffer'].clear()
         ctx.app['ensemble_buf'].clear()
-    logger.info('weight reload complete')
+    logger.info('weight reload complete; modalities=%s', ctx.app['modalities'])
 
 
 @app.subscribe(OnChange('labels'))
@@ -305,6 +307,7 @@ def main(
 ) -> None:
     app.state.config.update(
         {
+            'deactivated': False,
             'weight': weight,
             'geo_topic': geo_topic,
             'mic_topic': mic_topic,

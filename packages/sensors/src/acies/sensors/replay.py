@@ -178,6 +178,14 @@ def on_speed_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     ctx.app['restart'].set()
 
 
+@app.subscribe(OnChange('deactivated'))
+def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    is_deactivated = msg.value
+    logger.info('deactivated changed to %s', is_deactivated)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
+    ctx.app['restart'].set()
+
+
 @app.on_shutdown
 def teardown(_ctx: AciesContext) -> None:
     logger.info('replay stopped')
@@ -323,6 +331,12 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
                 _ = _wait_for_any(cancel, timeout=3600)
                 continue
 
+        # --- check if service is deactivated ---
+        if ctx.cfg.get('deactivated', False):
+            logger.info('service is deactivated; waiting for reactivation')
+            _ = _wait_for_any(cancel, timeout=3600)
+            continue
+
         windows = ctx.app['windows']
         speed: float = ctx.cfg.get('speed', 1.0)
         loop: bool = ctx.cfg.get('loop', False)
@@ -391,6 +405,7 @@ def main(
 ) -> None:
     app.state.config.update(
         {
+            'deactivated': False,
             'data_dir': data_dir,
             'scene': scene,
             'node': node,

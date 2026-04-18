@@ -226,6 +226,7 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         return
 
     # --- build kv ops for each target using service discovery ---
+    deactivate_pass: list[tuple[str, Sequence[KvEntry]]] = []
     data_reconfig_pass: list[tuple[str, Sequence[KvEntry]]] = []
     all_targets: list[str] = [gps_base]
     tracker_base = edge_services.get('tracker')
@@ -239,6 +240,19 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     for node_id, state in new_node_states.items():
         services = _find_services(heartbeat_buf, node_id)
+        modality = state['modality']
+
+        # --- deactivation/activation of sensor services ---
+        if modality not in ('geo', 'both') and 'geo' in services:
+            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=True)]))
+        if modality not in ('mic', 'both') and 'mic' in services:
+            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=True)]))
+        if modality in ('geo', 'both') and 'geo' in services:
+            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=False)]))
+        if modality in ('mic', 'both') and 'mic' in services:
+            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=False)]))
+
+        # --- data config for active services ---
         data_ops = [
             kv_set('scene', value=state['scene']),
             kv_set('run', value=state['run_id']),
@@ -247,14 +261,21 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         if 'vfm' in services:
             all_targets.append(services['vfm'])
             vfm_ops: list[KvEntry] = []
-            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(str(state['modality']).lower(), 'both')
+            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(str(modality).lower(), 'both')
             vfm_ops.append(kv_set('weight', value=vfm_weights[weight_key]))
             vfm_ops.append(kv_set('labels', value=vfm_labels))
+            # Send modality override so VFM updates its expected modalities
+            vfm_modality: str | None = None
+            if modality == 'geo':
+                vfm_modality = 'seismic'
+            elif modality == 'mic':
+                vfm_modality = 'audio'
+            vfm_ops.append(kv_set('modality', value=vfm_modality))
             data_reconfig_pass.append((services['vfm'], vfm_ops))
-        if state['modality'] in ['mic', 'both'] and 'mic' in services:
+        if modality in ['mic', 'both'] and 'mic' in services:
             data_reconfig_pass.append((services['mic'], data_ops))
             all_targets.append(services['mic'])
-        if state['modality'] in ['geo', 'both'] and 'geo' in services:
+        if modality in ['geo', 'both'] and 'geo' in services:
             data_reconfig_pass.append((services['geo'], data_ops))
             all_targets.append(services['geo'])
     data_reconfig_pass.append(
@@ -269,6 +290,10 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     )
 
     with ThreadPoolExecutor() as pool:
+        # pass 0: deactivate/activate sensor services
+        items0 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in deactivate_pass]
+        _wait_futures(items0, 'pass 0 (deactivation)')
+
         # pass 1: send data params in parallel
         items1 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in data_reconfig_pass]
         _wait_futures(items1, 'pass 1 (data params)')
