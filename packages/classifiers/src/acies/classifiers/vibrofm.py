@@ -116,6 +116,27 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
         ctx.app['ensemble_buf'].clear()
 
 
+@app.subscribe(OnChange('weight'))
+def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    """Reload model weights when the weight file changes."""
+    new_weight = msg.value
+    logger.info('weight changed to %s; reloading state dict', new_weight)
+    model: ModelForInference = ctx.app['model']
+    model.reload_weight(new_weight)
+    with ctx.app.lock:
+        ctx.app['buffer'].clear()
+        ctx.app['ensemble_buf'].clear()
+    logger.info('weight reload complete')
+
+
+@app.subscribe(OnChange('labels'))
+def on_labels_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    """Update class labels when the label list changes."""
+    new_labels = msg.value
+    logger.info('labels changed to %s', new_labels)
+    ctx.cfg['labels'] = new_labels if isinstance(new_labels, list) else new_labels.split(',')
+
+
 @app.subscribe('{geo_topic}')
 def on_geo(ctx: AciesContext, msg: AciesTimeSeries) -> None:
     if 'geo' not in ctx.app['modalities']:
@@ -254,9 +275,7 @@ def run_inference(ctx: AciesContext) -> None:
     show_default=True,
     help='Rolling window size in seconds for soft-vote ensemble.',
 )
-@click.option(
-    '--ensemble-size', default=1, type=int, show_default=True, help='Minimum results in window before publishing.'
-)
+@click.option('--ensemble-size', default=1, type=int, show_default=True, help='Minimum results in window before publishing.')
 @click.option(
     '--modality',
     default=None,

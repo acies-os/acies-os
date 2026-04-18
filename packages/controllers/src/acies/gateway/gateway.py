@@ -57,6 +57,8 @@ _MODALITY_MAP = {
     'both': 'both',
 }
 
+_MODALITY_TO_WEIGHT_KEY: dict[str, str] = {'both': 'both', 'geo': 'seismic', 'mic': 'audio'}
+
 
 @app.subscribe('**/vehicle')
 def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
@@ -185,7 +187,6 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         logger.error('reconfig target %s not found in routes', reconfig_target)
         return
 
-    # 2024-08-06-GQ/run29
     reconfig_route = routes[reconfig_target]
     scene, run_id = tuple(reconfig_route.split('/'))
     run_id = int(run_id.removeprefix('run'))
@@ -230,6 +231,12 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     tracker_base = edge_services.get('tracker')
     if tracker_base is not None:
         all_targets.append(tracker_base)
+
+    # model config for VFM nodes
+    vfm_cfg = map_cfg.get('models', {}).get('vfm', {})
+    vfm_weights: dict[str, str] = vfm_cfg.get('weight', {})
+    vfm_labels: list[str] | None = vfm_cfg.get('labels')
+
     for node_id, state in new_node_states.items():
         services = _find_services(heartbeat_buf, node_id)
         data_ops = [
@@ -239,6 +246,11 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         ]
         if 'vfm' in services:
             all_targets.append(services['vfm'])
+            vfm_ops: list[KvEntry] = []
+            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(str(state['modality']).lower(), 'both')
+            vfm_ops.append(kv_set('weight', value=vfm_weights[weight_key]))
+            vfm_ops.append(kv_set('labels', value=vfm_labels))
+            data_reconfig_pass.append((services['vfm'], vfm_ops))
         if state['modality'] in ['mic', 'both'] and 'mic' in services:
             data_reconfig_pass.append((services['mic'], data_ops))
             all_targets.append(services['mic'])

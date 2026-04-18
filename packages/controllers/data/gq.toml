@@ -17,6 +17,15 @@ gq-1 = "rs1"
 gq-2 = "rs3"
 gq-3 = "rs8"
 gq-4 = "rs10"
+
+[models.vfm]
+labels = ["polaris", "warthog", "truck", "husky"]
+
+[models.vfm.weight]
+both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_multiclass_best.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_seismic_multiclass_best.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_audio_multiclass_best.pt"
+
 # Confidence threshold to filter multi-label output
 [confidence_threshold]
 

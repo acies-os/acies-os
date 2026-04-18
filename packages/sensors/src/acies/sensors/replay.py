@@ -47,7 +47,7 @@ app = AciesApp()
 
 _SAMPLING_RATE = {'geo': 200, 'mic': 16000}
 _DTYPE = {'geo': 'int32', 'mic': 'int16'}
-_CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0'}}
+_CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0', 'mono'}}
 _NS_PER_S = 1_000_000_000
 
 

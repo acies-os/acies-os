@@ -85,6 +85,14 @@ coordinates = [
 wagoneer = "2026-04-14-West-Point/run6"
 kona = "2026-04-14-West-Point/run0"
 
+[models.vfm]
+labels = ["wagoneer", "kona"]
+
+[models.vfm.weight]
+both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_multiclass_distance-100_latest.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_seismic_multiclass_best.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_audio_multiclass_best.pt"
+
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
