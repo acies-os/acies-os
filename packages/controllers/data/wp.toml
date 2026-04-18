@@ -90,8 +90,8 @@ labels = ["wagoneer", "kona"]
 
 [models.vfm.weight]
 both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_multiclass_distance-100_latest.pt"
-seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_seismic_multiclass_best.pt"
-audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_audio_multiclass_best.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_wp2026_1.0_multiclass_distance-100_latest.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
 
 
 # Confidence threshold to filter multi-label output

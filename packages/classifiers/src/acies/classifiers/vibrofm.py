@@ -38,6 +38,7 @@ import torch
 from acies.buffers import TemporalBuffer
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
+from acies.FoundationSense.general_utils.weight_utils import load_model_weight  # pyright: ignore[reportMissingTypeStubs]
 from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     new_weight = msg.value
     logger.info('weight changed to %s; reloading state dict', new_weight)
     model: ModelForInference = ctx.app['model']
-    model.reload_weight(new_weight)
+    _ = load_model_weight(model.args, model.classifier, new_weight)
     with ctx.app.lock:
         ctx.app['buffer'].clear()
         ctx.app['ensemble_buf'].clear()
