@@ -74,6 +74,23 @@ edge-mqtt-local *args:
         --port {{ mqtt_port }} \
         --mqtt-topic {{ mqtt_topic }}
 
+# Run spar locally against the edge zenoh bus.
+# Requires `just edge-up-infra` (and typically `just edge-up-nodes`) to be running.
+# Uses SPAR_WEIGHT (classification head) and SPAR_TRACKING_WEIGHT (tracking head)
+# from .env; labels reuse VFM_LABELS.
+edge-spar-local *args:
+    @mkdir -p ~/.acies/logs
+    ACIES_LISTEN="" \
+    ACIES_LOG={{ acies_log }} \
+    uv run acies-spar \
+        --acies-namespace {{ acies_namespace }} --acies-name spar \
+        --acies-connect {{ edge_zenoh_connect }} \
+        --geo '**/geo' --mic '**/mic' \
+        --weight "$MODEL_DIR/$SPAR_WEIGHT" \
+        --tracking-weight "$MODEL_DIR/$SPAR_TRACKING_WEIGHT" \
+        --labels "$VFM_LABELS" \
+        {{ args }}
+
 # Start infra for an edge replay
 edge-up-infra *args:
     ACIES_NAMESPACE=$(hostname -s) docker compose -p edge-replay \
