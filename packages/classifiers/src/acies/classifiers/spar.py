@@ -49,6 +49,20 @@ WINDOW_GRACE_S = 1
 
 DEFAULT_LABELS = ['polaris', 'warthog', 'truck', 'husky']
 
+# Known scene IDs. A scene ID must match a yaml file under
+# ``acies/SPAR/vatt/config/{scene}.yaml`` (bundled with the SPAR package).
+# We identify the active scene by substring-matching one of these against a
+# weight filename.
+_KNOWN_SCENES: tuple[str, ...] = ('2024-03-29-ICT',)
+
+
+def _scene_from_path(path: str) -> str | None:
+    name = Path(path).name
+    for scene in _KNOWN_SCENES:
+        if scene in name:
+            return scene
+    return None
+
 
 app = AciesApp()
 
@@ -115,14 +129,50 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 
 @app.subscribe(OnChange('weight'))
 def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
-    """Reload model weights when the weight file changes."""
-    new_weight = msg.value # /model/spar_2024-03-29-ICT_classification.pt
-    
-    # TODO: IMPLEMENT
+    """Rebuild the model from scratch for the scene encoded in the weight filename.
+
+    The value is a marker carrying the scene ID (e.g. ``2024-03-29-ICT``) in its
+    basename. Different scenes can have different architectures, so we
+    instantiate a fresh ``ModelForInference`` rather than reloading state_dict
+    into the existing backbone.
+    """
+    weight_list: list[str] = [str(v) for v in msg.value]
+    if len(weight_list) < 2:
+        logger.error(
+            'on_weight_change: expected [classification, tracking], got %s; ignoring',
+            weight_list,
+        )
+        return
+    new_weight, new_tracking_weight = weight_list[0], weight_list[1]
+    scene = _scene_from_path(new_weight)
+    if scene is None:
+        logger.error(
+            'on_weight_change: no known scene %s matches %s; ignoring',
+            _KNOWN_SCENES, new_weight,
+        )
+        return
+
+    labels: list[str] = ctx.cfg.get('labels') or []
+    logger.info(
+        'rebuilding spar model: scene=%s weight=%s tracking_weight=%s #classes=%s',
+        scene, new_weight, new_tracking_weight, len(labels) or None,
+    )
+    new_model = ModelForInference(
+        weight=Path(new_weight),
+        scene=scene,
+        num_classes=len(labels) or None,
+        tracking_weight=Path(new_tracking_weight),
+    )
+    logger.info(
+        'rebuilt spar model: scene=%s #classes=%d #params=%d',
+        scene, new_model.num_classes, sum(p.numel() for p in new_model.parameters()),
+    )
 
     with ctx.app.lock:
+        ctx.app['model'] = new_model
         ctx.app['buffer'].clear()
-        ctx.app['ensemble_buf'].clear()
+        ctx.app['latest_ts_s'] = 0
+        ctx.app['next_window_start'] = None
 
 @app.subscribe(OnChange('deactivated'))
 def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
