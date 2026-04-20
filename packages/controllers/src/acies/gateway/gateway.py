@@ -56,9 +56,23 @@ _MODALITY_MAP = {
     'acoustic': 'mic',
     'both': 'both',
 }
+_ALL_MODELS = ['vfm', 'diffphys', 'spar']
+_MODEL_NAME_MAP: dict[str, str] = {'vibrofm': 'vfm', 'spar': 'spar', 'diffphys': 'diffphys'}
+_SPAR_NAMESPACE = 'joint'
 
 _MODALITY_TO_WEIGHT_KEY: dict[str, str] = {'both': 'both', 'geo': 'seismic', 'mic': 'audio'}
 
+
+@app.subscribe('**/spar')
+def on_spar(ctx: AciesContext, msg: AciesInference) -> None:
+    logger.debug('tk-on_spar: msg.predictions: %s', msg.predictions)
+    thresholds: dict[str, dict[str, float]] = ctx.app['confidence_threshold']
+    model_thresh = thresholds.get('spar', {})
+    filtered_predictions = [p for p in msg.predictions if p.score >= model_thresh.get(p.label, 0.0)]
+    logger.debug('tk-on_spar: filtered_predictions: %s', filtered_predictions)
+    if filtered_predictions:
+        msg_spar = AciesInference(source=msg.source, timestamp=msg.timestamp, predictions=filtered_predictions)
+        ctx.publish('ws://spar', msg_spar)
 
 @app.subscribe('**/vehicle')
 def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
@@ -179,7 +193,7 @@ def _build_node_states(
     for node_state in msg_nodes:
         node_id = node_state['nodeId'].lower()
         mapped_node_id: str = map_node_mapping.get(node_id, node_id)
-        model = node_state['model'].replace('VibroFM', 'vfm')
+        model = _MODEL_NAME_MAP.get(node_state['model'].lower(), node_state['model'].lower())
         modality = _MODALITY_MAP.get(node_state['modality'].lower(), node_state['modality'].lower())
         new_node_states[mapped_node_id] = {
             'node_id': mapped_node_id,
@@ -212,52 +226,85 @@ def _build_reconfig_ops(
     if tracker is not None:
         all_targets.append(tracker)
 
-    # model config for VFM nodes
-    vfm_cfg = map_cfg.get('models', {}).get('vfm', {})
-    vfm_weights: dict[str, str] = vfm_cfg.get('weight', {})
-    vfm_labels: list[str] | None = vfm_cfg.get('labels')
+    # Collect which models are active across all nodes
+    active_models: set[str] = {str(state['model']) for state in node_states.values()}
+    spar_active = 'spar' in active_models
 
+    # --- per-node: sensor activation + model activation/deactivation ---
     for node_id, state in node_states.items():
         services = _find_services(heartbeat_buf, node_id)
-        modality = state['modality']
+        selected_model: str = str(state['model'])
+        modality: str = str(state['modality'])
+        # SPAR needs all geo/mic across all nodes; force 'both' when active
+        effective_modality: str = 'both' if spar_active else modality
+        
+        logger.debug('node_id: %s, selected_model: %s, modality: %s, effective_modality: %s', node_id, selected_model, modality, effective_modality)
 
-        # --- deactivation/activation of sensor services ---
-        if modality not in ('geo', 'both') and 'geo' in services:
+        # --- sensor deactivation/activation ---
+        if effective_modality not in ('geo', 'both') and 'geo' in services:
             deactivate_pass.append((services['geo'], [kv_set('deactivated', value=True)]))
-        if modality not in ('mic', 'both') and 'mic' in services:
+        if effective_modality not in ('mic', 'both') and 'mic' in services:
             deactivate_pass.append((services['mic'], [kv_set('deactivated', value=True)]))
-        if modality in ('geo', 'both') and 'geo' in services:
+        if effective_modality in ('geo', 'both') and 'geo' in services:
             deactivate_pass.append((services['geo'], [kv_set('deactivated', value=False)]))
-        if modality in ('mic', 'both') and 'mic' in services:
+        if effective_modality in ('mic', 'both') and 'mic' in services:
             deactivate_pass.append((services['mic'], [kv_set('deactivated', value=False)]))
 
-        # --- data config for active services ---
+        # --- model deactivation: deactivate models NOT selected on this node ---
+        for model_name in _ALL_MODELS:
+            if model_name in services:
+                deactivate_pass.append((services[model_name], [kv_set('deactivated', value=True)]))
+
+        # --- sensor data config ---
         data_ops: list[KvEntry] = [
             kv_set('scene', value=state['scene']),
             kv_set('run', value=state['run_id']),
             kv_set('node', value=state['replayed_node_id']),
         ]
-        if 'vfm' in services:
-            all_targets.append(services['vfm'])
-            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(str(modality).lower(), 'both')
-            vfm_ops: list[KvEntry] = [
-                kv_set('weight', value=vfm_weights[weight_key]),
-                kv_set('labels', value=vfm_labels),
-            ]
-            # Send modality override so VFM updates its expected modalities
-            if modality == 'geo':
-                vfm_ops.append(kv_set('modality', value='seismic'))
-            elif modality == 'mic':
-                vfm_ops.append(kv_set('modality', value='audio'))
-            else:
-                vfm_ops.append(kv_set('modality', value=None))
-            data_pass.append((services['vfm'], vfm_ops))
-        if modality in ('mic', 'both') and 'mic' in services:
+        if effective_modality in ('mic', 'both') and 'mic' in services:
             data_pass.append((services['mic'], data_ops))
             all_targets.append(services['mic'])
-        if modality in ('geo', 'both') and 'geo' in services:
+        if effective_modality in ('geo', 'both') and 'geo' in services:
             data_pass.append((services['geo'], data_ops))
             all_targets.append(services['geo'])
+
+        # --- per-node model activation + config (vfm, diffphys) ---
+        if selected_model != 'spar' and selected_model in services:
+            model_cfg = map_cfg.get('models', {}).get(selected_model, {})
+            model_weights: dict[str, str] = model_cfg.get('weight', {})
+            model_labels: list[str] | None = model_cfg.get('labels')
+            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(effective_modality.lower(), 'both')
+            model_ops: list[KvEntry] = [
+                kv_set('deactivated', value=False),
+                kv_set('weight', value=model_weights[weight_key]),
+                kv_set('labels', value=model_labels),
+            ]
+            # Send modality override so the model updates its expected modalities
+            if effective_modality == 'geo':
+                model_ops.append(kv_set('modality', value='seismic'))
+            elif effective_modality == 'mic':
+                model_ops.append(kv_set('modality', value='audio'))
+            else:
+                model_ops.append(kv_set('modality', value=None))
+            data_pass.append((services[selected_model], model_ops))
+            all_targets.append(services[selected_model])
+
+    # --- SPAR global activation ---
+    if spar_active:
+        spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)
+        spar_cfg = map_cfg.get('models', {}).get('spar', {})
+        if 'spar' in spar_services:
+            spar_ops: list[KvEntry] = [
+                kv_set('deactivated', value=False),
+                kv_set('weight', value=spar_cfg.get('weight', '')),
+                kv_set('labels', value=spar_cfg.get('labels')),
+            ]
+            if spar_cfg.get('tracking_weight'):
+                spar_ops.append(kv_set('tracking_weight', value=spar_cfg['tracking_weight']))
+            data_pass.append((spar_services['spar'], spar_ops))
+            all_targets.append(spar_services['spar'])
+        else:
+            logger.warning('spar selected but no spar service found in heartbeat at %s', _SPAR_NAMESPACE)
 
     # GPS service config
     data_pass.append((
@@ -268,6 +315,10 @@ def _build_reconfig_ops(
             kv_set('label', value=reconfig_target),
         ],
     ))
+    
+    logger.debug('build_output: deactivate_pass: %s', deactivate_pass)
+    logger.debug('build_output: data_pass: %s', data_pass)
+    logger.debug('build_output: all_targets: %s', all_targets)
 
     return deactivate_pass, data_pass, all_targets
 
@@ -319,6 +370,9 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     # Execute in three passes
     with ThreadPoolExecutor() as pool:
+        
+        # this is the deactivation pass that controls what runs on each nodes
+        # this should send to mic/geo/vfm/diffphys on each node
         items0 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in deactivate_pass]
         _wait_futures(items0, 'pass 0 (deactivation)')
 

@@ -73,10 +73,25 @@ cx30_miata = "2024-06-22-ICT/run5"
 [models.vfm]
 labels = ["gle350", "miata", "cx30", "mustang"]
 
+[models.diffphys]
+labels = ["gle350", "miata", "cx30", "mustang"]
+
+[models.spar]
+labels = ["gle350", "miata", "cx30", "mustang"]
+
 [models.vfm.weight]
 both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt"
 seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_seismic_multiclass_best.pt"
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_audio_multiclass_best.pt"
+
+[models.diffphys.weight]
+both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_seismic_multiclass_best.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_audio_multiclass_best.pt"
+
+[models.spar.weight]
+both = "/model/spar_2024-03-29-ICT_classification.pt"
+# both = ["/model/spar_2026-04-13-West-Point_classification.pt", "/model/spar_2026-04-13-Wes-Point_tracking.pt"]
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
@@ -85,10 +100,17 @@ cx30 = 0.85
 gle350 = 0.85
 mustang = 0.85
 
-polaris = 0.95
-warthog = 0.95
-truck = 0.80
-husky = 0.95
+[confidence_threshold.diffphys]
+miata = 0.85
+cx30 = 0.85
+gle350 = 0.85
+mustang = 0.85
+
+[confidence_threshold.spar]
+gle350 = 0.85
+miata = 0.85
+cx30 = 0.85
+mustang = 0.85
 
 [ensemble]
 # ensemble temporal window size in seconds

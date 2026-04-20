@@ -1,0 +1,76 @@
+# Classifier(s) on edge. Combine with edge.yml + replay.yml.
+# Scenario 2 (lab development).
+#
+# Usage — select nodes with --profile (must match replay.yml profiles):
+#   MODEL_DIR=/model DIFFPHYS_WEIGHT=weights.pt \
+#     docker compose -f edge.yml -f replay.yml -f classifier.yml \
+#     --profile rs1 --profile rs3 up
+#
+# Env vars:
+#   MODEL_DIR         Host path to model directory (required)
+#   DIFFPHYS_WEIGHT        Weight filename inside MODEL_DIR (required)
+#   DIFFPHYS_LABELS        Comma-separated label list (required)
+#   ZENOH_CONNECT     Zenoh endpoint (default: tcp/127.0.0.1:7501)
+#   ACIES_LOG         Per-logger level overrides
+
+x-env: &env
+  PATH: /acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+  ACIES_LOG: ${ACIES_LOG:-}
+  ACIES_CONNECT: ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+
+x-diffphys: &diffphys
+  image: acies-server:latest
+  network_mode: host
+  volumes:
+    - ${MODEL_DIR}:/model:ro
+    - ~/.acies:/root/.acies
+  restart: unless-stopped
+
+services:
+  rs1-diffphys:
+    <<: *diffphys
+    profiles: [rs1, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs1/geo --mic rs1/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: diffphys }
+
+  rs2-diffphys:
+    <<: *diffphys
+    profiles: [rs2, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs2/geo --mic rs2/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: diffphys }
+
+  rs3-diffphys:
+    <<: *diffphys
+    profiles: [rs3, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs3/geo --mic rs3/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: diffphys }
+
+  rs5-diffphys:
+    <<: *diffphys
+    profiles: [rs5, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs5/geo --mic rs5/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: diffphys }
+
+  rs6-diffphys:
+    <<: *diffphys
+    profiles: [rs6, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs6/geo --mic rs6/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: diffphys }
+
+  rs7-diffphys:
+    <<: *diffphys
+    profiles: [rs7, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs7/geo --mic rs7/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: diffphys }
+
+  rs8-diffphys:
+    <<: *diffphys
+    profiles: [rs8, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs8/geo --mic rs8/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: diffphys }
+
+  rs10-diffphys:
+    <<: *diffphys
+    profiles: [rs10, all]
+    command: acies-diffphys --weight /model/${DIFFPHYS_WEIGHT} --geo rs10/geo --mic rs10/mic --labels ${DIFFPHYS_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: diffphys }

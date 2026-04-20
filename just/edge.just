@@ -96,6 +96,7 @@ edge-up-infra *args:
     ACIES_NAMESPACE=$(hostname -s) docker compose -p edge-replay \
         --env-file .env \
         -f docker/edge.yml \
+        -f docker/edge-classifier.yml \
         {{ args }} \
         up
 
@@ -104,6 +105,7 @@ edge-up-nodes *args:
     docker compose -p edge-replay --env-file .env \
         -f docker/replay.yml \
         -f docker/classifier.yml \
+        -f docker/diffphys.yml \
         {{ args }} \
         up
 

@@ -35,6 +35,7 @@ dependencies = [
 # scripts.acies-noise-detector = "acies.classifier.noise_detector:main"
 scripts.acies-vfm = "acies.classifiers.vibrofm:main"
 scripts.acies-spar = "acies.classifiers.spar:main"
+scripts.acies-diffphys = "acies.classifiers.diffphys:main"
 
 [dependency-groups]
 docs = [

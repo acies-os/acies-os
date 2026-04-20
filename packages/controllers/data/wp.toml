@@ -93,6 +93,16 @@ both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0
 seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_wp2026_1.0_multiclass_distance-100_latest.pt"
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
 
+[models.diffphys.weight]
+both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_multiclass_distance-100_latest.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_wp2026_1.0_multiclass_distance-100_latest.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
+
+[models.spar]
+weight = "/model/demo2-2024-03-29-ICT_MAEBackbone_vehicle_classification_1.0_finetune_latest.pt"
+tracking_weight = "/model/demo2-2024-03-29-ICT_MAEBackbone_vehicle_tracking_1.0_finetune_latest.pt"
+labels = ["wagoneer", "kona"]
+
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
@@ -102,6 +112,10 @@ miata = 1.1
 cx30 = 1.1
 gle350 = 1.1
 mustang = 1.1
+
+[confidence_threshold.spar]
+wagoneer = 0.60
+kona = 0.65
 
 [ensemble]
 # ensemble temporal window size in seconds

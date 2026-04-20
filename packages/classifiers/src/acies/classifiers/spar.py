@@ -73,7 +73,7 @@ def setup(ctx: AciesContext) -> None:
         sum(p.numel() for p in model.parameters()),
     )
 
-    output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('vehicle')
+    output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('spar')
     ctx.app['model'] = model
     ctx.app['output_topic'] = output_topic
     # buffer: {ts_s: {node: {modality: samples}}}
@@ -82,6 +82,9 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['next_window_start'] = None
 
     ctx.cfg['start_at'] = time.time()
+    
+    is_deactivated = ctx.cfg.get('deactivated', False)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
 
     logger.info(
         'publishing to %s; geo=%r mic=%r labels=%s',
@@ -113,28 +116,19 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 @app.subscribe(OnChange('weight'))
 def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     """Reload model weights when the weight file changes."""
-    new_weight = msg.value
-    tracking_weight = ctx.cfg.get('tracking_weight')
-    logger.info('weight changed to %s (tracking=%s); reloading', new_weight, tracking_weight)
-    ctx.app['model'].reload(new_weight, tracking_weight)
+    new_weight = msg.value # /model/spar_2024-03-29-ICT_classification.pt
+    
+    # TODO: IMPLEMENT
+
     with ctx.app.lock:
         ctx.app['buffer'].clear()
-        ctx.app['next_window_start'] = None
-    logger.info('weight reload complete')
+        ctx.app['ensemble_buf'].clear()
 
-
-@app.subscribe(OnChange('tracking_weight'))
-def on_tracking_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
-    """Reload both heads when the tracking weight file changes."""
-    new_tracking = msg.value
-    weight = ctx.cfg['weight']
-    logger.info('tracking_weight changed to %s; reloading', new_tracking)
-    ctx.app['model'].reload(weight, new_tracking)
-    with ctx.app.lock:
-        ctx.app['buffer'].clear()
-        ctx.app['next_window_start'] = None
-    logger.info('tracking_weight reload complete')
-
+@app.subscribe(OnChange('deactivated'))
+def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    is_deactivated = msg.value
+    logger.info('deactivated changed to %s', is_deactivated)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
 
 @app.subscribe(OnChange('labels'))
 def on_labels_change(ctx: AciesContext, msg: AciesKvChange) -> None:
@@ -182,6 +176,10 @@ def on_mic(ctx: AciesContext, msg: AciesTimeSeries) -> None:
 
 @app.schedule(1.0)
 def run_inference(ctx: AciesContext) -> None:
+    if ctx.cfg.get('deactivated'):
+        logger.debug('spar deactivated; skipping inference')
+        return
+
     with ctx.app.lock:
         buf: dict[int, dict[str, dict[str, npt.NDArray[Any]]]] = ctx.app['buffer']
         latest: int = ctx.app['latest_ts_s']
@@ -322,7 +320,7 @@ def run_inference(ctx: AciesContext) -> None:
     '--output',
     'output_topic',
     default=None,
-    help='Output topic for AciesInference results. Defaults to <host>/<name>/vehicle.',
+    help='Output topic for AciesInference results. Defaults to <host>/<name>.',
 )
 @click.option(
     '--labels',
@@ -340,7 +338,7 @@ def main(
 ) -> None:
     app.state.config.update(
         {
-            'deactivated': False,
+            'deactivated': True,
             'weight': weight,
             'tracking_weight': tracking_weight,
             'geo_topic': geo_topic,
