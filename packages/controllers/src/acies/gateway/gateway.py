@@ -155,13 +155,127 @@ def _wait_futures(
         logger.info('%s: %s: %s', label, target, ' '.join(parts))
 
 
+def _resolve_route(
+    map_cfg: dict[str, Any], target_list: list[str]
+) -> tuple[str, int, str] | None:
+    """Resolve a target list to (scene, run_id, reconfig_target) from the map config."""
+    reconfig_target = '_'.join(sorted(t.lower() for t in target_list))
+    routes = map_cfg.get('routes', {})
+    if reconfig_target not in routes:
+        logger.error('reconfig target %s not found in routes', reconfig_target)
+        return None
+    scene, run_id = tuple(routes[reconfig_target].split('/'))
+    return str(scene), int(run_id.removeprefix('run')), reconfig_target
+
+
+def _build_node_states(
+    msg_nodes: list[dict[str, str]],
+    map_node_mapping: dict[str, str],
+    scene: str,
+    run_id: int,
+) -> dict[str, dict[str, str | int]]:
+    """Build per-node state dict from the UI message node list."""
+    new_node_states: dict[str, dict[str, str | int]] = {}
+    for node_state in msg_nodes:
+        node_id = node_state['nodeId'].lower()
+        mapped_node_id: str = map_node_mapping.get(node_id, node_id)
+        model = node_state['model'].replace('VibroFM', 'vfm')
+        modality = _MODALITY_MAP.get(node_state['modality'].lower(), node_state['modality'].lower())
+        new_node_states[mapped_node_id] = {
+            'node_id': mapped_node_id,
+            'replayed_node_id': node_id,
+            'model': model,
+            'modality': modality,
+            'scene': scene,
+            'run_id': run_id,
+        }
+    return new_node_states
+
+
+def _build_reconfig_ops(
+    node_states: dict[str, dict[str, str | int]],
+    heartbeat_buf: TimeWindow,
+    map_cfg: dict[str, Any],
+    edge_services: dict[str, str],
+    scene: str,
+    run_id: int,
+    reconfig_target: str,
+) -> tuple[list[tuple[str, Sequence[KvEntry]]], list[tuple[str, Sequence[KvEntry]]], list[str]]:
+    """Build all KV operation passes for the reconfiguration.
+
+    Returns (deactivate_pass, data_pass, all_targets).
+    """
+    deactivate_pass: list[tuple[str, Sequence[KvEntry]]] = []
+    data_pass: list[tuple[str, Sequence[KvEntry]]] = []
+    all_targets: list[str] = [edge_services['gps']]
+    tracker = edge_services.get('tracker')
+    if tracker is not None:
+        all_targets.append(tracker)
+
+    # model config for VFM nodes
+    vfm_cfg = map_cfg.get('models', {}).get('vfm', {})
+    vfm_weights: dict[str, str] = vfm_cfg.get('weight', {})
+    vfm_labels: list[str] | None = vfm_cfg.get('labels')
+
+    for node_id, state in node_states.items():
+        services = _find_services(heartbeat_buf, node_id)
+        modality = state['modality']
+
+        # --- deactivation/activation of sensor services ---
+        if modality not in ('geo', 'both') and 'geo' in services:
+            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=True)]))
+        if modality not in ('mic', 'both') and 'mic' in services:
+            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=True)]))
+        if modality in ('geo', 'both') and 'geo' in services:
+            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=False)]))
+        if modality in ('mic', 'both') and 'mic' in services:
+            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=False)]))
+
+        # --- data config for active services ---
+        data_ops: list[KvEntry] = [
+            kv_set('scene', value=state['scene']),
+            kv_set('run', value=state['run_id']),
+            kv_set('node', value=state['replayed_node_id']),
+        ]
+        if 'vfm' in services:
+            all_targets.append(services['vfm'])
+            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(str(modality).lower(), 'both')
+            vfm_ops: list[KvEntry] = [
+                kv_set('weight', value=vfm_weights[weight_key]),
+                kv_set('labels', value=vfm_labels),
+            ]
+            # Send modality override so VFM updates its expected modalities
+            if modality == 'geo':
+                vfm_ops.append(kv_set('modality', value='seismic'))
+            elif modality == 'mic':
+                vfm_ops.append(kv_set('modality', value='audio'))
+            else:
+                vfm_ops.append(kv_set('modality', value=None))
+            data_pass.append((services['vfm'], vfm_ops))
+        if modality in ('mic', 'both') and 'mic' in services:
+            data_pass.append((services['mic'], data_ops))
+            all_targets.append(services['mic'])
+        if modality in ('geo', 'both') and 'geo' in services:
+            data_pass.append((services['geo'], data_ops))
+            all_targets.append(services['geo'])
+
+    # GPS service config
+    data_pass.append((
+        edge_services['gps'],
+        [
+            kv_set('scene', value=scene),
+            kv_set('run', value=run_id),
+            kv_set('label', value=reconfig_target),
+        ],
+    ))
+
+    return deactivate_pass, data_pass, all_targets
+
+
 @app.subscribe('ws://ctl')
 def on_ctl(ctx: AciesContext, msg: Any) -> None:
     logger.debug('ctl command received: %r', msg.get('appType', 'unknown'))
     reconfig_map = msg['map']
-    reconfig_target_list: list[str] = sorted([t.lower() for t in msg['target']])
-
-    logger.debug('ctl msg from UI: %r', msg)
 
     # Look up the config for the selected map
     configs: dict[str, dict[str, Any]] = ctx.app['configs']
@@ -177,129 +291,41 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         ctx.app['confidence_threshold'] = map_cfg.get('confidence_threshold', {})
         ctx.app['map_node_mapping'] = map_cfg.get('map_node_mapping', {})
         ctx.app['active_map'] = reconfig_map
+        ctx.app['ensemble_buf'].clear()
         logger.info('map changed: %s -> %s', active_map, reconfig_map)
 
-    # map selected map and target to the corresponding runID path
-    reconfig_target = '_'.join(reconfig_target_list)
-    routes = map_cfg.get('routes', {})
-
-    if reconfig_target not in routes:
-        logger.error('reconfig target %s not found in routes', reconfig_target)
+    # Resolve route
+    route = _resolve_route(map_cfg, msg['target'])
+    if route is None:
         return
+    scene, run_id, reconfig_target = route
 
-    reconfig_route = routes[reconfig_target]
-    scene, run_id = tuple(reconfig_route.split('/'))
-    run_id = int(run_id.removeprefix('run'))
-    scene = str(scene)
+    # Build per-node state
+    node_states = _build_node_states(msg['nodes'], map_cfg.get('map_node_mapping', {}), scene, run_id)
+    logger.debug('new replay config: %s', node_states)
 
-    # reconfig node states
-    reconfig_node_states: list[dict[str, str]] = msg['nodes']
-    new_node_states: dict[str, dict[str, str | int]] = {}
-    map_node_mapping = map_cfg.get('map_node_mapping', {})
-    for node_state in reconfig_node_states:
-        node_id = node_state['nodeId'].lower()
-        mapped_node_id: str = map_node_mapping.get(node_id, node_id)
-        # TODO: support changing model
-        model = node_state['model'].replace('VibroFM', 'vfm')
-        modality = node_state['modality'].lower()
-        modality = _MODALITY_MAP.get(modality, modality)
-
-        new_node_states[mapped_node_id] = {
-            'node_id': mapped_node_id,  # mapped node id, same for ICT, gq-X mapped to rsY for GCQ
-            'replayed_node_id': node_id,  # original node id, used for path routing
-            'model': model,  # model name
-            'modality': modality,  # modality name [both, seismic, acoustic]
-            'scene': scene,  # scene name, e.g. 2024-08-06-GQ
-            'run_id': run_id,  # run id, e.g. 29
-        }
-
-    logger.debug('new replay config: %s', new_node_states)
-
+    # Discover edge services
     heartbeat_buf: TimeWindow = ctx.app['heartbeat']
-
-    # --- look up GPS and tracker services from heartbeat records ---
     edge_host = ctx.ns.namespace.split('/')[0]
     edge_services = _find_services(heartbeat_buf, edge_host)
-    gps_base = edge_services.get('gps')
-    if gps_base is None:
+    if 'gps' not in edge_services:
         logger.error('gps service not found in heartbeat records')
         return
 
-    # --- build kv ops for each target using service discovery ---
-    deactivate_pass: list[tuple[str, Sequence[KvEntry]]] = []
-    data_reconfig_pass: list[tuple[str, Sequence[KvEntry]]] = []
-    all_targets: list[str] = [gps_base]
-    tracker_base = edge_services.get('tracker')
-    if tracker_base is not None:
-        all_targets.append(tracker_base)
-
-    # model config for VFM nodes
-    vfm_cfg = map_cfg.get('models', {}).get('vfm', {})
-    vfm_weights: dict[str, str] = vfm_cfg.get('weight', {})
-    vfm_labels: list[str] | None = vfm_cfg.get('labels')
-
-    for node_id, state in new_node_states.items():
-        services = _find_services(heartbeat_buf, node_id)
-        modality = state['modality']
-
-        # --- deactivation/activation of sensor services ---
-        if modality not in ('geo', 'both') and 'geo' in services:
-            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=True)]))
-        if modality not in ('mic', 'both') and 'mic' in services:
-            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=True)]))
-        if modality in ('geo', 'both') and 'geo' in services:
-            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=False)]))
-        if modality in ('mic', 'both') and 'mic' in services:
-            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=False)]))
-
-        # --- data config for active services ---
-        data_ops = [
-            kv_set('scene', value=state['scene']),
-            kv_set('run', value=state['run_id']),
-            kv_set('node', value=state['replayed_node_id']),
-        ]
-        if 'vfm' in services:
-            all_targets.append(services['vfm'])
-            vfm_ops: list[KvEntry] = []
-            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(str(modality).lower(), 'both')
-            vfm_ops.append(kv_set('weight', value=vfm_weights[weight_key]))
-            vfm_ops.append(kv_set('labels', value=vfm_labels))
-            # Send modality override so VFM updates its expected modalities
-            vfm_modality: str | None = None
-            if modality == 'geo':
-                vfm_modality = 'seismic'
-            elif modality == 'mic':
-                vfm_modality = 'audio'
-            vfm_ops.append(kv_set('modality', value=vfm_modality))
-            data_reconfig_pass.append((services['vfm'], vfm_ops))
-        if modality in ['mic', 'both'] and 'mic' in services:
-            data_reconfig_pass.append((services['mic'], data_ops))
-            all_targets.append(services['mic'])
-        if modality in ['geo', 'both'] and 'geo' in services:
-            data_reconfig_pass.append((services['geo'], data_ops))
-            all_targets.append(services['geo'])
-    data_reconfig_pass.append(
-        (
-            gps_base,
-            [
-                kv_set('scene', value=scene),
-                kv_set('run', value=run_id),
-                kv_set('label', value=reconfig_target),
-            ],
-        )
+    # Build KV operation passes
+    deactivate_pass, data_pass, all_targets = _build_reconfig_ops(
+        node_states, heartbeat_buf, map_cfg, edge_services, scene, run_id, reconfig_target,
     )
 
+    # Execute in three passes
     with ThreadPoolExecutor() as pool:
-        # pass 0: deactivate/activate sensor services
         items0 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in deactivate_pass]
         _wait_futures(items0, 'pass 0 (deactivation)')
 
-        # pass 1: send data params in parallel
-        items1 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in data_reconfig_pass]
+        items1 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in data_pass]
         _wait_futures(items1, 'pass 1 (data params)')
 
-        # pass 2: send start_at to all nodes in parallel
-        start_at: float = float(ctx.now() / _NS_PER_S) + _REPLAY_AHEAD_TIME_S
+        start_at = float(ctx.now() / _NS_PER_S) + _REPLAY_AHEAD_TIME_S
         start_ops: Sequence[KvEntry] = [kv_set('start_at', value=start_at)]
         items2 = [(t, start_ops, pool.submit(kv_call, ctx, t, start_ops)) for t in all_targets]
         _wait_futures(items2, 'pass 2 (start_at)')

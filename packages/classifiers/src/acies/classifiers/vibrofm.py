@@ -38,7 +38,6 @@ import torch
 from acies.buffers import TemporalBuffer
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
-from acies.FoundationSense.general_utils.weight_utils import load_model_weight  # pyright: ignore[reportUnknownVariableType]
 from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)
