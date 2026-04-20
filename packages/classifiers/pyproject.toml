@@ -28,11 +28,13 @@ dependencies = [
   "acies-core",
   # "deepsense-augmented @ git+ssh://github.com/acies-os/deepsense-augmented.git",
   "foundation-sense @ git+ssh://github.com/acies-os/FoundationSense.git",
+  "spar @ git+ssh://github.com/acies-os/SPAR.git@demo2",
   "numpy>=1.24.4,<2",
 ]
 # scripts.acies-ds = "acies.classifier.ds:main"
 # scripts.acies-noise-detector = "acies.classifier.noise_detector:main"
 scripts.acies-vfm = "acies.classifiers.vibrofm:main"
+scripts.acies-spar = "acies.classifiers.spar:main"
 
 [dependency-groups]
 docs = [
