@@ -118,11 +118,20 @@ registry-trust host:
 deploy-pi:
     #!/usr/bin/env bash
     set -euo pipefail
+
     [ -n "{{ pi_hosts }}" ] || { echo "error: PI_HOSTS not set"; exit 1; }
-    echo "deploying acies-pi:{{ tag }} to {{ pi_hosts }}"
-    for host in {{ pi_hosts }}; do
-        echo "==> deploying acies-pi:{{ tag }} to $host"
-        ssh "$host" "docker pull {{ registry_external }}/acies-pi:{{ tag }} \
-            && docker tag {{ registry_external }}/acies-pi:{{ tag }} acies-pi:{{ tag }} \
-            && docker rmi {{ registry_external }}/acies-pi:{{ tag }}"
-    done
+
+    image="{{ registry_external }}/acies-pi:{{ tag }}"
+    echo "deploying $image to {{ pi_hosts }}"
+
+    parallel -j4 --line-buffer --tag ssh {} \
+      "docker pull '$image'" \
+      ::: {{ pi_hosts }}
+
+    parallel -j4 --line-buffer --tag ssh {} \
+      "docker tag '$image' 'acies-pi:{{ tag }}'" \
+      ::: {{ pi_hosts }}
+
+    parallel -j4 --line-buffer --tag ssh {} \
+      "docker rmi '$image'" \
+      ::: {{ pi_hosts }}
