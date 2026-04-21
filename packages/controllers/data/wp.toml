@@ -94,7 +94,7 @@ seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
 
 [models.diffphys.weight]
-both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_multiclass_distance-100_latest.pt"
+both = ["/model/diffphys_2026-04-13-West-Point_classification.pt", "/model/diffphys_2026-04-13-West-Point_distance.pt"]
 seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_wp2026_1.0_multiclass_distance-100_latest.pt"
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
 

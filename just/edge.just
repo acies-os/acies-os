@@ -105,6 +105,8 @@ edge-up-infra *args:
 edge-up-nodes *args:
     docker compose -p edge-replay --env-file .env \
         -f docker/replay.yml \
+        -f docker/diffphys.yml \
+        -f docker/classifier.yml \
         {{ args }} \
         up
 

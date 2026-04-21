@@ -2044,7 +2044,7 @@ wheels = [
 [[package]]
 name = "spar"
 version = "0.1.0"
-source = { git = "ssh://github.com/acies-os/SPAR.git?rev=demo2#c9894e9e7c28f9425937db986254f5bd1ede3ad7" }
+source = { git = "ssh://github.com/acies-os/SPAR.git?rev=demo2#8e582aa5ccefe0bb2ef2684cb133c3446ff122be" }
 dependencies = [
     { name = "librosa", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
