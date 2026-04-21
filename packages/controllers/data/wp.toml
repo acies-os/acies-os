@@ -99,9 +99,13 @@ seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
 
 [models.spar]
-weight = "/model/demo2-2024-03-29-ICT_MAEBackbone_vehicle_classification_1.0_finetune_latest.pt"
-tracking_weight = "/model/demo2-2024-03-29-ICT_MAEBackbone_vehicle_tracking_1.0_finetune_latest.pt"
 labels = ["wagoneer", "kona"]
+
+[models.spar.weight]
+both = [
+  "/model/spar_2026-04-14-West-Point_classification.pt",
+  "/model/spar_2026-04-14-West-Point_tracking.pt",
+]
 
 
 # Confidence threshold to filter multi-label output

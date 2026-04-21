@@ -33,7 +33,10 @@ import numpy.typing as npt
 import torch
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
-from acies.SPAR.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
+from acies.SPAR.inference import (  # pyright: ignore[reportMissingTypeStubs]
+    ModelForInference,
+    scene_has_background,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,7 @@ DEFAULT_LABELS = ['polaris', 'warthog', 'truck', 'husky']
 # ``acies/SPAR/vatt/config/{scene}.yaml`` (bundled with the SPAR package).
 # We identify the active scene by substring-matching one of these against a
 # weight filename.
-_KNOWN_SCENES: tuple[str, ...] = ('2024-03-29-ICT',)
+_KNOWN_SCENES: tuple[str, ...] = ('2024-03-29-ICT', '2026-04-14-West-Point')
 
 
 def _scene_from_path(path: str) -> str | None:
@@ -62,6 +65,18 @@ def _scene_from_path(path: str) -> str | None:
         if scene in name:
             return scene
     return None
+
+
+def _num_classes_for(scene: str, labels: list[str]) -> int | None:
+    """Size the classifier head = len(labels) + 1 if the scene has a background class.
+
+    Scenes (e.g. 2026-04-14-West-Point) expose an internal "background" slot
+    that's absent from ``labels`` in .env / wp.toml. The slot is always the
+    last index, and predictions landing on it are dropped before publishing.
+    """
+    if not labels:
+        return None
+    return len(labels) + (1 if scene_has_background(scene) else 0)
 
 
 app = AciesApp()
@@ -74,16 +89,22 @@ app = AciesApp()
 def setup(ctx: AciesContext) -> None:
     labels: list[str] = ctx.cfg.get('labels') or []
     tracking_weight = ctx.cfg.get('tracking_weight')
+    # At startup scene is the SPAR default (ICT); on_weight_change will later
+    # rebuild for the scene encoded in the replay weight filename.
+    startup_scene = _scene_from_path(ctx.cfg.get('weight', '')) or '2024-03-29-ICT'
     model = ModelForInference(
         weight=Path(ctx.cfg['weight']),
-        num_classes=len(labels) or None,
+        scene=startup_scene,
+        num_classes=_num_classes_for(startup_scene, labels),
         tracking_weight=Path(tracking_weight) if tracking_weight else None,
     )
     logger.info(
-        'loaded model from %s; tracking_weight=%s #classes=%d #params=%d',
+        'loaded model from %s; scene=%s tracking_weight=%s #classes=%d (bg=%s) #params=%d',
         ctx.cfg['weight'],
+        startup_scene,
         tracking_weight,
         model.num_classes,
+        model.has_background,
         sum(p.numel() for p in model.parameters()),
     )
 
@@ -153,19 +174,21 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
         return
 
     labels: list[str] = ctx.cfg.get('labels') or []
+    num_classes = _num_classes_for(scene, labels)
     logger.info(
         'rebuilding spar model: scene=%s weight=%s tracking_weight=%s #classes=%s',
-        scene, new_weight, new_tracking_weight, len(labels) or None,
+        scene, new_weight, new_tracking_weight, num_classes,
     )
     new_model = ModelForInference(
         weight=Path(new_weight),
         scene=scene,
-        num_classes=len(labels) or None,
+        num_classes=num_classes,
         tracking_weight=Path(new_tracking_weight),
     )
     logger.info(
-        'rebuilt spar model: scene=%s #classes=%d #params=%d',
-        scene, new_model.num_classes, sum(p.numel() for p in new_model.parameters()),
+        'rebuilt spar model: scene=%s #classes=%d (bg=%s) #params=%d',
+        scene, new_model.num_classes, new_model.has_background,
+        sum(p.numel() for p in new_model.parameters()),
     )
 
     with ctx.app.lock:
@@ -297,12 +320,18 @@ def run_inference(ctx: AciesContext) -> None:
     #     stats_report,
     # )
 
+    model = ctx.app['model']
     t0 = time.perf_counter_ns()
-    class_probs, locations = ctx.app['model'](data)
+    class_probs, locations = model(data)
     infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
 
     probs_2d: npt.NDArray[np.float32] = np.atleast_2d(np.asarray(class_probs, dtype=np.float32))
     labels: list[str] = ctx.cfg.get('labels') or []
+
+    # Scenes with a background class (e.g. WP) carry an internal extra slot
+    # at the last index. If argmax lands on it, discard the whole prediction
+    # -- don't publish label, lat, or lon.
+    bg_idx = model.num_classes - 1 if getattr(model, 'has_background', False) else None
 
     # Scene invariant: exactly one vehicle present, so report only the argmax
     # class rather than the full softmax distribution.
@@ -310,6 +339,12 @@ def run_inference(ctx: AciesContext) -> None:
     for target_idx, target_probs in enumerate(probs_2d):
         lat, lon = locations[target_idx] if target_idx < len(locations) else (None, None)
         best_idx = int(np.argmax(target_probs))
+        if bg_idx is not None and best_idx == bg_idx:
+            logger.debug(
+                'dropping background prediction: window=[%d..%d] probs=%s',
+                next_start, window_end, [f'{x:.3f}' for x in target_probs],
+            )
+            continue
         label = labels[best_idx] if best_idx < len(labels) else str(best_idx)
         predictions.append(
             AciesPrediction(
