@@ -95,6 +95,22 @@ pi-vfm *args:
         -v ~/.acies:/root/.acies \
         acies-pi:latest acies-vfm {{ args }}
 
+# Run acies-vfm in the Pi image.
+pi-diffphys *args:
+    @mkdir -p ~/.acies/logs
+    -@docker run --rm -it \
+        --detach-keys="ctrl-z,z" \
+        -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
+        -e ACIES_LOG={{ acies_log }} \
+        -e ACIES_NAMESPACE={{ acies_namespace }} \
+        -e ACIES_NAME=diffphys \
+        -e ACIES_CONNECT={{ pi_zenoh_connect }} \
+        --network host \
+        -v /data:/data \
+        -v /model:/model \
+        -v ~/.acies:/root/.acies \
+        acies-pi:latest acies-diffphys {{ args }}
+
 # Run acies-vfm locally (no Docker).
 pi-vfm-local *args:
     @mkdir -p ~/.acies/logs

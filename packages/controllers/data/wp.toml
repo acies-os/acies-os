@@ -88,6 +88,9 @@ kona = "2026-04-14-West-Point/run0"
 [models.vfm]
 labels = ["wagoneer", "kona"]
 
+[models.diffphys]
+labels = ["wagoneer", "kona"]
+
 [models.vfm.weight]
 both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_multiclass_distance-100_latest.pt"
 seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_wp2026_1.0_multiclass_distance-100_latest.pt"
