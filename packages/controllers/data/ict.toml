@@ -90,7 +90,7 @@ seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_audio_multiclass_best.pt"
 
 [models.spar.weight]
-both = "/model/spar_2024-03-29-ICT_classification.pt"
+both = ["/model/spar_2024-03-29-ICT_classification.pt", "/model/spar_2024-03-29-ICT_tracking.pt"] 
 # both = ["/model/spar_2026-04-13-West-Point_classification.pt", "/model/spar_2026-04-13-Wes-Point_tracking.pt"]
 
 # Confidence threshold to filter multi-label output
