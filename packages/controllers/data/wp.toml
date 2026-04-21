@@ -112,10 +112,10 @@ both = [
 [confidence_threshold.vfm]
 wagoneer = 0.60
 kona = 0.65
-miata = 1.1
-cx30 = 1.1
-gle350 = 1.1
-mustang = 1.1
+
+[confidence_threshold.diffphys]
+wagoneer = 0.75
+kona = 0.75
 
 [confidence_threshold.spar]
 wagoneer = 0.60
