@@ -294,13 +294,15 @@ def _build_reconfig_ops(
         spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)
         spar_cfg = map_cfg.get('models', {}).get('spar', {})
         if 'spar' in spar_services:
+            # spar always consumes geo+mic, so select the 'both' entry. The
+            # value is a 2-element list [classification_weight, tracking_weight]
+            # that on_weight_change splits apart.
+            spar_weights: list[str] = spar_cfg.get('weight', {}).get('both', [])
             spar_ops: list[KvEntry] = [
                 kv_set('deactivated', value=False),
-                kv_set('weight', value=spar_cfg.get('weight', '')),
+                kv_set('weight', value=spar_weights),
                 kv_set('labels', value=spar_cfg.get('labels')),
             ]
-            if spar_cfg.get('tracking_weight'):
-                spar_ops.append(kv_set('tracking_weight', value=spar_cfg['tracking_weight']))
             data_pass.append((spar_services['spar'], spar_ops))
             all_targets.append(spar_services['spar'])
         else:

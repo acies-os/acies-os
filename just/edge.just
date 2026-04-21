@@ -76,19 +76,20 @@ edge-mqtt-local *args:
 
 # Run spar locally against the edge zenoh bus.
 # Requires `just edge-up-infra` (and typically `just edge-up-nodes`) to be running.
-# Uses SPAR_WEIGHT (classification head) and SPAR_TRACKING_WEIGHT (tracking head)
-# from .env; labels reuse VFM_LABELS.
+# Mirrors docker/edge-classifier.yml: fixed namespace `joint` so downstream
+# subscribers find this spar's output, and uses SPAR_CLASSIFICATION_WEIGHT /
+# SPAR_TRACKING_WEIGHT / SPAR_LABELS from .env.
 edge-spar-local *args:
     @mkdir -p ~/.acies/logs
     ACIES_LISTEN="" \
     ACIES_LOG={{ acies_log }} \
     uv run acies-spar \
-        --acies-namespace {{ acies_namespace }} --acies-name spar \
+        --acies-namespace joint --acies-name spar \
         --acies-connect {{ edge_zenoh_connect }} \
         --geo '**/geo' --mic '**/mic' \
-        --weight "$MODEL_DIR/$SPAR_WEIGHT" \
+        --weight "$MODEL_DIR/$SPAR_CLASSIFICATION_WEIGHT" \
         --tracking-weight "$MODEL_DIR/$SPAR_TRACKING_WEIGHT" \
-        --labels "$VFM_LABELS" \
+        --labels "$SPAR_LABELS" \
         {{ args }}
 
 # Start infra for an edge replay
@@ -100,12 +101,10 @@ edge-up-infra *args:
         {{ args }} \
         up
 
-# Start nodes for an edge replay
+# Start nodes for an edge replay (replay only; no per-node VFM classifier)
 edge-up-nodes *args:
     docker compose -p edge-replay --env-file .env \
         -f docker/replay.yml \
-        -f docker/classifier.yml \
-        -f docker/diffphys.yml \
         {{ args }} \
         up
 
