@@ -70,7 +70,7 @@ def setup(ctx: AciesContext) -> None:
     _saved_argv = sys.argv[:]
     sys.argv = sys.argv[:1]
     try:
-        model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
+        model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'), diffphys=True, distance_head=True)
     finally:
         sys.argv = _saved_argv
     raw_mods: list[str] = model.args.dataset_config['modality_names']
@@ -213,7 +213,7 @@ def run_inference(ctx: AciesContext) -> None:
             data['shake']['audio'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 1600))  # pyright: ignore[reportUnknownMemberType]
 
     t0 = time.perf_counter_ns()
-    logit, _feat = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
+    logit, distance = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
     infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
 
     # logit shape: (num_targets, num_classes), values are probabilities
@@ -221,10 +221,11 @@ def run_inference(ctx: AciesContext) -> None:
     ensemble_buf: deque[list[list[float]]] = ctx.app['ensemble_buf']
     ensemble_buf.append(probs)
     logger.debug(
-        'inference: probs=%s infer_ms=%.1f ensemble=%d',
+        'inference: probs=%s infer_ms=%.1f ensemble=%d, distance=%s',
         [[f'{x:.3f}' for x in row] for row in probs],
         infer_ms,
         len(ensemble_buf),
+        distance,
     )
 
     if len(ensemble_buf) < ctx.cfg.get('ensemble_size', 1):
@@ -244,7 +245,7 @@ def run_inference(ctx: AciesContext) -> None:
                     extras['geo_energy'] = energy['geo']
                 if 'mic' in energy:
                     extras['mic_energy'] = energy['mic']
-                target_pred = AciesPrediction(label=label, score=float(score), extras=extras)
+                target_pred = AciesPrediction(label=label, score=float(score), distance=float(distance), extras=extras)
                 predictions.append(target_pred)
                 logger.debug('%s', target_pred)
 
@@ -319,7 +320,7 @@ def main(
 ) -> None:
     app.state.config.update(
         {
-            'deactivated': True,
+            'deactivated': False,
             'weight': weight,
             'geo_topic': geo_topic,
             'mic_topic': mic_topic,
