@@ -30,5 +30,5 @@ services:
   edge-spar:
     <<: *spar
     profiles: [spar]
-    command: acies-spar --weight /model/${SPAR_CLASSIFICATION_WEIGHT} --tracking-weight /model/${SPAR_TRACKING_WEIGHT} --geo '**/geo' --mic '**/mic' --labels ${SPAR_LABELS}
+    command: acies-spar --weight /model/${SPAR_WEIGHT} --geo '**/geo' --mic '**/mic' --labels ${SPAR_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: joint, ACIES_NAME: spar }

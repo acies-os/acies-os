@@ -294,13 +294,13 @@ def _build_reconfig_ops(
         spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)
         spar_cfg = map_cfg.get('models', {}).get('spar', {})
         if 'spar' in spar_services:
-            # spar always consumes geo+mic, so select the 'both' entry. The
-            # value is a 2-element list [classification_weight, tracking_weight]
-            # that on_weight_change splits apart.
-            spar_weights: list[str] = spar_cfg.get('weight', {}).get('both', [])
+            # spar always consumes geo+mic, so select the 'both' entry. One
+            # unified weight file per scene covers backbone + classification
+            # + localization heads (vehicle_classification_tracking task).
+            spar_weight: str = spar_cfg.get('weight', {}).get('both', '')
             spar_ops: list[KvEntry] = [
                 kv_set('deactivated', value=False),
-                kv_set('weight', value=spar_weights),
+                kv_set('weight', value=spar_weight),
                 kv_set('labels', value=spar_cfg.get('labels')),
             ]
             data_pass.append((spar_services['spar'], spar_ops))

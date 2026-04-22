@@ -12,8 +12,7 @@ fed in, and the model itself decides how to fuse it.
 
 Usage::
 
-    acies-spar --weight /path/to/cls.pt
-               [--tracking-weight /path/to/track.pt]
+    acies-spar --weight /path/to/spar.pt
                --geo '**/geo' --mic '**/mic'
                [--output TOPIC]
                [--labels car,truck,person]
@@ -33,10 +32,7 @@ import numpy.typing as npt
 import torch
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
-from acies.SPAR.inference import (  # pyright: ignore[reportMissingTypeStubs]
-    ModelForInference,
-    scene_has_background,
-)
+from acies.SPAR.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +63,16 @@ def _scene_from_path(path: str) -> str | None:
     return None
 
 
-def _num_classes_for(scene: str, labels: list[str]) -> int | None:
-    """Size the classifier head = len(labels) + 1 if the scene has a background class.
+def _num_classes_for(labels: list[str]) -> int | None:
+    """Size the classifier head = len(labels) + 1.
 
-    Scenes (e.g. 2026-04-14-West-Point) expose an internal "background" slot
-    that's absent from ``labels`` in .env / wp.toml. The slot is always the
-    last index, and predictions landing on it are dropped before publishing.
+    Every scene reserves the last class slot for an internal "background"
+    class that is absent from ``labels`` in .env / *.toml. Predictions whose
+    argmax lands on that slot are dropped before publishing.
     """
     if not labels:
         return None
-    return len(labels) + (1 if scene_has_background(scene) else 0)
+    return len(labels) + 1
 
 
 app = AciesApp()
@@ -88,23 +84,19 @@ app = AciesApp()
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
     labels: list[str] = ctx.cfg.get('labels') or []
-    tracking_weight = ctx.cfg.get('tracking_weight')
     # At startup scene is the SPAR default (ICT); on_weight_change will later
     # rebuild for the scene encoded in the replay weight filename.
     startup_scene = _scene_from_path(ctx.cfg.get('weight', '')) or '2024-03-29-ICT'
     model = ModelForInference(
         weight=Path(ctx.cfg['weight']),
         scene=startup_scene,
-        num_classes=_num_classes_for(startup_scene, labels),
-        tracking_weight=Path(tracking_weight) if tracking_weight else None,
+        num_classes=_num_classes_for(labels),
     )
     logger.info(
-        'loaded model from %s; scene=%s tracking_weight=%s #classes=%d (bg=%s) #params=%d',
+        'loaded model from %s; scene=%s #classes=%d #params=%d',
         ctx.cfg['weight'],
         startup_scene,
-        tracking_weight,
         model.num_classes,
-        model.has_background,
         sum(p.numel() for p in model.parameters()),
     )
 
@@ -152,19 +144,12 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     """Rebuild the model from scratch for the scene encoded in the weight filename.
 
-    The value is a marker carrying the scene ID (e.g. ``2024-03-29-ICT``) in its
-    basename. Different scenes can have different architectures, so we
-    instantiate a fresh ``ModelForInference`` rather than reloading state_dict
-    into the existing backbone.
+    The value is a path whose basename carries the scene ID (e.g.
+    ``spar_2024-03-29-ICT.pt``). Different scenes can have different
+    architectures, so we instantiate a fresh ``ModelForInference`` rather
+    than reloading state_dict into the existing backbone.
     """
-    weight_list: list[str] = [str(v) for v in msg.value]
-    if len(weight_list) < 2:
-        logger.error(
-            'on_weight_change: expected [classification, tracking], got %s; ignoring',
-            weight_list,
-        )
-        return
-    new_weight, new_tracking_weight = weight_list[0], weight_list[1]
+    new_weight = str(msg.value)
     scene = _scene_from_path(new_weight)
     if scene is None:
         logger.error(
@@ -174,20 +159,19 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
         return
 
     labels: list[str] = ctx.cfg.get('labels') or []
-    num_classes = _num_classes_for(scene, labels)
+    num_classes = _num_classes_for(labels)
     logger.info(
-        'rebuilding spar model: scene=%s weight=%s tracking_weight=%s #classes=%s',
-        scene, new_weight, new_tracking_weight, num_classes,
+        'rebuilding spar model: scene=%s weight=%s #classes=%s',
+        scene, new_weight, num_classes,
     )
     new_model = ModelForInference(
         weight=Path(new_weight),
         scene=scene,
         num_classes=num_classes,
-        tracking_weight=Path(new_tracking_weight),
     )
     logger.info(
-        'rebuilt spar model: scene=%s #classes=%d (bg=%s) #params=%d',
-        scene, new_model.num_classes, new_model.has_background,
+        'rebuilt spar model: scene=%s #classes=%d #params=%d',
+        scene, new_model.num_classes,
         sum(p.numel() for p in new_model.parameters()),
     )
 
@@ -328,10 +312,10 @@ def run_inference(ctx: AciesContext) -> None:
     probs_2d: npt.NDArray[np.float32] = np.atleast_2d(np.asarray(class_probs, dtype=np.float32))
     labels: list[str] = ctx.cfg.get('labels') or []
 
-    # Scenes with a background class (e.g. WP) carry an internal extra slot
-    # at the last index. If argmax lands on it, discard the whole prediction
-    # -- don't publish label, lat, or lon.
-    bg_idx = model.num_classes - 1 if getattr(model, 'has_background', False) else None
+    # Every scene reserves the last class index for an internal "background"
+    # slot (unified vehicle_classification_tracking convention). Drop the
+    # prediction entirely when argmax lands there — no label, no lat/lon.
+    bg_idx = model.num_classes - 1
 
     # Scene invariant: exactly one vehicle present, so report only the argmax
     # class rather than the full softmax distribution.
@@ -339,7 +323,7 @@ def run_inference(ctx: AciesContext) -> None:
     for target_idx, target_probs in enumerate(probs_2d):
         lat, lon = locations[target_idx] if target_idx < len(locations) else (None, None)
         best_idx = int(np.argmax(target_probs))
-        if bg_idx is not None and best_idx == bg_idx:
+        if best_idx == bg_idx:
             logger.debug(
                 'dropping background prediction: window=[%d..%d] probs=%s',
                 next_start, window_end, [f'{x:.3f}' for x in target_probs],
@@ -382,13 +366,7 @@ def run_inference(ctx: AciesContext) -> None:
 
 
 @app.cli()
-@click.option('--weight', required=True, type=click.Path(exists=True), help='Classification weight file (backbone + class head).')
-@click.option(
-    '--tracking-weight',
-    default=None,
-    type=click.Path(exists=True),
-    help='Optional tracking-head weight file; loaded on top of --weight.',
-)
+@click.option('--weight', required=True, type=click.Path(exists=True), help='Unified spar weight file (backbone + class + localization heads).')
 @click.option(
     '--geo',
     'geo_topic',
@@ -411,11 +389,10 @@ def run_inference(ctx: AciesContext) -> None:
     '--labels',
     default=','.join(DEFAULT_LABELS),
     show_default=True,
-    help='Comma-separated class names matching model output order.',
+    help='Comma-separated class names matching model output order (excluding the internal background slot).',
 )
 def main(
     weight: str,
-    tracking_weight: str | None,
     geo_topic: str,
     mic_topic: str,
     output_topic: str | None,
@@ -425,7 +402,6 @@ def main(
         {
             'deactivated': True,
             'weight': weight,
-            'tracking_weight': tracking_weight,
             'geo_topic': geo_topic,
             'mic_topic': mic_topic,
             'output_topic': output_topic,

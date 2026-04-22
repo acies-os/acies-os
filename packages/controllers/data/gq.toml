@@ -26,11 +26,6 @@ both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_mu
 seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_seismic_multiclass_best.pt"
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_audio_multiclass_best.pt"
 
-[models.spar]
-weight = "/model/demo2-2024-03-29-ICT_MAEBackbone_vehicle_classification_1.0_finetune_latest.pt"
-tracking_weight = "/model/demo2-2024-03-29-ICT_MAEBackbone_vehicle_tracking_1.0_finetune_latest.pt"
-labels = ["polaris", "warthog", "truck", "husky"]
-
 # Confidence threshold to filter multi-label output
 [confidence_threshold]
 
@@ -59,12 +54,6 @@ miata = 1.1
 cx30 = 0.75
 gle350 = 0.65
 mustang = 1.1
-polaris = 0.95
-warthog = 0.95
-truck = 0.80
-husky = 0.95
-
-[confidence_threshold.spar]
 polaris = 0.95
 warthog = 0.95
 truck = 0.80
