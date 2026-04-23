@@ -34,7 +34,8 @@ x-replay: &replay
 services:
   zenohd:
     image: acies-pi:latest
-    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} ${ZENOH_BRIDGE:-}
+    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} --connect ${ZENOH_BRIDGE:-}
+    # command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} --connect ${ZENOH_BRIDGE:-}
     network_mode: host
     volumes:
       - ~/.acies:/root/.acies
@@ -72,6 +73,24 @@ services:
     environment:
       <<: *env
       ACIES_NAME: vfm
+    volumes:
+      - /data:/data
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+  
+  diffphys:
+    image: acies-pi:latest
+    command: >-
+      acies-diffphys
+      --weight /model/${DIFFPHYS_WEIGHT}
+      --geo ${ACIES_NAMESPACE:-}/geo
+      --mic ${ACIES_NAMESPACE:-}/mic
+      --labels ${DIFFPHYS_LABELS}
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: diffphys
     volumes:
       - /data:/data
       - ${MODEL_DIR:-/model}:/model:ro
