@@ -77,8 +77,8 @@ edge-mqtt-local *args:
 # Run spar locally against the edge zenoh bus.
 # Requires `just edge-up-infra` (and typically `just edge-up-nodes`) to be running.
 # Mirrors docker/edge-classifier.yml: fixed namespace `joint` so downstream
-# subscribers find this spar's output, and uses SPAR_CLASSIFICATION_WEIGHT /
-# SPAR_TRACKING_WEIGHT / SPAR_LABELS from .env.
+# subscribers find this spar's output, and uses SPAR_WEIGHT / SPAR_LABELS
+# from .env.
 edge-spar-local *args:
     @mkdir -p ~/.acies/logs
     ACIES_LISTEN="" \
@@ -87,8 +87,7 @@ edge-spar-local *args:
         --acies-namespace joint --acies-name spar \
         --acies-connect {{ edge_zenoh_connect }} \
         --geo '**/geo' --mic '**/mic' \
-        --weight "$MODEL_DIR/$SPAR_CLASSIFICATION_WEIGHT" \
-        --tracking-weight "$MODEL_DIR/$SPAR_TRACKING_WEIGHT" \
+        --weight "$MODEL_DIR/$SPAR_WEIGHT" \
         --labels "$SPAR_LABELS" \
         {{ args }}
 

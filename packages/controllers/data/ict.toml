@@ -81,8 +81,8 @@ labels = ["gle350", "miata", "cx30", "mustang"]
 
 [models.vfm.weight]
 both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt"
-seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_seismic_multiclass_best.pt"
-audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_audio_multiclass_best.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_ict2024_1.0_multiclass_latest.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_ict2024_1.0_multiclass_latest.pt"
 
 [models.diffphys.weight]
 both = ["/model/diffphys_2024-03-29-ICT_classification.pt", "/model/diffphys_2024-03-29-ICT_distance.pt"]
@@ -90,8 +90,7 @@ seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024
 audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_audio_multiclass_best.pt"
 
 [models.spar.weight]
-both = ["/model/spar_2024-03-29-ICT_classification.pt", "/model/spar_2024-03-29-ICT_tracking.pt"] 
-# both = ["/model/spar_2026-04-13-West-Point_classification.pt", "/model/spar_2026-04-13-Wes-Point_tracking.pt"]
+both = "/model/spar_2024-03-29-ICT.pt"
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
