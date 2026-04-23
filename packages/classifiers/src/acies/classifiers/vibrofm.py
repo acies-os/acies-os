@@ -319,7 +319,7 @@ def main(
 ) -> None:
     app.state.config.update(
         {
-            'deactivated': True,
+            'deactivated': False,
             'weight': weight,
             'geo_topic': geo_topic,
             'mic_topic': mic_topic,
