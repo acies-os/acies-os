@@ -22,6 +22,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,11 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['buffer'] = {}
     ctx.app['latest_ts_s'] = 0
     ctx.app['next_window_start'] = None
+    # Single-flight gate: prevents overlapping inferences from racing each
+    # other through next_window_start advancement when model inference is
+    # slow (e.g. during JIT warmup). Acquired non-blocking at the top of
+    # run_inference; a 2nd concurrent tick drops instead of piling up.
+    ctx.app['infer_lock'] = threading.Lock()
 
     ctx.cfg['start_at'] = time.time()
     
@@ -231,12 +237,26 @@ def on_mic(ctx: AciesContext, msg: AciesTimeSeries) -> None:
 # --- inference ------------------------------------------------------------
 
 
-@app.schedule(1.0)
+@app.schedule(float(INPUT_LEN))
 def run_inference(ctx: AciesContext) -> None:
     if ctx.cfg.get('deactivated'):
         logger.debug('spar deactivated; skipping inference')
         return
 
+    # Single-flight: if a previous tick's inference is still running (e.g.
+    # JIT warmup taking ~10 s on the first call), drop this tick rather than
+    # queueing another worker that will race on next_window_start.
+    infer_lock: threading.Lock = ctx.app['infer_lock']
+    if not infer_lock.acquire(blocking=False):
+        logger.debug('previous inference still in flight; skipping tick')
+        return
+    try:
+        _run_inference_body(ctx)
+    finally:
+        infer_lock.release()
+
+
+def _run_inference_body(ctx: AciesContext) -> None:
     with ctx.app.lock:
         buf: dict[int, dict[str, dict[str, npt.NDArray[Any]]]] = ctx.app['buffer']
         latest: int = ctx.app['latest_ts_s']
@@ -256,16 +276,28 @@ def run_inference(ctx: AciesContext) -> None:
                 for modality, samples in mods.items():
                     collected.setdefault(node, {}).setdefault(modality, []).append((w, samples))
 
+        if not collected:
+            # next_start has overshot real sensor data. Do NOT ratchet forward
+            # (that would keep overshooting forever as latest_ts_s — a max
+            # across publishers — stays ahead). Instead, resync next_start to
+            # the earliest timestamp we actually have buffered, so the next
+            # tick processes real data rather than another empty slot.
+            if buf:
+                ctx.app['next_window_start'] = min(buf)
+                logger.debug(
+                    'empty window [%d..%d]; resync next_start to %d',
+                    next_start, window_end, ctx.app['next_window_start'],
+                )
+            else:
+                logger.debug('empty window [%d..%d]; buffer empty', next_start, window_end)
+            return
+
         ctx.app['next_window_start'] = next_start + INPUT_LEN
 
         # drop any stragglers older than the new window start; they can no
         # longer contribute to a future window.
         for old in [t for t in buf if t < ctx.app['next_window_start']]:
-            buf.pop(old, None)
-
-    if not collected:
-        logger.debug('empty window [%d..%d]; skipping', next_start, window_end)
-        return
+            _ = buf.pop(old, None)
 
     # --- build model input: {node: {modality: concatenated tensor}} ---
     data: dict[str, dict[str, torch.Tensor]] = {}
