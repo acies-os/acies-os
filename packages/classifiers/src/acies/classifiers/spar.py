@@ -37,6 +37,12 @@ from acies.SPAR.inference import ModelForInference  # pyright: ignore[reportMiss
 
 logger = logging.getLogger(__name__)
 
+# suppress verbose bytecode / ssa dumps from numba JIT compilation triggered
+# downstream (e.g. librosa). Overridable via ACIES_LOG=numba=DEBUG.
+numba_logger = logging.getLogger('numba')
+numba_logger.setLevel(logging.WARNING)
+numba_logger.propagate = False
+
 # samples required for one inference call: N x 1-second windows.
 # Observed sample rates on ICT replay: geo=200 Hz, mic=16000 Hz, so a
 # 2-second window yields tensors of shape (400,) for geo and (32000,)

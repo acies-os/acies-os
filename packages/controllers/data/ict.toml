@@ -109,7 +109,7 @@ mustang = 0.75
 gle350 = 0.85
 miata = 0.85
 cx30 = 0.85
-mustang = 0.65
+mustang = 0.0
 
 [ensemble]
 # ensemble temporal window size in seconds
