@@ -290,23 +290,26 @@ def _build_reconfig_ops(
             all_targets.append(services[selected_model])
 
     # --- SPAR global activation ---
-    if spar_active:
-        spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)
-        spar_cfg = map_cfg.get('models', {}).get('spar', {})
-        if 'spar' in spar_services:
-            # spar always consumes geo+mic, so select the 'both' entry. One
-            # unified weight file per scene covers backbone + classification
-            # + localization heads (vehicle_classification_tracking task).
+    spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)
+    spar_cfg = map_cfg.get('models', {}).get('spar', {})
+    if 'spar' in spar_services:
+        # spar always consumes geo+mic, so select the 'both' entry. One
+        # unified weight file per scene covers backbone + classification
+        # + localization heads (vehicle_classification_tracking task).
+        
+        if spar_active:
             spar_weight: str = spar_cfg.get('weight', {}).get('both', '')
             spar_ops: list[KvEntry] = [
                 kv_set('deactivated', value=False),
                 kv_set('weight', value=spar_weight),
                 kv_set('labels', value=spar_cfg.get('labels')),
             ]
-            data_pass.append((spar_services['spar'], spar_ops))
-            all_targets.append(spar_services['spar'])
         else:
-            logger.warning('spar selected but no spar service found in heartbeat at %s', _SPAR_NAMESPACE)
+            spar_ops = [kv_set('deactivated', value=True)]
+        data_pass.append((spar_services['spar'], spar_ops))
+        all_targets.append(spar_services['spar'])
+    else:
+        logger.warning('spar selected but no spar service found in heartbeat at %s', _SPAR_NAMESPACE)
 
     # GPS service config
     data_pass.append((
