@@ -121,7 +121,7 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['infer_lock'] = threading.Lock()
 
     ctx.cfg['start_at'] = time.time()
-    
+
     is_deactivated = ctx.cfg.get('deactivated', False)
     ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
 
@@ -166,7 +166,8 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     if scene is None:
         logger.error(
             'on_weight_change: no known scene %s matches %s; ignoring',
-            _KNOWN_SCENES, new_weight,
+            _KNOWN_SCENES,
+            new_weight,
         )
         return
 
@@ -174,7 +175,9 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     num_classes = _num_classes_for(labels)
     logger.info(
         'rebuilding spar model: scene=%s weight=%s #classes=%s',
-        scene, new_weight, num_classes,
+        scene,
+        new_weight,
+        num_classes,
     )
     new_model = ModelForInference(
         weight=Path(new_weight),
@@ -183,7 +186,8 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     )
     logger.info(
         'rebuilt spar model: scene=%s #classes=%d #params=%d',
-        scene, new_model.num_classes,
+        scene,
+        new_model.num_classes,
         sum(p.numel() for p in new_model.parameters()),
     )
 
@@ -193,11 +197,13 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
         ctx.app['latest_ts_s'] = 0
         ctx.app['next_window_start'] = None
 
+
 @app.subscribe(OnChange('deactivated'))
 def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     is_deactivated = msg.value
     logger.info('deactivated changed to %s', is_deactivated)
     ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
+
 
 @app.subscribe(OnChange('labels'))
 def on_labels_change(ctx: AciesContext, msg: AciesKvChange) -> None:
@@ -292,7 +298,9 @@ def _run_inference_body(ctx: AciesContext) -> None:
                 ctx.app['next_window_start'] = min(buf)
                 logger.debug(
                     'empty window [%d..%d]; resync next_start to %d',
-                    next_start, window_end, ctx.app['next_window_start'],
+                    next_start,
+                    window_end,
+                    ctx.app['next_window_start'],
                 )
             else:
                 logger.debug('empty window [%d..%d]; buffer empty', next_start, window_end)
@@ -364,7 +372,9 @@ def _run_inference_body(ctx: AciesContext) -> None:
         if best_idx == bg_idx:
             logger.debug(
                 'dropping background prediction: window=[%d..%d] probs=%s',
-                next_start, window_end, [f'{x:.3f}' for x in target_probs],
+                next_start,
+                window_end,
+                [f'{x:.3f}' for x in target_probs],
             )
             continue
         label = labels[best_idx] if best_idx < len(labels) else str(best_idx)
@@ -404,7 +414,12 @@ def _run_inference_body(ctx: AciesContext) -> None:
 
 
 @app.cli()
-@click.option('--weight', required=True, type=click.Path(exists=True), help='Unified spar weight file (backbone + class + localization heads).')
+@click.option(
+    '--weight',
+    required=True,
+    type=click.Path(exists=True),
+    help='Unified spar weight file (backbone + class + localization heads).',
+)
 @click.option(
     '--geo',
     'geo_topic',

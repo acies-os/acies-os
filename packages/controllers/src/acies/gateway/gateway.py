@@ -74,6 +74,7 @@ def on_spar(ctx: AciesContext, msg: AciesInference) -> None:
         msg_spar = AciesInference(source=msg.source, timestamp=msg.timestamp, predictions=filtered_predictions)
         ctx.publish('ws://spar', msg_spar)
 
+
 @app.subscribe('**/vehicle')
 def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
     for pred in msg.predictions:
@@ -169,9 +170,7 @@ def _wait_futures(
         logger.info('%s: %s: %s', label, target, ' '.join(parts))
 
 
-def _resolve_route(
-    map_cfg: dict[str, Any], target_list: list[str]
-) -> tuple[str, int, str] | None:
+def _resolve_route(map_cfg: dict[str, Any], target_list: list[str]) -> tuple[str, int, str] | None:
     """Resolve a target list to (scene, run_id, reconfig_target) from the map config."""
     reconfig_target = '_'.join(sorted(t.lower() for t in target_list))
     routes = map_cfg.get('routes', {})
@@ -237,8 +236,14 @@ def _build_reconfig_ops(
         modality: str = str(state['modality'])
         # SPAR needs all geo/mic across all nodes; force 'both' when active
         effective_modality: str = 'both' if spar_active else modality
-        
-        logger.debug('node_id: %s, selected_model: %s, modality: %s, effective_modality: %s', node_id, selected_model, modality, effective_modality)
+
+        logger.debug(
+            'node_id: %s, selected_model: %s, modality: %s, effective_modality: %s',
+            node_id,
+            selected_model,
+            modality,
+            effective_modality,
+        )
 
         # --- sensor deactivation/activation ---
         if effective_modality not in ('geo', 'both') and 'geo' in services:
@@ -296,7 +301,7 @@ def _build_reconfig_ops(
         # spar always consumes geo+mic, so select the 'both' entry. One
         # unified weight file per scene covers backbone + classification
         # + localization heads (vehicle_classification_tracking task).
-        
+
         if spar_active:
             spar_weight: str = spar_cfg.get('weight', {}).get('both', '')
             spar_ops: list[KvEntry] = [
@@ -312,15 +317,17 @@ def _build_reconfig_ops(
         logger.warning('spar selected but no spar service found in heartbeat at %s', _SPAR_NAMESPACE)
 
     # GPS service config
-    data_pass.append((
-        edge_services['gps'],
-        [
-            kv_set('scene', value=scene),
-            kv_set('run', value=run_id),
-            kv_set('label', value=reconfig_target),
-        ],
-    ))
-    
+    data_pass.append(
+        (
+            edge_services['gps'],
+            [
+                kv_set('scene', value=scene),
+                kv_set('run', value=run_id),
+                kv_set('label', value=reconfig_target),
+            ],
+        )
+    )
+
     logger.debug('build_output: deactivate_pass: %s', deactivate_pass)
     logger.debug('build_output: data_pass: %s', data_pass)
     logger.debug('build_output: all_targets: %s', all_targets)
@@ -370,12 +377,17 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     # Build KV operation passes
     deactivate_pass, data_pass, all_targets = _build_reconfig_ops(
-        node_states, heartbeat_buf, map_cfg, edge_services, scene, run_id, reconfig_target,
+        node_states,
+        heartbeat_buf,
+        map_cfg,
+        edge_services,
+        scene,
+        run_id,
+        reconfig_target,
     )
 
     # Execute in three passes
     with ThreadPoolExecutor() as pool:
-        
         # this is the deactivation pass that controls what runs on each nodes
         # this should send to mic/geo/vfm/diffphys on each node
         items0 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in deactivate_pass]

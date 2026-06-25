@@ -70,7 +70,9 @@ def setup(ctx: AciesContext) -> None:
     _saved_argv = sys.argv[:]
     sys.argv = sys.argv[:1]
     try:
-        model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'), diffphys=True, distance_head=True)
+        model = ModelForInference(
+            Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'), diffphys=True, distance_head=True
+        )
     finally:
         sys.argv = _saved_argv
     raw_mods: list[str] = model.args.dataset_config['modality_names']
@@ -89,7 +91,7 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['output_topic'] = output_topic
     ctx.app['ensemble_buf'] = deque(maxlen=ensemble_win)
     ctx.app['buffer'] = TemporalBuffer(size=INPUT_LEN + 2)
-    
+
     is_deactivated = ctx.cfg.get('deactivated', False)
     ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
 
@@ -141,11 +143,13 @@ def on_labels_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     logger.info('labels changed to %s', new_labels)
     ctx.cfg['labels'] = new_labels if isinstance(new_labels, list) else new_labels.split(',')
 
+
 @app.subscribe(OnChange('deactivated'))
 def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     is_deactivated = msg.value
     logger.info('deactivated changed to %s', is_deactivated)
     ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
+
 
 @app.subscribe('{geo_topic}')
 def on_geo(ctx: AciesContext, msg: AciesTimeSeries) -> None:
@@ -182,7 +186,7 @@ def run_inference(ctx: AciesContext) -> None:
     modalities: list[str] = ctx.app['modalities']
     _mod_to_topic = {'geo': ctx.cfg['geo_topic'], 'mic': ctx.cfg['mic_topic']}
     keys = [_mod_to_topic[m] for m in modalities]
-    
+
     if ctx.cfg.get('deactivated'):
         logger.debug('diffphys deactivated; skipping inference')
         return
@@ -195,7 +199,6 @@ def run_inference(ctx: AciesContext) -> None:
             ts_by_topic = {k: sorted(ctx.app['buffer']._data[k]) for k in keys}
         logger.debug('not enough buffered data for inference; timestamps=%s', ts_by_topic)
         return
-
 
     # --- build FoundationSense model input ---
     # expected format: {'shake': {'seismic': tensor, 'audio': tensor}}
@@ -291,7 +294,9 @@ def run_inference(ctx: AciesContext) -> None:
     show_default=True,
     help='Rolling window size in seconds for soft-vote ensemble.',
 )
-@click.option('--ensemble-size', default=1, type=int, show_default=True, help='Minimum results in window before publishing.')
+@click.option(
+    '--ensemble-size', default=1, type=int, show_default=True, help='Minimum results in window before publishing.'
+)
 @click.option(
     '--modality',
     default=None,

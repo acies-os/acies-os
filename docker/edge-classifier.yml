@@ -1,7 +1,9 @@
 # Classifier(s) on edge. Combine with edge.yml + replay.yml.
 # Scenario 2 (lab development).
 #
-# Usage — select nodes with --profile (must match replay.yml profiles):
+# Usage:
+#
+# Select nodes with --profile (must match replay.yml profiles):
 #   MODEL_DIR=/model VFM_WEIGHT=weights.pt \
 #     docker compose -f edge.yml -f replay.yml -f classifier.yml \
 #     --profile rs1 --profile rs3 up

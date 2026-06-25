@@ -2,6 +2,7 @@
 # Scenario 3 (tabletop demo).
 #
 # Usage:
+#
 #   ACIES_NAMESPACE=rs1 SCENE=2024-03-29-ICT RUN=2 \
 #     ZENOH_BRIDGE="--connect tcp/LAPTOP_IP:7447" \
 #     docker compose -f pi-replay.yml up
@@ -78,7 +79,7 @@ services:
       - ${MODEL_DIR:-/model}:/model:ro
       - ~/.acies:/root/.acies
     restart: unless-stopped
-  
+
   # diffphys:
   #   image: acies-pi:latest
   #   command: >-

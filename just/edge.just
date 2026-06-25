@@ -74,11 +74,11 @@ edge-mqtt-local *args:
         --port {{ mqtt_port }} \
         --mqtt-topic {{ mqtt_topic }}
 
-# Run spar locally against the edge zenoh bus.
-# Requires `just edge-up-infra` (and typically `just edge-up-nodes`) to be running.
+# To run SPAR locally, you need to run`just edge-up-infra` (and typically `just edge-up-nodes`).
 # Mirrors docker/edge-classifier.yml: fixed namespace `joint` so downstream
-# subscribers find this spar's output, and uses SPAR_WEIGHT / SPAR_LABELS
-# from .env.
+# subscribers find this spar's output, and uses SPAR_WEIGHT / SPAR_LABELS from .env.
+
+# Run spar locally.
 edge-spar-local *args:
     @mkdir -p ~/.acies/logs
     ACIES_LISTEN="" \
