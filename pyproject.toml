@@ -41,8 +41,8 @@ docs = [
 ]
 
 [tool.hatch]
-build.targets.wheel.packages = [ "src/acies" ]
 metadata.allow-direct-references = true
+build.targets.wheel.packages = [ "src/acies" ]
 
 [tool.uv]
 environments = [
@@ -70,10 +70,10 @@ lint.mccabe = { max-complexity = 13 }
 typeCheckingMode = "recommended"
 include = [ "packages/*/src" ]
 extraPaths = [
-  "packages/core/src",
-  "packages/sensors/src",
   "packages/buffers/src",
   "packages/controller/src",
+  "packages/core/src",
+  "packages/sensors/src",
   "packages/vehicle-classifier/src"
 ]
 reportAny = false

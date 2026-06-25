@@ -1,4 +1,4 @@
-"""VibroFM vehicle classifier node for AciesOS.
+"""DiffPhys vehicle classifier node for AciesOS.
 
 Subscribes to AciesTimeSeries messages on configured geo and/or mic topics,
 buffers two 1-second windows per modality, and runs a FoundationSense model
@@ -11,7 +11,7 @@ silently ignored.
 
 Usage::
 
-    acies-vfm --weight /path/to/model.pt
+    acies-diffphys --weight /path/to/model.pt
               --geo <topic> --mic <topic>
               [--output TOPIC]
               [--labels car,truck,person]
@@ -70,7 +70,9 @@ def setup(ctx: AciesContext) -> None:
     _saved_argv = sys.argv[:]
     sys.argv = sys.argv[:1]
     try:
-        model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
+        model = ModelForInference(
+            Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'), diffphys=True, distance_head=True
+        )
     finally:
         sys.argv = _saved_argv
     raw_mods: list[str] = model.args.dataset_config['modality_names']
@@ -90,10 +92,10 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['ensemble_buf'] = deque(maxlen=ensemble_win)
     ctx.app['buffer'] = TemporalBuffer(size=INPUT_LEN + 2)
 
-    ctx.cfg['start_at'] = time.time()
-
     is_deactivated = ctx.cfg.get('deactivated', False)
     ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
+
+    ctx.cfg['start_at'] = time.time()
 
     logger.info(
         'publishing to %s; ensemble_win=%d ensemble_size=%d geo_thresh=%.1f mic_thresh=%.1f',
@@ -107,7 +109,7 @@ def setup(ctx: AciesContext) -> None:
 
 @app.on_shutdown
 def teardown(_ctx: AciesContext) -> None:
-    logger.info('vibrofm stopped')
+    logger.info('diffphys stopped')
 
 
 @app.subscribe(OnChange('start_at'))
@@ -134,19 +136,19 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     logger.info('weight reload complete; modalities=%s', ctx.app['modalities'])
 
 
-@app.subscribe(OnChange('deactivated'))
-def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
-    is_deactivated = msg.value
-    logger.info('deactivated changed to %s', is_deactivated)
-    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
-
-
 @app.subscribe(OnChange('labels'))
 def on_labels_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     """Update class labels when the label list changes."""
     new_labels = msg.value
     logger.info('labels changed to %s', new_labels)
     ctx.cfg['labels'] = new_labels if isinstance(new_labels, list) else new_labels.split(',')
+
+
+@app.subscribe(OnChange('deactivated'))
+def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    is_deactivated = msg.value
+    logger.info('deactivated changed to %s', is_deactivated)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
 
 
 @app.subscribe('{geo_topic}')
@@ -186,7 +188,7 @@ def run_inference(ctx: AciesContext) -> None:
     keys = [_mod_to_topic[m] for m in modalities]
 
     if ctx.cfg.get('deactivated'):
-        logger.debug('vibrofm deactivated; skipping inference')
+        logger.debug('diffphys deactivated; skipping inference')
         return
 
     try:
@@ -214,7 +216,7 @@ def run_inference(ctx: AciesContext) -> None:
             data['shake']['audio'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 1600))  # pyright: ignore[reportUnknownMemberType]
 
     t0 = time.perf_counter_ns()
-    logit, _feat = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
+    logit, distance = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
     infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
 
     # logit shape: (num_targets, num_classes), values are probabilities
@@ -222,10 +224,11 @@ def run_inference(ctx: AciesContext) -> None:
     ensemble_buf: deque[list[list[float]]] = ctx.app['ensemble_buf']
     ensemble_buf.append(probs)
     logger.debug(
-        'inference: probs=%s infer_ms=%.1f ensemble=%d',
+        'inference: probs=%s infer_ms=%.1f ensemble=%d, distance=%s',
         [[f'{x:.3f}' for x in row] for row in probs],
         infer_ms,
         len(ensemble_buf),
+        distance,
     )
 
     if len(ensemble_buf) < ctx.cfg.get('ensemble_size', 1):
@@ -245,7 +248,7 @@ def run_inference(ctx: AciesContext) -> None:
                     extras['geo_energy'] = energy['geo']
                 if 'mic' in energy:
                     extras['mic_energy'] = energy['mic']
-                target_pred = AciesPrediction(label=label, score=float(score), extras=extras)
+                target_pred = AciesPrediction(label=label, score=float(score), distance=float(distance), extras=extras)
                 predictions.append(target_pred)
                 logger.debug('%s', target_pred)
 
@@ -322,7 +325,7 @@ def main(
 ) -> None:
     app.state.config.update(
         {
-            'deactivated': False,
+            'deactivated': True,
             'weight': weight,
             'geo_topic': geo_topic,
             'mic_topic': mic_topic,

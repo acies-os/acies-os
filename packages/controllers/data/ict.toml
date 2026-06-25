@@ -61,7 +61,7 @@ coordinates = [
 
 
 # map selected map and target to the corresponding runID path
-[routes.ict]
+[routes]
 mustang = "2024-03-29-ICT/run0"
 miata = "2024-03-29-ICT/run2"
 gle350 = "2024-03-29-ICT/run4"
@@ -70,19 +70,27 @@ cx30_mustang = "2024-06-22-ICT/run1"
 miata_mustang = "2024-06-22-ICT/run3"
 cx30_miata = "2024-06-22-ICT/run5"
 
-# map selected map and target to the corresponding runID path
-[routes.gcq]
-polaris = "2024-08-06-GQ/run2"
-warthog = "2024-08-06-GQ/run29"
-polaris_warthog = "2024-08-06-GQ/run75"
+[models.vfm]
+labels = ["gle350", "miata", "cx30", "mustang"]
 
-# map gq-X to rsY for GCQ
-[map_node_mapping]
-gq-1 = "rs1"
-gq-2 = "rs3"
-gq-3 = "rs8"
-gq-4 = "rs10"
+[models.diffphys]
+labels = ["gle350", "miata", "cx30", "mustang"]
 
+[models.spar]
+labels = ["gle350", "miata", "cx30", "mustang"]
+
+[models.vfm.weight]
+both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_ict2024_1.0_multiclass_latest.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_ict2024_1.0_multiclass_latest.pt"
+
+[models.diffphys.weight]
+both = ["/model/diffphys_2024-03-29-ICT_classification.pt", "/model/diffphys_2024-03-29-ICT_distance.pt"]
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_seismic_multiclass_best.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_audio_multiclass_best.pt"
+
+[models.spar.weight]
+both = "/model/spar_2024-03-29-ICT.pt"
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
@@ -91,10 +99,17 @@ cx30 = 0.85
 gle350 = 0.85
 mustang = 0.85
 
-polaris = 0.95
-warthog = 0.95
-truck = 0.80
-husky = 0.95
+[confidence_threshold.diffphys]
+miata = 0.75
+cx30 = 0.75
+gle350 = 0.75
+mustang = 0.75
+
+[confidence_threshold.spar]
+gle350 = 0.85
+miata = 0.85
+cx30 = 0.85
+mustang = 0.0
 
 [ensemble]
 # ensemble temporal window size in seconds

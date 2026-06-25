@@ -74,15 +74,33 @@ edge-mqtt-local *args:
         --port {{ mqtt_port }} \
         --mqtt-topic {{ mqtt_topic }}
 
+# To run SPAR locally, you need to run`just edge-up-infra` (and typically `just edge-up-nodes`).
+# Mirrors docker/edge-classifier.yml: fixed namespace `joint` so downstream
+# subscribers find this spar's output, and uses SPAR_WEIGHT / SPAR_LABELS from .env.
+
+# Run spar locally.
+edge-spar-local *args:
+    @mkdir -p ~/.acies/logs
+    ACIES_LISTEN="" \
+    ACIES_LOG={{ acies_log }} \
+    uv run acies-spar \
+        --acies-namespace joint --acies-name spar \
+        --acies-connect {{ edge_zenoh_connect }} \
+        --geo '**/geo' --mic '**/mic' \
+        --weight "$MODEL_DIR/$SPAR_WEIGHT" \
+        --labels "$SPAR_LABELS" \
+        {{ args }}
+
 # Start infra for an edge replay
 edge-up-infra *args:
     ACIES_NAMESPACE=$(hostname -s) docker compose -p edge-replay \
         --env-file .env \
         -f docker/edge.yml \
+        -f docker/edge-classifier.yml \
         {{ args }} \
         up
 
-# Start nodes for an edge replay
+# Start nodes for an edge replay (replay only; no per-node VFM classifier)
 edge-up-nodes *args:
     docker compose -p edge-replay --env-file .env \
         -f docker/replay.yml \

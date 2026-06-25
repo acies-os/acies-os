@@ -1,0 +1,36 @@
+# Classifier(s) on edge. Combine with edge.yml + replay.yml.
+# Scenario 2 (lab development).
+#
+# Usage:
+#
+# Select nodes with --profile (must match replay.yml profiles):
+#   MODEL_DIR=/model VFM_WEIGHT=weights.pt \
+#     docker compose -f edge.yml -f replay.yml -f classifier.yml \
+#     --profile rs1 --profile rs3 up
+#
+# Env vars:
+#   MODEL_DIR         Host path to model directory (required)
+#   VFM_WEIGHT        Weight filename inside MODEL_DIR (required)
+#   VFM_LABELS        Comma-separated label list (required)
+#   ZENOH_CONNECT     Zenoh endpoint (default: tcp/127.0.0.1:7501)
+#   ACIES_LOG         Per-logger level overrides
+
+x-env: &env
+  PATH: /acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+  ACIES_LOG: ${ACIES_LOG:-}
+  ACIES_CONNECT: ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+
+x-spar: &spar
+  image: acies-server:latest
+  network_mode: host
+  volumes:
+    - ${MODEL_DIR}:/model:ro
+    - ~/.acies:/root/.acies
+  restart: unless-stopped
+
+services:
+  edge-spar:
+    <<: *spar
+    profiles: [spar]
+    command: acies-spar --weight /model/${SPAR_WEIGHT} --geo '**/geo' --mic '**/mic' --labels ${SPAR_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: joint, ACIES_NAME: spar }

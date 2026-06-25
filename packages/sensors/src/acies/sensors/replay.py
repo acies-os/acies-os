@@ -47,7 +47,7 @@ app = AciesApp()
 
 _SAMPLING_RATE = {'geo': 200, 'mic': 16000}
 _DTYPE = {'geo': 'int32', 'mic': 'int16'}
-_CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0'}}
+_CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0', 'mono'}}
 _NS_PER_S = 1_000_000_000
 
 
@@ -175,6 +175,14 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 @app.subscribe(OnChange('speed'))
 def on_speed_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     logger.info('speed changed to %s', msg.value)
+    ctx.app['restart'].set()
+
+
+@app.subscribe(OnChange('deactivated'))
+def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    is_deactivated = msg.value
+    logger.info('deactivated changed to %s', is_deactivated)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
     ctx.app['restart'].set()
 
 
@@ -323,6 +331,12 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
                 _ = _wait_for_any(cancel, timeout=3600)
                 continue
 
+        # --- check if service is deactivated ---
+        if ctx.cfg.get('deactivated', False):
+            logger.info('service is deactivated; waiting for reactivation')
+            _ = _wait_for_any(cancel, timeout=3600)
+            continue
+
         windows = ctx.app['windows']
         speed: float = ctx.cfg.get('speed', 1.0)
         loop: bool = ctx.cfg.get('loop', False)
@@ -391,6 +405,7 @@ def main(
 ) -> None:
     app.state.config.update(
         {
+            'deactivated': False,
             'data_dir': data_dir,
             'scene': scene,
             'node': node,

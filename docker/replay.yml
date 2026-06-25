@@ -1,7 +1,9 @@
 # Replay sensor data (mic + geo) on selected nodes, all on edge.
 # Scenario 2 (lab development). Combine with edge.yml.
 #
-# Usage — select nodes with --profile:
+# Usage:
+#
+# Select nodes with --profile:
 #   SCENE=2024-03-29-ICT RUN=2 \
 #     docker compose -f edge.yml -f replay.yml --profile rs1 --profile rs3 up
 #

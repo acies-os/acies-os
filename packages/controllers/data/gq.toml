@@ -1,10 +1,30 @@
 # Node locations
 [gps]
 # node_name = [latitude, longitude]
-dvpg-gq-1-shake = [39.350809, -76.344938]
-dvpg-gq-2-shake = [39.350933, -76.344952]
-dvpg-gq-3-shake = [39.351015, -76.344871]
-dvpg-gq-4-shake = [39.351153, -76.344783]
+gq-1 = [39.350809, -76.344938]
+gq-2 = [39.350933, -76.344952]
+gq-3 = [39.351015, -76.344871]
+gq-4 = [39.351153, -76.344783]
+
+[routes]
+warthog = "2024-08-06-GQ/run2"
+polaris = "2024-08-06-GQ/run29"
+polaris_warthog = "2024-08-06-GQ/run57"
+
+# map gq-X to rsY for GCQ
+[map_node_mapping]
+gq-1 = "rs1"
+gq-2 = "rs3"
+gq-3 = "rs8"
+gq-4 = "rs10"
+
+[models.vfm]
+labels = ["polaris", "warthog", "truck", "husky"]
+
+[models.vfm.weight]
+both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_multiclass_best.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_seismic_multiclass_best.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_gcq_1.0_audio_multiclass_best.pt"
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold]

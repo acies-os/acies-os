@@ -81,26 +81,45 @@ coordinates = [
 
 
 # map selected map and target to the corresponding runID path
-[routes.wp]
-suv = "2026-04-14-WP/run0"
-sedan = "2026-04-14-WP/run1"
+[routes]
+wagoneer = "2026-04-14-West-Point/run6"
+kona = "2026-04-14-West-Point/run0"
 
-# map gq-X to rsY for GCQ
-[map_node_mapping]
-gq-1 = "rs1"
-gq-2 = "rs3"
-gq-3 = "rs8"
-gq-4 = "rs10"
+[models.vfm]
+labels = ["wagoneer", "kona"]
+
+[models.diffphys]
+labels = ["wagoneer", "kona"]
+
+[models.vfm.weight]
+both = "/model/Parkland_TransformerV4_vehicle_classification_finetune_wp2026_1.0_multiclass_distance-100_latest.pt"
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_wp2026_1.0_multiclass_distance-100_latest.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
+
+[models.diffphys.weight]
+both = ["/model/diffphys_2026-04-13-West-Point_classification.pt", "/model/diffphys_2026-04-13-West-Point_distance.pt"]
+seismic = "/model/Parkland_TransformerV4_vehicle_classification_finetune_seismic_wp2026_1.0_multiclass_distance-100_latest.pt"
+audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_audio_wp2026_1.0_multiclass_distance-100_latest.pt"
+
+[models.spar]
+labels = ["wagoneer", "kona"]
+
+[models.spar.weight]
+both = "/model/spar_2026-04-14-West-Point.pt"
 
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
 wagoneer = 0.60
 kona = 0.65
-miata = 1.1
-cx30 = 1.1
-gle350 = 1.1
-mustang = 1.1
+
+[confidence_threshold.diffphys]
+wagoneer = 0.75
+kona = 0.75
+
+[confidence_threshold.spar]
+wagoneer = 0.60
+kona = 0.65
 
 [ensemble]
 # ensemble temporal window size in seconds

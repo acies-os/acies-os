@@ -29,9 +29,12 @@ dependencies = [
   # "deepsense-augmented @ git+ssh://github.com/acies-os/deepsense-augmented.git",
   "foundation-sense @ git+ssh://github.com/acies-os/FoundationSense.git",
   "numpy>=1.24.4,<2",
+  "spar @ git+ssh://github.com/acies-os/SPAR.git@demo2",
 ]
+scripts.acies-diffphys = "acies.classifiers.diffphys:main"
 # scripts.acies-ds = "acies.classifier.ds:main"
 # scripts.acies-noise-detector = "acies.classifier.noise_detector:main"
+scripts.acies-spar = "acies.classifiers.spar:main"
 scripts.acies-vfm = "acies.classifiers.vibrofm:main"
 
 [dependency-groups]
@@ -44,8 +47,8 @@ docs = [
 ]
 
 [tool.hatch]
-build.targets.wheel.packages = [ "src/acies" ]
 metadata.allow-direct-references = true
+build.targets.wheel.packages = [ "src/acies" ]
 
 [tool.uv]
 sources.acies-buffers = { workspace = true }

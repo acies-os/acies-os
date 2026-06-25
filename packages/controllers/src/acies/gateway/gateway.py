@@ -19,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import random
@@ -55,6 +56,23 @@ _MODALITY_MAP = {
     'acoustic': 'mic',
     'both': 'both',
 }
+_ALL_MODELS = ['vfm', 'diffphys', 'spar']
+_MODEL_NAME_MAP: dict[str, str] = {'vibrofm': 'vfm', 'spar': 'spar', 'diffphys': 'diffphys'}
+_SPAR_NAMESPACE = 'joint'
+
+_MODALITY_TO_WEIGHT_KEY: dict[str, str] = {'both': 'both', 'geo': 'seismic', 'mic': 'audio'}
+
+
+@app.subscribe('**/spar')
+def on_spar(ctx: AciesContext, msg: AciesInference) -> None:
+    logger.debug('tk-on_spar: msg.predictions: %s', msg.predictions)
+    thresholds: dict[str, dict[str, float]] = ctx.app['confidence_threshold']
+    model_thresh = thresholds.get('spar', {})
+    filtered_predictions = [p for p in msg.predictions if p.score >= model_thresh.get(p.label, 0.0)]
+    logger.debug('tk-on_spar: filtered_predictions: %s', filtered_predictions)
+    if filtered_predictions:
+        msg_spar = AciesInference(source=msg.source, timestamp=msg.timestamp, predictions=filtered_predictions)
+        ctx.publish('ws://spar', msg_spar)
 
 
 @app.subscribe('**/vehicle')
@@ -152,85 +170,156 @@ def _wait_futures(
         logger.info('%s: %s: %s', label, target, ' '.join(parts))
 
 
-@app.subscribe('ws://ctl')
-def on_ctl(ctx: AciesContext, msg: Any) -> None:
-    logger.debug('ctl command received: %r', msg.get('appType', 'unknown'))
-    reconfig_map = msg['map']
-    reconfig_target_list: list[str] = sorted([t.lower() for t in msg['target']])
-
-    # map selected map and target to the corresponding runID path
-    reconfig_target = '_'.join(reconfig_target_list)
-    if reconfig_map not in ctx.cfg['routes']:
-        logger.error('reconfig map %s not found in routes', reconfig_map)
-        return
-
-    if reconfig_target not in ctx.cfg['routes'][reconfig_map]:
+def _resolve_route(map_cfg: dict[str, Any], target_list: list[str]) -> tuple[str, int, str] | None:
+    """Resolve a target list to (scene, run_id, reconfig_target) from the map config."""
+    reconfig_target = '_'.join(sorted(t.lower() for t in target_list))
+    routes = map_cfg.get('routes', {})
+    if reconfig_target not in routes:
         logger.error('reconfig target %s not found in routes', reconfig_target)
-        return
+        return None
+    scene, run_id = tuple(routes[reconfig_target].split('/'))
+    return str(scene), int(run_id.removeprefix('run')), reconfig_target
 
-    # 2024-08-06-GQ/run29
-    reconfig_route = ctx.cfg['routes'][reconfig_map][reconfig_target]
-    scene, run_id = tuple(reconfig_route.split('/'))
-    run_id = int(run_id.removeprefix('run'))
-    scene = str(scene)
 
-    # reconfig node states
-    reconfig_node_states: list[dict[str, str]] = msg['nodes']
+def _build_node_states(
+    msg_nodes: list[dict[str, str]],
+    map_node_mapping: dict[str, str],
+    scene: str,
+    run_id: int,
+) -> dict[str, dict[str, str | int]]:
+    """Build per-node state dict from the UI message node list."""
     new_node_states: dict[str, dict[str, str | int]] = {}
-    map_node_mapping = ctx.cfg['map_node_mapping']
-    for node_state in reconfig_node_states:
+    for node_state in msg_nodes:
         node_id = node_state['nodeId'].lower()
         mapped_node_id: str = map_node_mapping.get(node_id, node_id)
-        # TODO: support changing model
-        model = node_state['model'].replace('VibroFM', 'vfm')
-        modality = node_state['modality'].lower()
-        modality = _MODALITY_MAP.get(modality, modality)
-
+        model = _MODEL_NAME_MAP.get(node_state['model'].lower(), node_state['model'].lower())
+        modality = _MODALITY_MAP.get(node_state['modality'].lower(), node_state['modality'].lower())
         new_node_states[mapped_node_id] = {
-            'node_id': mapped_node_id,  # mapped node id, same for ICT, gq-X mapped to rsY for GCQ
-            'replayed_node_id': node_id,  # original node id, used for path routing
-            'model': model,  # model name
-            'modality': modality,  # modality name [both, seismic, acoustic]
-            'scene': scene,  # scene name, e.g. 2024-08-06-GQ
-            'run_id': run_id,  # run id, e.g. 29
+            'node_id': mapped_node_id,
+            'replayed_node_id': node_id,
+            'model': model,
+            'modality': modality,
+            'scene': scene,
+            'run_id': run_id,
         }
+    return new_node_states
 
-    logger.debug('new replay config: %s', new_node_states)
 
-    heartbeat_buf: TimeWindow = ctx.app['heartbeat']
+def _build_reconfig_ops(
+    node_states: dict[str, dict[str, str | int]],
+    heartbeat_buf: TimeWindow,
+    map_cfg: dict[str, Any],
+    edge_services: dict[str, str],
+    scene: str,
+    run_id: int,
+    reconfig_target: str,
+) -> tuple[list[tuple[str, Sequence[KvEntry]]], list[tuple[str, Sequence[KvEntry]]], list[str]]:
+    """Build all KV operation passes for the reconfiguration.
 
-    # --- look up GPS and tracker services from heartbeat records ---
-    edge_host = ctx.ns.namespace.split('/')[0]
-    edge_services = _find_services(heartbeat_buf, edge_host)
-    gps_base = edge_services.get('gps')
-    if gps_base is None:
-        logger.error('gps service not found in heartbeat records')
-        return
+    Returns (deactivate_pass, data_pass, all_targets).
+    """
+    deactivate_pass: list[tuple[str, Sequence[KvEntry]]] = []
+    data_pass: list[tuple[str, Sequence[KvEntry]]] = []
+    all_targets: list[str] = [edge_services['gps']]
+    tracker = edge_services.get('tracker')
+    if tracker is not None:
+        all_targets.append(tracker)
 
-    # --- build kv ops for each target using service discovery ---
-    data_reconfig_pass: list[tuple[str, Sequence[KvEntry]]] = []
-    all_targets: list[str] = [gps_base]
-    tracker_base = edge_services.get('tracker')
-    if tracker_base is not None:
-        all_targets.append(tracker_base)
-    for node_id, state in new_node_states.items():
+    # Collect which models are active across all nodes
+    active_models: set[str] = {str(state['model']) for state in node_states.values()}
+    spar_active = 'spar' in active_models
+
+    # --- per-node: sensor activation + model activation/deactivation ---
+    for node_id, state in node_states.items():
         services = _find_services(heartbeat_buf, node_id)
-        data_ops = [
+        selected_model: str = str(state['model'])
+        modality: str = str(state['modality'])
+        # SPAR needs all geo/mic across all nodes; force 'both' when active
+        effective_modality: str = 'both' if spar_active else modality
+
+        logger.debug(
+            'node_id: %s, selected_model: %s, modality: %s, effective_modality: %s',
+            node_id,
+            selected_model,
+            modality,
+            effective_modality,
+        )
+
+        # --- sensor deactivation/activation ---
+        if effective_modality not in ('geo', 'both') and 'geo' in services:
+            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=True)]))
+        if effective_modality not in ('mic', 'both') and 'mic' in services:
+            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=True)]))
+        if effective_modality in ('geo', 'both') and 'geo' in services:
+            deactivate_pass.append((services['geo'], [kv_set('deactivated', value=False)]))
+        if effective_modality in ('mic', 'both') and 'mic' in services:
+            deactivate_pass.append((services['mic'], [kv_set('deactivated', value=False)]))
+
+        # --- model deactivation: deactivate models NOT selected on this node ---
+        for model_name in _ALL_MODELS:
+            if model_name in services:
+                deactivate_pass.append((services[model_name], [kv_set('deactivated', value=True)]))
+
+        # --- sensor data config ---
+        data_ops: list[KvEntry] = [
             kv_set('scene', value=state['scene']),
             kv_set('run', value=state['run_id']),
             kv_set('node', value=state['replayed_node_id']),
         ]
-        if 'vfm' in services:
-            all_targets.append(services['vfm'])
-        if state['modality'] in ['mic', 'both'] and 'mic' in services:
-            data_reconfig_pass.append((services['mic'], data_ops))
+        if effective_modality in ('mic', 'both') and 'mic' in services:
+            data_pass.append((services['mic'], data_ops))
             all_targets.append(services['mic'])
-        if state['modality'] in ['geo', 'both'] and 'geo' in services:
-            data_reconfig_pass.append((services['geo'], data_ops))
+        if effective_modality in ('geo', 'both') and 'geo' in services:
+            data_pass.append((services['geo'], data_ops))
             all_targets.append(services['geo'])
-    data_reconfig_pass.append(
+
+        # --- per-node model activation + config (vfm, diffphys) ---
+        if selected_model != 'spar' and selected_model in services:
+            model_cfg = map_cfg.get('models', {}).get(selected_model, {})
+            model_weights: dict[str, str] = model_cfg.get('weight', {})
+            model_labels: list[str] | None = model_cfg.get('labels')
+            weight_key: str = _MODALITY_TO_WEIGHT_KEY.get(effective_modality.lower(), 'both')
+            model_ops: list[KvEntry] = [
+                kv_set('deactivated', value=False),
+                kv_set('weight', value=model_weights[weight_key]),
+                kv_set('labels', value=model_labels),
+            ]
+            # Send modality override so the model updates its expected modalities
+            if effective_modality == 'geo':
+                model_ops.append(kv_set('modality', value='seismic'))
+            elif effective_modality == 'mic':
+                model_ops.append(kv_set('modality', value='audio'))
+            else:
+                model_ops.append(kv_set('modality', value=None))
+            data_pass.append((services[selected_model], model_ops))
+            all_targets.append(services[selected_model])
+
+    # --- SPAR global activation ---
+    spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)
+    spar_cfg = map_cfg.get('models', {}).get('spar', {})
+    if 'spar' in spar_services:
+        # spar always consumes geo+mic, so select the 'both' entry. One
+        # unified weight file per scene covers backbone + classification
+        # + localization heads (vehicle_classification_tracking task).
+
+        if spar_active:
+            spar_weight: str = spar_cfg.get('weight', {}).get('both', '')
+            spar_ops: list[KvEntry] = [
+                kv_set('deactivated', value=False),
+                kv_set('weight', value=spar_weight),
+                kv_set('labels', value=spar_cfg.get('labels')),
+            ]
+        else:
+            spar_ops = [kv_set('deactivated', value=True)]
+        data_pass.append((spar_services['spar'], spar_ops))
+        all_targets.append(spar_services['spar'])
+    else:
+        logger.warning('spar selected but no spar service found in heartbeat at %s', _SPAR_NAMESPACE)
+
+    # GPS service config
+    data_pass.append(
         (
-            gps_base,
+            edge_services['gps'],
             [
                 kv_set('scene', value=scene),
                 kv_set('run', value=run_id),
@@ -239,13 +328,75 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
         )
     )
 
+    logger.debug('build_output: deactivate_pass: %s', deactivate_pass)
+    logger.debug('build_output: data_pass: %s', data_pass)
+    logger.debug('build_output: all_targets: %s', all_targets)
+
+    return deactivate_pass, data_pass, all_targets
+
+
+@app.subscribe('ws://ctl')
+def on_ctl(ctx: AciesContext, msg: Any) -> None:
+    logger.debug('ctl command received: %r', msg.get('appType', 'unknown'))
+    reconfig_map = msg['map']
+
+    # Look up the config for the selected map
+    configs: dict[str, dict[str, Any]] = ctx.app['configs']
+    if reconfig_map not in configs:
+        logger.error('unknown map: %s (available: %s)', reconfig_map, list(configs.keys()))
+        return
+    map_cfg = configs[reconfig_map]
+
+    # Swap active config state on map change
+    active_map: str | None = ctx.app.get('active_map')
+    if active_map != reconfig_map:
+        ctx.app['gps'] = map_cfg.get('gps', {})
+        ctx.app['confidence_threshold'] = map_cfg.get('confidence_threshold', {})
+        ctx.app['map_node_mapping'] = map_cfg.get('map_node_mapping', {})
+        ctx.app['active_map'] = reconfig_map
+        ctx.app['ensemble_buf'].clear()
+        logger.info('map changed: %s -> %s', active_map, reconfig_map)
+
+    # Resolve route
+    route = _resolve_route(map_cfg, msg['target'])
+    if route is None:
+        return
+    scene, run_id, reconfig_target = route
+
+    # Build per-node state
+    node_states = _build_node_states(msg['nodes'], map_cfg.get('map_node_mapping', {}), scene, run_id)
+    logger.debug('new replay config: %s', node_states)
+
+    # Discover edge services
+    heartbeat_buf: TimeWindow = ctx.app['heartbeat']
+    edge_host = ctx.ns.namespace.split('/')[0]
+    edge_services = _find_services(heartbeat_buf, edge_host)
+    if 'gps' not in edge_services:
+        logger.error('gps service not found in heartbeat records')
+        return
+
+    # Build KV operation passes
+    deactivate_pass, data_pass, all_targets = _build_reconfig_ops(
+        node_states,
+        heartbeat_buf,
+        map_cfg,
+        edge_services,
+        scene,
+        run_id,
+        reconfig_target,
+    )
+
+    # Execute in three passes
     with ThreadPoolExecutor() as pool:
-        # pass 1: send data params in parallel
-        items1 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in data_reconfig_pass]
+        # this is the deactivation pass that controls what runs on each nodes
+        # this should send to mic/geo/vfm/diffphys on each node
+        items0 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in deactivate_pass]
+        _wait_futures(items0, 'pass 0 (deactivation)')
+
+        items1 = [(t, ops, pool.submit(kv_call, ctx, t, ops)) for t, ops in data_pass]
         _wait_futures(items1, 'pass 1 (data params)')
 
-        # pass 2: send start_at to all nodes in parallel
-        start_at: float = float(ctx.now() / _NS_PER_S) + _REPLAY_AHEAD_TIME_S
+        start_at = float(ctx.now() / _NS_PER_S) + _REPLAY_AHEAD_TIME_S
         start_ops: Sequence[KvEntry] = [kv_set('start_at', value=start_at)]
         items2 = [(t, start_ops, pool.submit(kv_call, ctx, t, start_ops)) for t in all_targets]
         _wait_futures(items2, 'pass 2 (start_at)')
@@ -327,8 +478,14 @@ def system_health(ctx: AciesContext) -> None:
         # source is "namespace/name" -> group by first segment (host)
         parts = source.split('/', 1)
         host = parts[0]
+        map_node_mapping: dict[str, str] = ctx.app.get('map_node_mapping', {})
+        reverse_mapping = {v: k for k, v in map_node_mapping.items()}
+        gps_key = reverse_mapping.get(host, host)
+        # skip hosts not in the current map's GPS table (only when mapping is defined)
+        if map_node_mapping and gps_key not in gps_table:
+            continue
         if host not in hosts:
-            coords = gps_table.get(host, [])
+            coords = gps_table.get(gps_key, [])
             hosts[host] = {
                 'services': [],
                 'lat': coords[0] if len(coords) > 0 else None,
@@ -344,7 +501,7 @@ def system_health(ctx: AciesContext) -> None:
         )
 
     logger.debug('system health: %s ', hosts)
-    ctx.publish('ws://health', hosts)
+    ctx.publish('ws://health', {'map': ctx.app.get('active_map'), 'hosts': hosts})
 
 
 @app.schedule(1.0)
@@ -385,12 +542,31 @@ def _reload_config(ctx: AciesContext) -> None:
         ctx.cfg.update(tomllib.load(f))
     ctx.app['gps'] = ctx.cfg.get('gps', {})
     ctx.app['confidence_threshold'] = ctx.cfg.get('confidence_threshold', {})
+    ctx.app['map_node_mapping'] = ctx.cfg.get('map_node_mapping', {})
     ctx.app['config_mtime'] = os.path.getmtime(ctx.cfg['config_path'])
+
+    # Refresh the matching entry in the pre-loaded configs dict
+    config_name = os.path.splitext(os.path.basename(ctx.cfg['config_path']))[0]
+    configs: dict[str, dict[str, Any]] | None = ctx.app.data.get('configs')
+    if configs is not None:
+        configs[config_name] = dict(ctx.cfg)  # snapshot current merged config
 
 
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
     _reload_config(ctx)
+
+    # Pre-load all TOML configs from the same directory, keyed by filename stem
+    config_dir = os.path.dirname(ctx.cfg['config_path'])
+    configs: dict[str, dict[str, Any]] = {}
+    for path in sorted(glob.glob(f'{config_dir}/*.toml')):
+        name = os.path.splitext(os.path.basename(path))[0]
+        with open(path, 'rb') as f:
+            configs[name] = tomllib.load(f)
+    ctx.app['configs'] = configs
+    ctx.app['active_map'] = None
+    logger.info('loaded %d config(s): %s', len(configs), list(configs.keys()))
+
     logger.info('confidence thresholds: %d model(s)', len(ctx.app['confidence_threshold']))
     ctx.app['ensemble_buf'] = deque()
     heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
