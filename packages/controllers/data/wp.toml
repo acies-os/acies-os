@@ -110,16 +110,16 @@ both = "/model/spar_2026-04-14-West-Point.pt"
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
-wagoneer = 0.60
-kona = 0.65
+wagoneer = 0.78
+kona = 0.81
 
 [confidence_threshold.diffphys]
 wagoneer = 0.75
 kona = 0.75
 
 [confidence_threshold.spar]
-wagoneer = 0.60
-kona = 0.65
+wagoneer = 0.69
+kona = 0.69
 
 [ensemble]
 # ensemble temporal window size in seconds

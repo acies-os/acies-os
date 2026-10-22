@@ -13,3 +13,7 @@ wheels/
 *.log
 .env
 data/*
+
+
+.DS_Store
+replay/*
