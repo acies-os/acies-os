@@ -689,7 +689,7 @@ wheels = [
 [[package]]
 name = "foundation-sense"
 version = "0.2.0"
-source = { git = "ssh://github.com/acies-os/FoundationSense.git#14fc52fa1955937a1503b0ec4991b881bc7ac4f2" }
+source = { git = "ssh://github.com/acies-os/FoundationSense.git#4a97519672246a9edf72d876870991a7e00775cb" }
 dependencies = [
     { name = "einops", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "matplotlib", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },

@@ -9,6 +9,11 @@ Modalities required by the model are determined from the model config file
 at startup. Both --geo and --mic topics must be provided; unused topics are
 silently ignored.
 
+Any VibroFM checkpoint with the TransformerV4 architecture can be loaded; the
+number of classes is taken from the checkpoint (4 for the vehicle models, 13
+for the AuDroK drone model). Audio is resampled to the model's 8 kHz input
+whatever the mic rate (16 kHz vehicle mic, 8 kHz drone replay).
+
 Usage::
 
     acies-vfm --weight /path/to/model.pt
@@ -17,7 +22,9 @@ Usage::
               [--labels car,truck,person]
               [--geo-energy-thresh FLOAT] [--mic-energy-thresh FLOAT]
               [--ensemble-win N] [--ensemble-size N]
+              [--top-k N]
               [--modality seismic|audio]
+              [--model-dir DIR]
               [--freq-mae]
               [--acies-namespace NS] [--acies-name NAME]
 """
@@ -70,7 +77,7 @@ def setup(ctx: AciesContext) -> None:
     _saved_argv = sys.argv[:]
     sys.argv = sys.argv[:1]
     try:
-        model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
+        model = VibroFMModel(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
     finally:
         sys.argv = _saved_argv
     raw_mods: list[str] = model.args.dataset_config['modality_names']
@@ -122,7 +129,7 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 @app.subscribe(OnChange('weight'))
 def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     """Reload model weights and update modalities when the weight file changes."""
-    new_weight = msg.value
+    new_weight = _resolve_weight(ctx, msg.value)
     modality_cfg = ctx.cfg.get('modality')
     logger.info('weight changed to %s (modality=%s); reloading', new_weight, modality_cfg)
     ctx.app['model'].reload(new_weight, modality_cfg)
@@ -248,6 +255,11 @@ def run_inference(ctx: AciesContext) -> None:
                 predictions.append(target_pred)
                 logger.debug('%s', target_pred)
 
+    # single-target models (e.g. drones, no background class) publish only the best labels
+    top_k: int = ctx.cfg.get('top_k') or 0
+    if top_k > 0:
+        predictions = sorted(predictions, key=lambda p: p.score, reverse=True)[:top_k]
+
     if len(predictions) > 0:
         msg = AciesInference(source=ctx.ns.base, timestamp=ctx.now(), predictions=predictions)
         ctx.publish(ctx.app['output_topic'], msg)
@@ -292,10 +304,23 @@ def run_inference(ctx: AciesContext) -> None:
 )
 @click.option('--ensemble-size', default=1, type=int, show_default=True, help='Minimum results in window before publishing.')
 @click.option(
+    '--top-k',
+    default=0,
+    type=int,
+    show_default=True,
+    help='Publish only the K highest-scoring labels (0 = all). Use 1 for single-target models such as drones.',
+)
+@click.option(
     '--modality',
     default=None,
     type=str,
     help='Single modality override for the model (e.g. seismic, audio). Omit for multimodal.',
+)
+@click.option(
+    '--model-dir',
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help='Local directory to look up weight files whose configured path does not exist (e.g. /model/x.pt).',
 )
 @click.option(
     '--freq-mae',
@@ -314,7 +339,9 @@ def main(
     mic_energy_thresh: float,
     ensemble_win: int,
     ensemble_size: int,
+    top_k: int,
     modality: str | None,
+    model_dir: str | None,
     freq_mae: bool,
 ) -> None:
     app.state.config.update(
@@ -329,7 +356,9 @@ def main(
             'mic_energy_thresh': mic_energy_thresh,
             'ensemble_win': ensemble_win,
             'ensemble_size': ensemble_size,
+            'top_k': top_k,
             'modality': modality,
+            'model_dir': model_dir,
             'freq_mae': freq_mae,
         }
     )

@@ -57,8 +57,12 @@ _MODALITY_MAP = {
     'both': 'both',
 }
 _ALL_MODELS = ['vfm', 'diffphys', 'spar']
-_MODEL_NAME_MAP: dict[str, str] = {'vibrofm': 'vfm', 'spar': 'spar', 'diffphys': 'diffphys'}
+_MODEL_NAME_MAP: dict[str, str] = {'vibrofm': 'vfm', 'spar': 'spar', 'diffphys': 'diffphys', 'drone': 'drone'}
 _SPAR_NAMESPACE = 'joint'
+# Drone classification runs on the node's VibroFM service with the drone weights
+# ([models.drone] in the map config); the node's mic replays the selected drone.
+_DRONE_MODEL = 'drone'
+_MODEL_SERVICE: dict[str, str] = {_DRONE_MODEL: 'vfm'}
 
 _MODALITY_TO_WEIGHT_KEY: dict[str, str] = {'both': 'both', 'geo': 'seismic', 'mic': 'audio'}
 
@@ -187,15 +191,20 @@ def _build_node_states(
     map_node_mapping: dict[str, str],
     scene: str,
     run_id: int,
+    drone_cfg: dict[str, Any],
 ) -> dict[str, dict[str, str | int]]:
-    """Build per-node state dict from the UI message node list."""
+    """Build per-node state dict from the UI message node list.
+
+    Drone nodes replay the selected drone's recording (``drone_cfg`` scene/runs)
+    on their mic instead of the vehicle run; drones are audio only.
+    """
     new_node_states: dict[str, dict[str, str | int]] = {}
     for node_state in msg_nodes:
         node_id = node_state['nodeId'].lower()
         mapped_node_id: str = map_node_mapping.get(node_id, node_id)
         model = _MODEL_NAME_MAP.get(node_state['model'].lower(), node_state['model'].lower())
         modality = _MODALITY_MAP.get(node_state['modality'].lower(), node_state['modality'].lower())
-        new_node_states[mapped_node_id] = {
+        state: dict[str, str | int] = {
             'node_id': mapped_node_id,
             'replayed_node_id': node_id,
             'model': model,
@@ -203,6 +212,19 @@ def _build_node_states(
             'scene': scene,
             'run_id': run_id,
         }
+        if model == _DRONE_MODEL:
+            drone = node_state.get('drone', '')
+            runs: dict[str, int] = drone_cfg.get('runs', {})
+            if drone not in runs:
+                logger.error('node %s: unknown drone %r (available: %s); skipping', node_id, drone, list(runs))
+                continue
+            state.update(
+                modality='mic',
+                scene=drone_cfg['scene'],
+                run_id=runs[drone],
+                replayed_node_id=drone_cfg.get('node', node_id),
+            )
+        new_node_states[mapped_node_id] = state
     return new_node_states
 
 
@@ -235,8 +257,8 @@ def _build_reconfig_ops(
         services = _find_services(heartbeat_buf, node_id)
         selected_model: str = str(state['model'])
         modality: str = str(state['modality'])
-        # SPAR needs all geo/mic across all nodes; force 'both' when active
-        effective_modality: str = 'both' if spar_active else modality
+        # SPAR needs all geo/mic across all nodes; force 'both' when active (drone nodes stay mic-only)
+        effective_modality: str = 'both' if spar_active and selected_model != _DRONE_MODEL else modality
         
         logger.debug('node_id: %s, selected_model: %s, modality: %s, effective_modality: %s', node_id, selected_model, modality, effective_modality)
 
@@ -268,8 +290,9 @@ def _build_reconfig_ops(
             data_pass.append((services['geo'], data_ops))
             all_targets.append(services['geo'])
 
-        # --- per-node model activation + config (vfm, diffphys) ---
-        if selected_model != 'spar' and selected_model in services:
+        # --- per-node model activation + config (vfm, diffphys, drone) ---
+        service = _MODEL_SERVICE.get(selected_model, selected_model)
+        if selected_model != 'spar' and service in services:
             model_cfg = map_cfg.get('models', {}).get(selected_model, {})
             model_weights: dict[str, str] = model_cfg.get('weight', {})
             model_labels: list[str] | None = model_cfg.get('labels')
@@ -278,6 +301,8 @@ def _build_reconfig_ops(
                 kv_set('deactivated', value=False),
                 kv_set('weight', value=model_weights[weight_key]),
                 kv_set('labels', value=model_labels),
+                # always sent so switching a node back from drone restores all labels
+                kv_set('top_k', value=model_cfg.get('top_k', 0)),
             ]
             # Send modality override so the model updates its expected modalities
             if effective_modality == 'geo':
@@ -286,8 +311,8 @@ def _build_reconfig_ops(
                 model_ops.append(kv_set('modality', value='audio'))
             else:
                 model_ops.append(kv_set('modality', value=None))
-            data_pass.append((services[selected_model], model_ops))
-            all_targets.append(services[selected_model])
+            data_pass.append((services[service], model_ops))
+            all_targets.append(services[service])
 
     # --- SPAR global activation ---
     spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)
@@ -357,7 +382,13 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
     scene, run_id, reconfig_target = route
 
     # Build per-node state
-    node_states = _build_node_states(msg['nodes'], map_cfg.get('map_node_mapping', {}), scene, run_id)
+    node_states = _build_node_states(
+        msg['nodes'],
+        map_cfg.get('map_node_mapping', {}),
+        scene,
+        run_id,
+        map_cfg.get('models', {}).get(_DRONE_MODEL, {}),
+    )
     logger.debug('new replay config: %s', node_states)
 
     # Discover edge services

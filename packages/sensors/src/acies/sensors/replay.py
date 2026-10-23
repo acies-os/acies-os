@@ -8,6 +8,11 @@ Data format (parquet columns):
   samples            int64     one ADC sample value
   channel            str|int   channel identifier (e.g. 'EH3' or 0)
   original_timestamp float64   raw capture timestamp
+  sample_rate        int64     optional; sampling rate in Hz
+
+The sampling rate is read from the ``sample_rate`` column when present,
+otherwise inferred from the timestamp spacing (e.g. 8 kHz drone audio vs.
+16 kHz vehicle audio), falling back to the modality default.
 
 File naming convention:
   {data_dir}/{scene}/run{run}_{node}_{modality}.parquet
@@ -45,7 +50,9 @@ logger = logging.getLogger(__name__)
 app = AciesApp()
 
 
-_SAMPLING_RATE = {'geo': 200, 'mic': 16000}
+_SAMPLING_RATE = {'geo': 200, 'mic': 16000}  # defaults when the file does not tell us
+_STANDARD_RATES = (100, 200, 8000, 16000, 22050, 32000, 44100, 48000)
+_RATE_TOLERANCE = 0.02  # relative error allowed when snapping an inferred rate
 _DTYPE = {'geo': 'int32', 'mic': 'int16'}
 _CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0', 'mono'}}
 _NS_PER_S = 1_000_000_000
@@ -64,6 +71,26 @@ def _ts_to_ns(ts: float) -> int:
     return int(ts * _NS_PER_S)
 
 
+def _infer_sampling_rate(timestamps: list[float], default: int, path: str) -> int:
+    """Infer the sampling rate from the median spacing of per-sample timestamps.
+
+    Uses the median (not the overall span) so recording gaps do not bias the
+    estimate, and snaps to the nearest standard rate. Falls back to ``default``
+    when the spacing is unusable (e.g. one timestamp per block).
+    """
+    head = np.asarray(timestamps[:100_001], dtype=np.float64)
+    dt = float(np.median(np.diff(head))) if head.size > 1 else 0.0
+    if dt <= 0:
+        logger.warning('cannot infer sampling rate from timestamps in %s; using default %d Hz', path, default)
+        return default
+    estimate = 1.0 / dt
+    nearest = min(_STANDARD_RATES, key=lambda r: abs(r - estimate))
+    if abs(nearest - estimate) / nearest <= _RATE_TOLERANCE:
+        return nearest
+    logger.warning('inferred sampling rate %.1f Hz in %s is not a standard rate; using it rounded', estimate, path)
+    return round(estimate)
+
+
 def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list[str], int, str]]:
     """Load a parquet file and chunk samples into 1-second windows.
 
@@ -74,12 +101,19 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
     Returns a sorted list of (timestamp_ns, payload_list, channel_list,
     sampling_rate, dtype) tuples.
     """
-    sampling_rate: int = _SAMPLING_RATE[modality]
     dtype: str = _DTYPE[modality]
     wanted: set[str] = _CHANNEL[modality]
     np_dtype = np.dtype(dtype)
 
     df = pl.read_parquet(path)
+
+    file_rate: int | None = None
+    if 'sample_rate' in df.columns:
+        rates = df['sample_rate'].unique().to_list()
+        if len(rates) == 1:
+            file_rate = int(rates[0])
+        else:
+            logger.warning('multiple sample_rate values %s in %s; inferring from timestamps', rates, path)
 
     if 'channel' not in df.columns:
         # No channel column — treat all samples as a single channel
@@ -112,6 +146,8 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
         del df
         assert ch_timestamps is not None
 
+    sampling_rate: int = file_rate or _infer_sampling_rate(ch_timestamps, _SAMPLING_RATE[modality], path)
+
     # All channels should have the same number of samples
     n_samples = len(ch_timestamps)
     for ch, arr in ch_arrays.items():
@@ -127,12 +163,13 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
         windows.append((ts_ns, payloads, present, sampling_rate, dtype))
 
     logger.info(
-        'loaded %s: %d windows (%ds), channels=%s, %d samples/channel',
+        'loaded %s: %d windows (%ds), channels=%s, %d samples/channel, %d Hz',
         path,
         len(windows),
         len(windows),
         present,
         n_samples,
+        sampling_rate,
     )
     return windows
 

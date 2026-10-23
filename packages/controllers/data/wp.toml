@@ -107,6 +107,28 @@ labels = ["wagoneer", "kona"]
 [models.spar.weight]
 both = "/model/spar_2026-04-14-West-Point.pt"
 
+# Drone classification (AuDroK). Selected per node in the UI: runs on the node's
+# VibroFM service with these weights while the node's mic replays the chosen
+# drone. Labels follow the model's class order (AuDroK drone folders, sorted).
+[models.drone]
+labels = [
+  "cartonic_toy_drone", "dji_avata", "dji_inspire_2", "dji_matrice_300", "dji_matrice_30_t",
+  "dji_mavic_3e", "dji_mini_3", "dji_phantom_4", "emotion", "hp_e616p_1", "hpx4",
+  "mavic_air_2", "potensic_firefly",
+]
+top_k = 1        # one drone at a time and no background class: publish the best label only
+scene = "audrok" # replay scene with one run per drone: run{N}_{node}_mic.parquet
+node = "rs1"     # node name in the drone replay filenames
+
+[models.drone.weight]
+audio = "/model/AuDroK_8k_SwinTransformer_drone_classification_finetune_audrok_1.0_linear_best.pt"
+
+# drone (as sent by the UI) -> replay run in `scene`
+[models.drone.runs]
+dji_avata = 1
+potensic_firefly = 2
+cartonic_toy_drone = 3
+
 
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
