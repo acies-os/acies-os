@@ -159,6 +159,31 @@ class AciesTimeSeries(msgspec.Struct, frozen=True):
     dtype: str  # numpy dtype string: 'int16', 'int32', etc.
 
 
+class AciesEmbedding(msgspec.Struct, frozen=True, omit_defaults=True):
+    """Feature embedding published by an encoder for downstream task heads.
+
+    ``payload`` contains the raw bytes of a C-contiguous array of ``shape``.
+    Use ``np.frombuffer(msg.payload, dtype=msg.dtype).reshape(msg.shape)`` to decode.
+
+    Example (one 256-d embedding)::
+
+        AciesEmbedding(
+            source='edge-01/encoder',
+            timestamp=...,
+            payload=features.astype(np.float32).tobytes(),
+            shape=[1, 256],
+            dtype='float32',
+        )
+    """
+
+    source: str
+    timestamp: NanoSecond
+    payload: bytes
+    shape: list[int]
+    dtype: str  # numpy dtype string: 'float32', etc.
+    extras: dict[str, Any] = msgspec.field(default_factory=dict)  # encoder-specific metadata
+
+
 class AciesPrediction(msgspec.Struct, frozen=True, omit_defaults=True):
     """One ranked prediction from a classifier.
 
