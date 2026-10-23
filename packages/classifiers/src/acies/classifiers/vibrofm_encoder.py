@@ -1,0 +1,287 @@
+"""VibroFM encoder node for AciesOS.
+
+Subscribes to AciesTimeSeries messages on configured geo and/or mic topics,
+buffers two 1-second windows per modality, and runs the FoundationSense
+encoder every second. The resulting feature embedding is published as an
+AciesEmbedding so that one encoder can be shared by multiple task heads
+(see ``vibrofm_task_head``).
+
+Modalities required by the model are determined from the model config file
+at startup. Both --geo and --mic topics must be provided; unused topics are
+silently ignored.
+
+Usage::
+
+    acies-vfm-encoder --weight /path/to/encoder.pt
+                      --geo <topic> --mic <topic>
+                      [--output TOPIC]
+                      [--geo-energy-thresh FLOAT] [--mic-energy-thresh FLOAT]
+                      [--modality seismic|audio]
+                      [--freq-mae]
+                      [--acies-namespace NS] [--acies-name NAME]
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+import click
+import numpy as np
+import numpy.typing as npt
+import torch
+from acies.buffers import TemporalBuffer
+from acies.core import AciesApp, AciesContext, OnChange, setup_logging
+from acies.core.msg import AciesEmbedding, AciesKvChange, AciesTimeSeries
+from acies.FoundationSense.embedding import VibrofmEmbeddingModel  # pyright: ignore[reportMissingTypeStubs]
+
+logger = logging.getLogger(__name__)
+
+# samples required per modality for one inference call: 2 x 1-second windows
+INPUT_LEN = 2
+
+# mapping from FoundationSense dataset modality names to acies modality keys
+_MOD_MAPPING: dict[str, str] = {
+    'seismic': 'geo',
+    'sei': 'geo',
+    'acoustic': 'mic',
+    'audio': 'mic',
+    'aco': 'mic',
+}
+
+
+app = AciesApp()
+
+
+@app.on_startup
+def setup(ctx: AciesContext) -> None:
+    freq_mae: bool = ctx.cfg.get('freq_mae', False)
+
+    # VibrofmEmbeddingModel calls argparse.parse_args() internally at construction;
+    # clear sys.argv so it does not see our Click arguments and error out.
+    _saved_argv = sys.argv[:]
+    sys.argv = sys.argv[:1]
+    try:
+        model = VibrofmEmbeddingModel(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
+    finally:
+        sys.argv = _saved_argv
+    raw_mods: list[str] = model.args.dataset_config['modality_names']
+    modalities = [_MOD_MAPPING[m] for m in raw_mods]
+    logger.info(
+        'loaded encoder from %s; modalities=%s freq_mae=%s #params=%d',
+        ctx.cfg['weight'],
+        modalities,
+        freq_mae,
+        sum(p.numel() for p in model.parameters()),
+    )
+
+    output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('embedding')
+    ctx.app['model'] = model
+    ctx.app['modalities'] = modalities
+    ctx.app['output_topic'] = output_topic
+    ctx.app['buffer'] = TemporalBuffer(size=INPUT_LEN + 2)
+
+    ctx.cfg['start_at'] = time.time()
+
+    is_deactivated = ctx.cfg.get('deactivated', False)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
+
+    logger.info(
+        'publishing to %s; geo_thresh=%.1f mic_thresh=%.1f',
+        output_topic,
+        ctx.cfg.get('geo_energy_thresh', 0.0),
+        ctx.cfg.get('mic_energy_thresh', 0.0),
+    )
+
+
+@app.on_shutdown
+def teardown(_ctx: AciesContext) -> None:
+    logger.info('vibrofm encoder stopped')
+
+
+@app.subscribe(OnChange('start_at'))
+def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    """Clear buffers when a new replay starts so stale data doesn't pollute inference."""
+    logger.info('start_at changed to %s; clearing buffers', msg.value)
+    with ctx.app.lock:
+        ctx.app['buffer'].clear()
+
+
+@app.subscribe(OnChange('weight'))
+def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    """Reload encoder weights and update modalities when the weight file changes."""
+    new_weight = msg.value
+    modality_cfg = ctx.cfg.get('modality')
+    logger.info('weight changed to %s (modality=%s); reloading', new_weight, modality_cfg)
+    ctx.app['model'].reload(new_weight, modality_cfg)
+    ctx.app['modalities'] = [_MOD_MAPPING[m] for m in ctx.app['model'].args.dataset_config['modality_names']]
+
+    with ctx.app.lock:
+        ctx.app['buffer'].clear()
+    logger.info('weight reload complete; modalities=%s', ctx.app['modalities'])
+
+
+@app.subscribe(OnChange('deactivated'))
+def on_deactivated_change(ctx: AciesContext, msg: AciesKvChange) -> None:
+    is_deactivated = msg.value
+    logger.info('deactivated changed to %s', is_deactivated)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
+
+
+@app.subscribe('{geo_topic}')
+def on_geo(ctx: AciesContext, msg: AciesTimeSeries) -> None:
+    if 'geo' not in ctx.app['modalities']:
+        return
+    samples: npt.NDArray[np.int_] = np.frombuffer(msg.payload[0], dtype=msg.dtype)
+    energy = float(np.std(samples))
+    thresh: float = ctx.cfg.get('geo_energy_thresh', 0.0)
+    if energy < thresh:
+        logger.debug('geo energy %.1f below threshold %.1f; dropping window', energy, thresh)
+        return
+    ts_s = msg.timestamp // 1_000_000_000
+    with ctx.app.lock:
+        ctx.app['buffer'].add(ctx.cfg['geo_topic'], ts_s, samples)
+
+
+@app.subscribe('{mic_topic}')
+def on_mic(ctx: AciesContext, msg: AciesTimeSeries) -> None:
+    if 'mic' not in ctx.app['modalities']:
+        return
+    samples: npt.NDArray[np.int_] = np.frombuffer(msg.payload[0], dtype=msg.dtype)
+    energy = float(np.std(samples))
+    thresh: float = ctx.cfg.get('mic_energy_thresh', 0.0)
+    if energy < thresh:
+        logger.debug('mic energy %.1f below threshold %.1f; dropping window', energy, thresh)
+        return
+    ts_s = msg.timestamp // 1_000_000_000
+    with ctx.app.lock:
+        ctx.app['buffer'].add(ctx.cfg['mic_topic'], ts_s, samples)
+
+
+@app.schedule(1.0)
+def run_inference(ctx: AciesContext) -> None:
+    modalities: list[str] = ctx.app['modalities']
+    _mod_to_topic = {'geo': ctx.cfg['geo_topic'], 'mic': ctx.cfg['mic_topic']}
+    keys = [_mod_to_topic[m] for m in modalities]
+
+    if ctx.cfg.get('deactivated'):
+        logger.debug('vibrofm encoder deactivated; skipping inference')
+        return
+
+    try:
+        with ctx.app.lock:
+            samples = ctx.app['buffer'].pop(keys, INPUT_LEN)
+    except ValueError:
+        with ctx.app.lock:
+            ts_by_topic = {k: sorted(ctx.app['buffer']._data[k]) for k in keys}
+        logger.debug('not enough buffered data for inference; timestamps=%s', ts_by_topic)
+        return
+
+    # --- build FoundationSense model input ---
+    # expected format: {'shake': {'seismic': tensor, 'audio': tensor}}
+    data: dict[str, dict[str, torch.Tensor]] = {'shake': {}}
+    energy: dict[str, float] = {}
+    for mod in modalities:
+        topic = _mod_to_topic[mod]
+        arr: npt.NDArray[np.float32] = np.concatenate([v for _, v in sorted(samples[topic].items())]).astype(np.float32)
+        energy[mod] = float(np.std(arr))
+        if mod == 'geo':
+            # 2s x 200 Hz = 400 -> downsample x2 -> 200 -> (1, 1, 10, 20)
+            data['shake']['seismic'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 20))  # pyright: ignore[reportUnknownMemberType]
+        else:
+            # 2s x 16000 Hz = 32000 -> downsample x2 -> 16000 -> (1, 1, 10, 1600)
+            data['shake']['audio'] = torch.from_numpy(arr[::2].reshape(1, 1, 10, 1600))  # pyright: ignore[reportUnknownMemberType]
+
+    t0 = time.perf_counter_ns()
+    feat = ctx.app['model'](data)  # features concatenated across modalities
+    infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
+
+    # feat shape: (num_targets, embed_dim)
+    feat_arr: npt.NDArray[np.float32] = np.ascontiguousarray(feat, dtype=np.float32)
+    logger.debug('embedding: shape=%s infer_ms=%.1f', feat_arr.shape, infer_ms)
+
+    extras: dict[str, Any] = {'infer_ms': infer_ms}
+    if 'geo' in energy:
+        extras['geo_energy'] = energy['geo']
+    if 'mic' in energy:
+        extras['mic_energy'] = energy['mic']
+    msg = AciesEmbedding(
+        source=ctx.ns.base,
+        timestamp=ctx.now(),
+        payload=feat_arr.tobytes(),
+        shape=list(feat_arr.shape),
+        dtype=str(feat_arr.dtype),
+        extras=extras,
+    )
+    ctx.publish(ctx.app['output_topic'], msg)
+
+
+@app.cli()
+@click.option('--weight', required=True, type=click.Path(exists=True), help='Encoder weight file path.')
+@click.option('--geo', 'geo_topic', required=True, help='Geo input topic (AciesTimeSeries).')
+@click.option('--mic', 'mic_topic', required=True, help='Mic input topic (AciesTimeSeries).')
+@click.option(
+    '--output',
+    'output_topic',
+    default=None,
+    help='Output topic for AciesEmbedding results. Defaults to <host>/<name>/embedding.',
+)
+@click.option(
+    '--geo-energy-thresh',
+    default=0.0,
+    type=float,
+    show_default=True,
+    help='Geo std threshold; windows below are dropped.',
+)
+@click.option(
+    '--mic-energy-thresh',
+    default=0.0,
+    type=float,
+    show_default=True,
+    help='Mic std threshold; windows below are dropped.',
+)
+@click.option(
+    '--modality',
+    default=None,
+    type=str,
+    help='Single modality override for the model (e.g. seismic, audio). Omit for multimodal.',
+)
+@click.option(
+    '--freq-mae',
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help='Use frequency-domain MAE model variant.',
+)
+def main(
+    weight: str,
+    geo_topic: str,
+    mic_topic: str,
+    output_topic: str | None,
+    geo_energy_thresh: float,
+    mic_energy_thresh: float,
+    modality: str | None,
+    freq_mae: bool,
+) -> None:
+    app.state.config.update(
+        {
+            'deactivated': False,
+            'weight': weight,
+            'geo_topic': geo_topic,
+            'mic_topic': mic_topic,
+            'output_topic': output_topic,
+            'geo_energy_thresh': geo_energy_thresh,
+            'mic_energy_thresh': mic_energy_thresh,
+            'modality': modality,
+            'freq_mae': freq_mae,
+        }
+    )
+    setup_logging(app.name, app.namespace)
+    app.run()
+
+
+if __name__ == '__main__':
+    main()
