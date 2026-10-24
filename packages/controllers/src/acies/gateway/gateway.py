@@ -244,6 +244,16 @@ def _build_node_states(
     return new_node_states
 
 
+def _drone_truth(node_states: dict[str, dict[str, str | int | None]], map_cfg: dict[str, Any]) -> dict[str, str | None]:
+    """Drone each node was told to replay on ``drone_mic`` (None when off), mirroring ``_build_reconfig_ops``."""
+    runs: dict[str, Any] = map_cfg.get('models', {}).get('drone', {}).get('runs', {})
+    spar_active = any(state['model'] == 'spar' for state in node_states.values())
+    return {
+        node_id: None if spar_active or state['drone'] not in runs else str(state['drone'])
+        for node_id, state in node_states.items()
+    }
+
+
 def _build_fm_ops(
     map_cfg: dict[str, Any],
     services: dict[str, str],
@@ -490,6 +500,8 @@ def on_ctl(ctx: AciesContext, msg: Any) -> None:
 
     # Build per-node state
     node_states = _build_node_states(msg['nodes'], map_cfg.get('map_node_mapping', {}), scene, run_id)
+    with ctx.app.lock:
+        ctx.app['drone_truth'] = _drone_truth(node_states, map_cfg)
     logger.debug('new replay config: %s', node_states)
 
     # Discover edge services
@@ -625,6 +637,13 @@ def system_health(ctx: AciesContext) -> None:
             }
         )
 
+    # ground truth for the drone classifier: the drone this host's drone_mic is replaying
+    with ctx.app.lock:
+        drone_truth: dict[str, str | None] = dict(ctx.app['drone_truth'])
+    for host, info in hosts.items():
+        replaying = any(s['name'] == f'{host}/drone_mic' and s['state'] == 'active' for s in info['services'])
+        info['drone'] = drone_truth.get(host) if replaying else None
+
     logger.debug('system health: %s ', hosts)
     ctx.publish('ws://health', {'map': ctx.app.get('active_map'), 'hosts': hosts})
 
@@ -757,6 +776,7 @@ def setup(ctx: AciesContext) -> None:
 
     logger.info('confidence thresholds: %d model(s)', len(ctx.app['confidence_threshold']))
     ctx.app['ensemble_buf'] = deque()
+    ctx.app['drone_truth'] = {}  # {node: drone replayed on its drone_mic}, set on each deploy
     heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
     alive_timeout = ctx.cfg.get('alive_timeout', heartbeat_interval * _DEFAULT_ALIVE_MULTIPLIER)
     # Keep heartbeat history for at least 2x the alive timeout

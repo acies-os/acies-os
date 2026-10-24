@@ -133,6 +133,23 @@ miata = 0.85
 cx30 = 0.85
 mustang = 0.0
 
+[confidence_threshold.vfm_drone]
+# drones that can be replayed ([models.drone.runs]); 0.0 = no filtering
+cartonic_toy_drone = 0.0
+dji_avata = 0.0
+potensic_firefly = 0.0
+# drones we never replay: above any sigmoid score, so they are never shown
+dji_inspire_2 = 1.01
+dji_matrice_300 = 1.01
+dji_matrice_30_t = 1.01
+dji_mavic_3e = 1.01
+dji_mini_3 = 1.01
+dji_phantom_4 = 1.01
+emotion = 1.01
+hp_e616p_1 = 1.01
+hpx4 = 1.01
+mavic_air_2 = 1.01
+
 [ensemble]
 # ensemble temporal window size in seconds
 win = 30
