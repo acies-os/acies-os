@@ -100,10 +100,13 @@ weight = "/model/Parkland_ict2024_encoder.pt"
 [models.vfm.fm]
 head = "/model/Parkland_ict2024_class_layer.pt"
 
-# Drone add-on (UI "Drone" toggle): replays 8 kHz AuDroK audio on <node>/drone_mic
-# and classifies it with the vfm_drone head. `labels` must match the head's class order.
+# Drone add-on (UI "Drone" toggle): replays 8 kHz AuDroK audio on <node>/drone_mic and
+# classifies it with the vfm_drone head ("fm") or vfm_drone_e2e ("e2e"). `labels` must match
+# the class order of both.
 [models.drone]
 head = "/model/AuDroK_class_layer.pt"
+# end-to-end model (UI pipeline "e2e"): the full AuDroK checkpoint, same backbone as vfm_encoder
+weight = "/model/AuDroK_8k_SwinTransformer_drone_classification_finetune_audrok_1.0_linear_best.pt"
 labels = ["cartonic_toy_drone", "dji_avata", "dji_inspire_2", "dji_matrice_300", "dji_matrice_30_t", "dji_mavic_3e", "dji_mini_3", "dji_phantom_4", "emotion", "hp_e616p_1", "hpx4", "mavic_air_2", "potensic_firefly"]
 scene = "audrok"
 node = "rs1"

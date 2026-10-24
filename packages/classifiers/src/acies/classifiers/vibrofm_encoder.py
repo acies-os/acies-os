@@ -24,7 +24,7 @@ Usage::
                       [--geo-energy-thresh FLOAT] [--mic-energy-thresh FLOAT]
                       [--drone-mic-energy-thresh FLOAT]
                       [--modality seismic|audio]
-                      [--freq-mae]
+                      [--freq-mae] [--deactivated]
                       [--acies-namespace NS] [--acies-name NAME]
 """
 
@@ -311,6 +311,13 @@ def run_inference(ctx: AciesContext) -> None:
     show_default=True,
     help='Use frequency-domain MAE model variant.',
 )
+@click.option(
+    '--deactivated',
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help='Start deactivated; inference begins once the deactivated key is set to false.',
+)
 def main(
     weight: str,
     geo_topic: str,
@@ -323,10 +330,11 @@ def main(
     drone_mic_energy_thresh: float,
     modality: str | None,
     freq_mae: bool,
+    deactivated: bool,
 ) -> None:
     app.state.config.update(
         {
-            'deactivated': False,
+            'deactivated': deactivated,
             'weight': weight,
             'geo_topic': geo_topic,
             'mic_topic': mic_topic,
