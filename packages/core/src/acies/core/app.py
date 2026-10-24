@@ -22,7 +22,9 @@ import socket
 import threading
 import time
 import uuid
-from typing import Any, Callable, get_type_hints
+from collections.abc import Callable
+from types import FunctionType
+from typing import Any, TypeVar, get_type_hints
 from urllib.parse import urlparse
 
 import msgspec
@@ -38,6 +40,10 @@ from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec, Thre
 from .transport import WebSocketTransport, ZenohTransport
 
 logger = logging.getLogger(__name__)
+
+# Handlers are plain functions (not partials or callable objects), so they
+# always have __name__ and work with get_type_hints().
+F = TypeVar('F', bound=FunctionType)
 
 _WS_PREFIX = 'ws://'
 _WS_DEFAULT_HOST = '0.0.0.0'
@@ -66,7 +72,7 @@ def _has_var_keyword(fn: Callable[..., Any]) -> bool:
     return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in inspect.signature(fn).parameters.values())
 
 
-def _check_param(fn: Callable[..., Any], decorator: str, name: str, annotation: str | None = None) -> None:
+def _check_param(fn: FunctionType, decorator: str, name: str, annotation: str | None = None) -> None:
     """Raise TypeError if fn is missing a required named parameter.
 
     Accepts either ``name`` or ``_name`` (underscore prefix to silence LSP
@@ -115,8 +121,8 @@ class AciesApp:
         self._router: Router = router
         self._executor: Executor = Executor()
         self._tasks: list[TaskSpec] = []
-        self._startup_hooks: list[Callable[..., None]] = []
-        self._shutdown_hooks: list[Callable[..., None]] = []
+        self._startup_hooks: list[FunctionType] = []
+        self._shutdown_hooks: list[FunctionType] = []
         self._stop_event: threading.Event = threading.Event()
         self._startup_ok: bool = False
         self._timer_thread: threading.Thread | None = None
@@ -185,7 +191,7 @@ class AciesApp:
 
     # ----------------------------- Lifecyle hooks -----------------------------
 
-    def on_startup(self, fn: Callable[..., None]) -> Callable[..., None]:
+    def on_startup(self, fn: F) -> F:
         """Called once after all subsystems are started, before managed threads::
 
         @app.on_startup
@@ -196,7 +202,7 @@ class AciesApp:
         self._startup_hooks.append(fn)
         return fn
 
-    def on_shutdown(self, fn: Callable[..., None]) -> Callable[..., None]:
+    def on_shutdown(self, fn: F) -> F:
         """Called once after managed threads are joined, during shutdown::
 
         @app.on_shutdown
@@ -209,7 +215,7 @@ class AciesApp:
 
     # ---------------------------- task decorators ----------------------------
 
-    def thread(self, fn: Callable[..., None]) -> Callable[..., None]:
+    def thread(self, fn: F) -> F:
         """Long-running thread: fn(ctx, stop) loops until stop.is_set().
 
         The thread is started after startup hooks and joined (timeout=5s)
@@ -239,7 +245,7 @@ class AciesApp:
         self._tasks.append(ThreadSpec(name=fn.__name__, fn=_run))
         return fn
 
-    def subscribe(self, *topics: TopicArg) -> Callable[..., Callable[..., None]]:
+    def subscribe(self, *topics: TopicArg) -> Callable[[F], F]:
         """Message-driven: handler is called for each message on any of the topics.
 
         The handler must have a parameter named ``msg``::
@@ -249,7 +255,7 @@ class AciesApp:
                 ...
         """
 
-        def decorator(fn: Callable[..., None]) -> Callable[..., None]:
+        def decorator(fn: F) -> F:
             _check_param(fn, 'subscriber', 'ctx', 'AciesContext')
             _check_param(fn, 'subscriber', 'msg')
             hints = get_type_hints(fn)
@@ -260,7 +266,7 @@ class AciesApp:
 
         return decorator
 
-    def schedule(self, interval: float) -> Callable[..., Callable[..., None]]:
+    def schedule(self, interval: float) -> Callable[[F], F]:
         """Timer-driven: handler is called every `interval` seconds::
 
         @app.schedule(interval=1.0)
@@ -268,7 +274,7 @@ class AciesApp:
             ...
         """
 
-        def decorator(fn: Callable[..., None]) -> Callable[..., None]:
+        def decorator(fn: F) -> F:
             _check_param(fn, 'schedule', 'ctx', 'AciesContext')
             self._tasks.append(ScheduleSpec(name=fn.__name__, fn=fn, interval=interval))
             logger.debug('schedule %r registered: interval=%.1fs', fn.__name__, interval)
@@ -276,7 +282,7 @@ class AciesApp:
 
         return decorator
 
-    def service(self, topic: TopicArg) -> Callable[..., Callable[..., None]]:
+    def service(self, topic: TopicArg) -> Callable[[F], F]:
         """RPC/queryable: handler is called on queries to topic; return value is the reply.
 
         The handler must have a ``msg`` parameter with a specific type annotation
@@ -288,7 +294,7 @@ class AciesApp:
                 ...
         """
 
-        def decorator(fn: Callable[..., None]) -> Callable[..., None]:
+        def decorator(fn: F) -> F:
             _check_param(fn, 'service', 'ctx', 'AciesContext')
             _check_param(fn, 'service', 'msg')
             hints = get_type_hints(fn)
@@ -416,7 +422,9 @@ class AciesApp:
             connect_eps: list[str] = sys_cfg.get('connect', [])
             zenoh_listen_eps: list[str] = [ep for ep in sys_cfg.get('listen', []) if not ep.startswith(_WS_PREFIX)]
             self._router.add_transport(ZenohTransport(mode=net_mode, connect=connect_eps, listen=zenoh_listen_eps))
-            logger.info('zenoh transport registered: mode=%r connect=%r listen=%r', net_mode, connect_eps, zenoh_listen_eps)
+            logger.info(
+                'zenoh transport registered: mode=%r connect=%r listen=%r', net_mode, connect_eps, zenoh_listen_eps
+            )
 
         seen_ws: set[str] = set()
         for endpoint in self._app_state.config['sys'].get('listen', []):
