@@ -72,7 +72,7 @@ services:
       - audio
     restart: unless-stopped
 
-  vfm:
+  e2e_vehicle:
     image: acies-pi:latest
     profiles: [geo-classifier, mic-classifier, multimodal]
     command: >-
@@ -84,7 +84,7 @@ services:
     network_mode: host
     environment:
       <<: *env
-      ACIES_NAME: vfm
+      ACIES_NAME: e2e_vehicle
     volumes:
       - /data:/data
       - ${MODEL_DIR:-/model}:/model:ro

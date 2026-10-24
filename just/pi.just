@@ -87,7 +87,7 @@ pi-vfm *args:
         -e PATH="/acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
         -e ACIES_LOG={{ acies_log }} \
         -e ACIES_NAMESPACE={{ acies_namespace }} \
-        -e ACIES_NAME=vfm \
+        -e ACIES_NAME=e2e_vehicle \
         -e ACIES_CONNECT={{ pi_zenoh_connect }} \
         --network host \
         -v /data:/data \
@@ -115,7 +115,7 @@ pi-diffphys *args:
 pi-vfm-local *args:
     @mkdir -p ~/.acies/logs
     ACIES_LOG={{ acies_log }} \
-    uv run acies-vfm --acies-namespace {{ acies_namespace }} --acies-name vfm \
+    uv run acies-vfm --acies-namespace {{ acies_namespace }} --acies-name e2e_vehicle \
         --acies-connect {{ pi_zenoh_connect }} \
         --weight /model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1.0_multiclass_best.pt \
         --geo {{ acies_namespace }}/geo --mic {{ acies_namespace }}/mic \

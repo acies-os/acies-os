@@ -87,7 +87,7 @@ services:
   #   <ns>/vfm_encoder/drone/embedding    (drone_mic)  -> vfm_drone head
   # Every model starts deactivated; the gateway activates the pipeline chosen in the UI config panel:
   #   "fm"  -> vfm_encoder + vfm_vehicle  (+ Drone: vfm_drone + drone_mic)
-  #   "e2e" -> vfm                        (+ Drone: vfm_drone_e2e + drone_mic)
+  #   "e2e" -> e2e_vehicle                (+ Drone: e2e_drone + drone_mic)
   vfm_encoder:
     image: acies-pi:latest
     command: >-
@@ -146,8 +146,8 @@ services:
       - ~/.acies:/root/.acies
     restart: unless-stopped
 
-  # End-to-end vehicle VibroFM (UI pipeline "e2e"); publishes <ns>/vfm/vehicle.
-  vfm:
+  # End-to-end vehicle VibroFM (UI pipeline "e2e"); publishes <ns>/e2e_vehicle/vehicle.
+  e2e_vehicle:
     image: acies-pi:latest
     command: >-
       acies-vfm
@@ -159,7 +159,7 @@ services:
     network_mode: host
     environment:
       <<: *env
-      ACIES_NAME: vfm
+      ACIES_NAME: e2e_vehicle
     volumes:
       - /data:/data
       - ${MODEL_DIR:-/model}:/model:ro
@@ -167,8 +167,8 @@ services:
     restart: unless-stopped
 
   # End-to-end drone model (UI pipeline "e2e" + Drone): full AuDroK checkpoint on drone audio;
-  # publishes <ns>/vfm_drone_e2e/drone.
-  vfm_drone_e2e:
+  # publishes <ns>/e2e_drone/drone.
+  e2e_drone:
     image: acies-pi:latest
     command: >-
       acies-vfm
@@ -176,13 +176,13 @@ services:
       --modality audio
       --geo ${ACIES_NAMESPACE:-}/geo
       --mic ${ACIES_NAMESPACE:-}/drone_mic
-      --output ${ACIES_NAMESPACE:-}/vfm_drone_e2e/drone
+      --output ${ACIES_NAMESPACE:-}/e2e_drone/drone
       --labels ${VFM_DRONE_LABELS}
       --deactivated
     network_mode: host
     environment:
       <<: *env
-      ACIES_NAME: vfm_drone_e2e
+      ACIES_NAME: e2e_drone
     volumes:
       - ${MODEL_DIR:-/model}:/model:ro
       - ~/.acies:/root/.acies

@@ -71,7 +71,7 @@ _MODALITY_MAP = {
     'acoustic': 'mic',
     'both': 'both',
 }
-_ALL_MODELS = ['vfm', 'diffphys', 'spar', 'vfm_encoder', 'vfm_vehicle', 'vfm_drone', 'vfm_drone_e2e']
+_ALL_MODELS = ['e2e_vehicle', 'diffphys', 'spar', 'vfm_encoder', 'vfm_vehicle', 'vfm_drone', 'e2e_drone']
 _MODEL_NAME_MAP: dict[str, str] = {'vibrofm': 'vfm', 'spar': 'spar', 'diffphys': 'diffphys'}
 _SPAR_NAMESPACE = 'joint'
 
@@ -80,8 +80,11 @@ _MODALITY_TO_WEIGHT_KEY: dict[str, str] = {'both': 'both', 'geo': 'seismic', 'mi
 # VibroFM pipelines selectable per node in the UI: 'e2e' runs the monolithic `vfm`
 # service; 'fm' runs the shared `vfm_encoder` + `vfm_vehicle` task head.
 _DEFAULT_PIPELINE = 'e2e'
+_PIPELINES = ('fm', 'e2e')
 # confidence_threshold table to use for each prediction source service
-_THRESHOLD_MODEL: dict[str, str] = {'vfm_vehicle': 'vfm', 'vfm_drone_e2e': 'vfm_drone'}
+_THRESHOLD_MODEL: dict[str, str] = {'vfm_vehicle': 'vfm', 'e2e_vehicle': 'vfm', 'e2e_drone': 'vfm_drone'}
+# service running the end-to-end model of a model family ('vfm' config/UI model -> 'e2e_vehicle' service)
+_E2E_SERVICE: dict[str, str] = {'vfm': 'e2e_vehicle'}
 
 
 @app.subscribe('**/spar')
@@ -114,7 +117,7 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
 
 @app.subscribe('**/drone')
 def on_drone(ctx: AciesContext, msg: AciesInference) -> None:
-    """Forward drone classifications (vfm_drone head or vfm_drone_e2e) to the UI, apart from vehicle predictions."""
+    """Forward drone classifications (vfm_drone head or e2e_drone) to the UI, apart from vehicle predictions."""
     model = msg.source.rsplit('/', 1)[-1]
     thresholds: dict[str, dict[str, float]] = ctx.app['confidence_threshold']
     model_thresh = thresholds.get(_THRESHOLD_MODEL.get(model, model), {})
@@ -213,24 +216,35 @@ def _resolve_route(map_cfg: dict[str, Any], target_list: list[str]) -> tuple[str
     return str(scene), int(run_id.removeprefix('run')), reconfig_target
 
 
+def _model_set(value: Any, fallback: str) -> list[str]:
+    """Pipelines ('fm', 'e2e') enabled for one task; ``[fallback]`` when the UI sent no list (older UI)."""
+    if value is None:
+        return [fallback]
+    chosen = {str(v).lower() for v in value}
+    return [p for p in _PIPELINES if p in chosen]
+
+
 def _build_node_states(
     msg_nodes: list[dict[str, Any]],
     map_node_mapping: dict[str, str],
     scene: str,
     run_id: int,
-) -> dict[str, dict[str, str | int | None]]:
+) -> dict[str, dict[str, Any]]:
     """Build per-node state dict from the UI message node list.
 
-    ``pipeline`` ('fm' | 'e2e') and ``drone`` (drone name or None) are only sent
-    for single-node identification; they default to the monolithic VibroFM and
-    no drone.
+    Single-node identification also sends ``drone`` (drone name or None) and the models
+    to run for each task: ``vehicleModels`` and ``droneModels``, each a subset of
+    ['fm', 'e2e'] so FM and end-to-end can run side by side. Older UIs send only
+    ``pipeline`` ('fm' | 'e2e'), which then applies to both tasks; the defaults are the
+    end-to-end VibroFM and no drone.
     """
-    new_node_states: dict[str, dict[str, str | int | None]] = {}
+    new_node_states: dict[str, dict[str, Any]] = {}
     for node_state in msg_nodes:
         node_id = node_state['nodeId'].lower()
         mapped_node_id: str = map_node_mapping.get(node_id, node_id)
         model = _MODEL_NAME_MAP.get(node_state['model'].lower(), node_state['model'].lower())
         modality = _MODALITY_MAP.get(node_state['modality'].lower(), node_state['modality'].lower())
+        pipeline = (node_state.get('pipeline') or _DEFAULT_PIPELINE).lower()
         new_node_states[mapped_node_id] = {
             'node_id': mapped_node_id,
             'replayed_node_id': node_id,
@@ -238,18 +252,19 @@ def _build_node_states(
             'modality': modality,
             'scene': scene,
             'run_id': run_id,
-            'pipeline': (node_state.get('pipeline') or _DEFAULT_PIPELINE).lower(),
             'drone': node_state.get('drone'),
+            'vehicle_models': _model_set(node_state.get('vehicleModels'), pipeline),
+            'drone_models': _model_set(node_state.get('droneModels'), pipeline),
         }
     return new_node_states
 
 
-def _drone_truth(node_states: dict[str, dict[str, str | int | None]], map_cfg: dict[str, Any]) -> dict[str, str | None]:
+def _drone_truth(node_states: dict[str, dict[str, Any]], map_cfg: dict[str, Any]) -> dict[str, str | None]:
     """Drone each node was told to replay on ``drone_mic`` (None when off), mirroring ``_build_reconfig_ops``."""
     runs: dict[str, Any] = map_cfg.get('models', {}).get('drone', {}).get('runs', {})
     spar_active = any(state['model'] == 'spar' for state in node_states.values())
     return {
-        node_id: None if spar_active or state['drone'] not in runs else str(state['drone'])
+        node_id: None if spar_active or state['drone'] not in runs or not state['drone_models'] else str(state['drone'])
         for node_id, state in node_states.items()
     }
 
@@ -258,15 +273,16 @@ def _build_fm_ops(
     map_cfg: dict[str, Any],
     services: dict[str, str],
     node_id: str,
-    use_fm: bool,
+    vehicle_fm: bool,
     drone: str | None,
-    drone_fm: bool,
+    drone_models: list[str],
 ) -> tuple[list[tuple[str, Sequence[KvEntry]]], list[tuple[str, Sequence[KvEntry]]], list[str]]:
     """Build KV ops for the split VibroFM pipeline, the drone classifier, and drone audio replay on one node.
 
-    ``use_fm`` runs vehicle classification on the shared encoder + ``vfm_vehicle`` head. A drone is
-    classified by the encoder + ``vfm_drone`` head when ``drone_fm`` (the node's 'fm' pipeline) and by
-    the end-to-end ``vfm_drone_e2e`` model otherwise. The encoder runs whenever one of its heads does.
+    ``vehicle_fm`` runs vehicle classification on the shared encoder + ``vfm_vehicle`` head. A drone is
+    classified by the encoder + ``vfm_drone`` head ('fm' in ``drone_models``) and/or the end-to-end
+    ``e2e_drone`` model ('e2e'); its audio is replayed only while one of them runs. The encoder runs
+    whenever one of its heads does.
     All models are already deactivated by the generic model deactivation pass, so only activation is
     emitted here.
 
@@ -283,6 +299,8 @@ def _build_fm_ops(
             '%s: drone %r not in [models.drone.runs] (available: %s)', node_id, drone, list(drone_cfg.get('runs', {}))
         )
         drone = None
+    if not drone_models:
+        drone = None  # no drone model selected: nothing to replay or classify
 
     # --- drone audio replay: on with the selected drone's run, off otherwise ---
     if 'drone_mic' in services:
@@ -298,24 +316,24 @@ def _build_fm_ops(
     elif drone is not None:
         logger.warning('%s: drone %r selected but no drone_mic service found in heartbeat', node_id, drone)
 
-    drone_head = drone is not None and drone_fm
-    drone_e2e = drone is not None and not drone_fm
+    drone_head = drone is not None and 'fm' in drone_models
+    drone_e2e = drone is not None and 'e2e' in drone_models
 
     # --- shared encoder ---
-    if (use_fm or drone_head) and 'vfm_encoder' in services:
+    if (vehicle_fm or drone_head) and 'vfm_encoder' in services:
         encoder_weight: str = models_cfg.get('vfm_encoder', {}).get('weight', '')
         data_pass.append(
             (services['vfm_encoder'], [kv_set('deactivated', value=False), kv_set('weight', value=encoder_weight)])
         )
         targets.append(services['vfm_encoder'])
-    elif use_fm or drone_head:
+    elif vehicle_fm or drone_head:
         logger.warning('%s: fm pipeline selected but no vfm_encoder service found in heartbeat', node_id)
 
     # --- task heads ---
     vfm_cfg: dict[str, Any] = models_cfg.get('vfm', {})
     vehicle_cfg = {'head': vfm_cfg.get('fm', {}).get('head', ''), 'labels': vfm_cfg.get('labels')}
     heads: list[tuple[str, dict[str, Any], bool]] = [
-        ('vfm_vehicle', vehicle_cfg, use_fm),
+        ('vfm_vehicle', vehicle_cfg, vehicle_fm),
         ('vfm_drone', drone_cfg, drone_head),
     ]
     for head, cfg, active in heads:
@@ -334,23 +352,23 @@ def _build_fm_ops(
         targets.append(services[head])
 
     # --- end-to-end drone model (full AuDroK checkpoint, audio only) ---
-    if drone_e2e and 'vfm_drone_e2e' in services:
+    if drone_e2e and 'e2e_drone' in services:
         e2e_ops: list[KvEntry] = [
             kv_set('deactivated', value=False),
             kv_set('modality', value='audio'),
             kv_set('weight', value=drone_cfg.get('weight', '')),
             kv_set('labels', value=drone_cfg.get('labels')),
         ]
-        data_pass.append((services['vfm_drone_e2e'], e2e_ops))
-        targets.append(services['vfm_drone_e2e'])
+        data_pass.append((services['e2e_drone'], e2e_ops))
+        targets.append(services['e2e_drone'])
     elif drone_e2e:
-        logger.warning('%s: end-to-end drone selected but no vfm_drone_e2e service found in heartbeat', node_id)
+        logger.warning('%s: end-to-end drone selected but no e2e_drone service found in heartbeat', node_id)
 
     return deactivate_pass, data_pass, targets
 
 
 def _build_reconfig_ops(
-    node_states: dict[str, dict[str, str | int | None]],
+    node_states: dict[str, dict[str, Any]],
     heartbeat_buf: TimeWindow,
     map_cfg: dict[str, Any],
     edge_services: dict[str, str],
@@ -418,17 +436,20 @@ def _build_reconfig_ops(
             all_targets.append(services['geo'])
 
         # --- VibroFM split pipeline (encoder + task heads) and drone add-on ---
-        use_fm = selected_model == 'vfm' and state['pipeline'] == 'fm'
+        # VibroFM can run FM and end-to-end side by side; other models only have an end-to-end form
+        vehicle_models: list[str] = state['vehicle_models'] if selected_model == 'vfm' else ['e2e']
+        use_fm = 'fm' in vehicle_models
         drone = None if spar_active else state['drone']
         fm_deactivate, fm_data, fm_targets = _build_fm_ops(
-            map_cfg, services, node_id, use_fm, None if drone is None else str(drone), state['pipeline'] == 'fm'
+            map_cfg, services, node_id, use_fm, None if drone is None else str(drone), state['drone_models']
         )
         deactivate_pass.extend(fm_deactivate)
         data_pass.extend(fm_data)
         all_targets.extend(fm_targets)
 
-        # --- per-node model activation + config (vfm e2e, diffphys) ---
-        if selected_model != 'spar' and not use_fm and selected_model in services:
+        # --- per-node model activation + config (end-to-end vfm as e2e_vehicle, diffphys) ---
+        model_service = _E2E_SERVICE.get(selected_model, selected_model)
+        if selected_model != 'spar' and 'e2e' in vehicle_models and model_service in services:
             model_cfg = map_cfg.get('models', {}).get(selected_model, {})
             model_weights: dict[str, str] = model_cfg.get('weight', {})
             model_labels: list[str] | None = model_cfg.get('labels')
@@ -445,8 +466,8 @@ def _build_reconfig_ops(
                 model_ops.append(kv_set('modality', value='audio'))
             else:
                 model_ops.append(kv_set('modality', value=None))
-            data_pass.append((services[selected_model], model_ops))
-            all_targets.append(services[selected_model])
+            data_pass.append((services[model_service], model_ops))
+            all_targets.append(services[model_service])
 
     # --- SPAR global activation ---
     spar_services = _find_services(heartbeat_buf, _SPAR_NAMESPACE)

@@ -101,7 +101,7 @@ weight = "/model/Parkland_ict2024_encoder.pt"
 head = "/model/Parkland_ict2024_class_layer.pt"
 
 # Drone add-on (UI "Drone" toggle): replays 8 kHz AuDroK audio on <node>/drone_mic and
-# classifies it with the vfm_drone head ("fm") or vfm_drone_e2e ("e2e"). `labels` must match
+# classifies it with the vfm_drone head ("fm") or e2e_drone ("e2e"). `labels` must match
 # the class order of both.
 [models.drone]
 head = "/model/AuDroK_class_layer.pt"
