@@ -17,8 +17,9 @@ Ergonomic access:
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeAlias
+from typing import Any, TypeAlias
 
 import msgspec
 
