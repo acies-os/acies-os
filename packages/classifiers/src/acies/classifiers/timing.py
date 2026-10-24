@@ -2,8 +2,8 @@
 
 Records how long model loads, weight reloads, and inference calls take, keeps
 the last ``window`` samples per operation, and summarises them. Nothing is
-published; nodes log the summary periodically and keep it in their config
-under ``sys/timing`` so it can be read on demand (e.g. ``kv get sys/timing``).
+published; nodes keep a ``Timings`` in app state (``ctx.app['timings']``) and
+log the summary periodically and on shutdown.
 
 Usage::
 
@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 
-# how often nodes log (and refresh sys/timing with) the summary
+# how often nodes log the summary
 LOG_INTERVAL_S = 60.0
 
 
@@ -50,6 +50,20 @@ class Timings:
             yield
         finally:
             self.record(op, (time.perf_counter_ns() - t0) / 1_000_000)
+
+    def reset(self, op: str | None = None) -> None:
+        """Drop the samples and the count of ``op``, or of every op when ``op`` is None.
+
+        Reset steady-state ops (e.g. ``infer``) when the model changes. Event
+        ops (``load``, ``reload``) are history; keep them.
+        """
+        with self._lock:
+            if op is None:
+                self._samples.clear()
+                self._count.clear()
+            else:
+                self._samples.pop(op, None)
+                self._count.pop(op, None)
 
     def last(self, op: str) -> float | None:
         with self._lock:

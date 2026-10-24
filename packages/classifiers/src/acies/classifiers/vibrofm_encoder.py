@@ -122,10 +122,8 @@ def teardown(ctx: AciesContext) -> None:
 
 @app.schedule(LOG_INTERVAL_S)
 def log_timings(ctx: AciesContext) -> None:
-    """Log rolling load/reload/inference timings and keep them in sys/timing (not published)."""
-    timings: Timings = ctx.app['timings']
-    ctx.app.config.setdefault('sys', {})['timing'] = timings.summary()
-    logger.info('timing: %s', timings.format())
+    """Log rolling load/reload/inference timings (kept in app state, not published)."""
+    logger.info('timing: %s', ctx.app['timings'].format())
 
 
 @app.subscribe(OnChange('start_at'))
@@ -152,6 +150,11 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
         ctx.app['buffer'].clear()
         ctx.app['drone_buffer'].clear()
     logger.info('weight reload complete in %.0f ms; modalities=%s', timings.last('reload'), ctx.app['modalities'])
+
+    # inference stats describe the previous weights; log them, then start fresh
+    logger.info('timing of previous weights: %s', timings.format())
+    timings.reset('infer_vehicle')
+    timings.reset('infer_drone')
 
 
 @app.subscribe(OnChange('deactivated'))
