@@ -19,11 +19,13 @@ fix path=".":
 clean:
     rm -f *.log
 
-# Install dependencies
-deps:
-    uv sync --package acies-sensors \
-        --package acies-classifiers \
-        --package acies-controllers \
+# Sync all workspace packages and dev groups from the lockfile (no upgrades)
+deps-dev:
+    uv sync --all-packages --all-groups
+
+# Bump git deps (foundation-sense, rawshake) in uv.lock, then sync
+deps-upgrade:
+    uv sync --all-packages \
         --upgrade-package foundation-sense \
         --upgrade-package rawshake
 
