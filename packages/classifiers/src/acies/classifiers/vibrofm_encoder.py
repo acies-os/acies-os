@@ -85,8 +85,9 @@ def setup(ctx: AciesContext) -> None:
         sum(p.numel() for p in model.parameters()),
     )
 
-    output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('embedding', 'vehicle')
-    drone_output_topic: str = ctx.cfg.get('drone_output_topic') or ctx.ns.topic('embedding', 'drone')
+    # end in /embedding so `**/vehicle` and `**/drone` prediction subscribers don't match
+    output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('vehicle', 'embedding')
+    drone_output_topic: str = ctx.cfg.get('drone_output_topic') or ctx.ns.topic('drone', 'embedding')
     ctx.app['model'] = model
     ctx.app['modalities'] = modalities
     ctx.app['output_topic'] = output_topic
@@ -252,13 +253,13 @@ def run_inference(ctx: AciesContext) -> None:
     '--output',
     'output_topic',
     default=None,
-    help='Output topic for vehicle AciesEmbedding results. Defaults to <host>/<name>/embedding/vehicle.',
+    help='Output topic for vehicle AciesEmbedding results. Defaults to <host>/<name>/vehicle/embedding.',
 )
 @click.option(
     '--drone-output',
     'drone_output_topic',
     default=None,
-    help='Output topic for drone AciesEmbedding results. Defaults to <host>/<name>/embedding/drone.',
+    help='Output topic for drone AciesEmbedding results. Defaults to <host>/<name>/drone/embedding.',
 )
 @click.option(
     '--geo-energy-thresh',

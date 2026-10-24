@@ -12,6 +12,13 @@
 #   MODEL_DIR         Host path to model directory (required)
 #   VFM_WEIGHT        Weight filename inside MODEL_DIR (required)
 #   VFM_LABELS        Comma-separated label list (required)
+#   VFM_ENCODER_WEIGHT       Shared VibroFM encoder weight inside MODEL_DIR
+#   VFM_VEHICLE_HEAD_WEIGHT  Vehicle task head weight ("fm" pipeline) inside MODEL_DIR
+#   VFM_DRONE_HEAD_WEIGHT    Drone task head weight inside MODEL_DIR
+#   VFM_DRONE_LABELS         Comma-separated drone labels (drone head class order)
+#
+# Per node, `vfm` is the monolithic ("e2e") pipeline and vfm-encoder/vfm-vehicle/vfm-drone
+# the split one; the gateway activates them from the UI config panel.
 #   ZENOH_CONNECT     Zenoh endpoint (default: tcp/127.0.0.1:7501)
 #   ACIES_LOG         Per-logger level overrides
 
@@ -35,11 +42,65 @@ services:
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs1/geo --mic rs1/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: vfm }
 
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs1-vfm-encoder:
+    <<: *vfm
+    profiles: [rs1, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs1/geo --mic rs1/mic --drone-mic rs1/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: vfm_encoder }
+
+  rs1-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs1, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs1/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: vfm_vehicle }
+
+  rs1-vfm-drone:
+    <<: *vfm
+    profiles: [rs1, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs1/vfm_encoder/drone/embedding --output rs1/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: vfm_drone }
+
   rs2-vfm:
     <<: *vfm
     profiles: [rs2, all]
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs2/geo --mic rs2/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: vfm }
+
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs2-vfm-encoder:
+    <<: *vfm
+    profiles: [rs2, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs2/geo --mic rs2/mic --drone-mic rs2/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: vfm_encoder }
+
+  rs2-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs2, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs2/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: vfm_vehicle }
+
+  rs2-vfm-drone:
+    <<: *vfm
+    profiles: [rs2, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs2/vfm_encoder/drone/embedding --output rs2/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: vfm_drone }
 
   rs3-vfm:
     <<: *vfm
@@ -47,11 +108,65 @@ services:
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs3/geo --mic rs3/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: vfm }
 
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs3-vfm-encoder:
+    <<: *vfm
+    profiles: [rs3, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs3/geo --mic rs3/mic --drone-mic rs3/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: vfm_encoder }
+
+  rs3-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs3, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs3/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: vfm_vehicle }
+
+  rs3-vfm-drone:
+    <<: *vfm
+    profiles: [rs3, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs3/vfm_encoder/drone/embedding --output rs3/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: vfm_drone }
+
   rs5-vfm:
     <<: *vfm
     profiles: [rs5, all]
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs5/geo --mic rs5/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: vfm }
+
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs5-vfm-encoder:
+    <<: *vfm
+    profiles: [rs5, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs5/geo --mic rs5/mic --drone-mic rs5/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: vfm_encoder }
+
+  rs5-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs5, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs5/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: vfm_vehicle }
+
+  rs5-vfm-drone:
+    <<: *vfm
+    profiles: [rs5, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs5/vfm_encoder/drone/embedding --output rs5/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: vfm_drone }
 
   rs6-vfm:
     <<: *vfm
@@ -59,11 +174,65 @@ services:
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs6/geo --mic rs6/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: vfm }
 
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs6-vfm-encoder:
+    <<: *vfm
+    profiles: [rs6, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs6/geo --mic rs6/mic --drone-mic rs6/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: vfm_encoder }
+
+  rs6-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs6, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs6/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: vfm_vehicle }
+
+  rs6-vfm-drone:
+    <<: *vfm
+    profiles: [rs6, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs6/vfm_encoder/drone/embedding --output rs6/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: vfm_drone }
+
   rs7-vfm:
     <<: *vfm
     profiles: [rs7, all]
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs7/geo --mic rs7/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: vfm }
+
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs7-vfm-encoder:
+    <<: *vfm
+    profiles: [rs7, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs7/geo --mic rs7/mic --drone-mic rs7/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: vfm_encoder }
+
+  rs7-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs7, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs7/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: vfm_vehicle }
+
+  rs7-vfm-drone:
+    <<: *vfm
+    profiles: [rs7, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs7/vfm_encoder/drone/embedding --output rs7/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: vfm_drone }
 
   rs8-vfm:
     <<: *vfm
@@ -71,8 +240,62 @@ services:
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs8/geo --mic rs8/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: vfm }
 
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs8-vfm-encoder:
+    <<: *vfm
+    profiles: [rs8, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs8/geo --mic rs8/mic --drone-mic rs8/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: vfm_encoder }
+
+  rs8-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs8, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs8/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: vfm_vehicle }
+
+  rs8-vfm-drone:
+    <<: *vfm
+    profiles: [rs8, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs8/vfm_encoder/drone/embedding --output rs8/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: vfm_drone }
+
   rs10-vfm:
     <<: *vfm
     profiles: [rs10, all]
     command: acies-vfm --weight /model/${VFM_WEIGHT} --geo rs10/geo --mic rs10/mic --labels ${VFM_LABELS}
     environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: vfm }
+
+  # split VibroFM ("fm" pipeline + drone): shared encoder and two task heads; gateway toggles them
+  rs10-vfm-encoder:
+    <<: *vfm
+    profiles: [rs10, all]
+    command: >-
+      acies-vfm-encoder --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo rs10/geo --mic rs10/mic --drone-mic rs10/drone_mic
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: vfm_encoder }
+
+  rs10-vfm-vehicle:
+    <<: *vfm
+    profiles: [rs10, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input rs10/vfm_encoder/vehicle/embedding --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS} --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: vfm_vehicle }
+
+  rs10-vfm-drone:
+    <<: *vfm
+    profiles: [rs10, all]
+    command: >-
+      acies-vfm-head --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input rs10/vfm_encoder/drone/embedding --output rs10/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256} --labels ${VFM_DRONE_LABELS}
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: vfm_drone }

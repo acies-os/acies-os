@@ -71,11 +71,17 @@ _MODALITY_MAP = {
     'acoustic': 'mic',
     'both': 'both',
 }
-_ALL_MODELS = ['vfm', 'diffphys', 'spar']
+_ALL_MODELS = ['vfm', 'diffphys', 'spar', 'vfm_encoder', 'vfm_vehicle', 'vfm_drone']
 _MODEL_NAME_MAP: dict[str, str] = {'vibrofm': 'vfm', 'spar': 'spar', 'diffphys': 'diffphys'}
 _SPAR_NAMESPACE = 'joint'
 
 _MODALITY_TO_WEIGHT_KEY: dict[str, str] = {'both': 'both', 'geo': 'seismic', 'mic': 'audio'}
+
+# VibroFM pipelines selectable per node in the UI: 'e2e' runs the monolithic `vfm`
+# service; 'fm' runs the shared `vfm_encoder` + `vfm_vehicle` task head.
+_DEFAULT_PIPELINE = 'e2e'
+# confidence_threshold table to use for each prediction source service
+_THRESHOLD_MODEL: dict[str, str] = {'vfm_vehicle': 'vfm'}
 
 
 @app.subscribe('**/spar')
@@ -99,11 +105,22 @@ def on_vehicle(ctx: AciesContext, msg: AciesInference) -> None:
     # Filter by per-model confidence thresholds before forwarding to UI
     model = msg.source.rsplit('/', 1)[-1]
     thresholds: dict[str, dict[str, float]] = ctx.app['confidence_threshold']
-    model_thresh = thresholds.get(model, {})
+    model_thresh = thresholds.get(_THRESHOLD_MODEL.get(model, model), {})
     filtered = [p for p in msg.predictions if p.score >= model_thresh.get(p.label, 0.0)]
     if filtered:
         msg_filtered = AciesInference(source=msg.source, timestamp=msg.timestamp, predictions=filtered)
         ctx.publish('ws://predictions', msg_filtered)
+
+
+@app.subscribe('**/drone')
+def on_drone(ctx: AciesContext, msg: AciesInference) -> None:
+    """Forward drone classifications (vfm_drone task head) to the UI, kept apart from vehicle predictions."""
+    model = msg.source.rsplit('/', 1)[-1]
+    thresholds: dict[str, dict[str, float]] = ctx.app['confidence_threshold']
+    model_thresh = thresholds.get(model, {})
+    filtered = [p for p in msg.predictions if p.score >= model_thresh.get(p.label, 0.0)]
+    if filtered:
+        ctx.publish('ws://drone', AciesInference(source=msg.source, timestamp=msg.timestamp, predictions=filtered))
 
 
 if os.getenv('ACIES_GATEWAY_DEBUG'):
@@ -197,13 +214,18 @@ def _resolve_route(map_cfg: dict[str, Any], target_list: list[str]) -> tuple[str
 
 
 def _build_node_states(
-    msg_nodes: list[dict[str, str]],
+    msg_nodes: list[dict[str, Any]],
     map_node_mapping: dict[str, str],
     scene: str,
     run_id: int,
-) -> dict[str, dict[str, str | int]]:
-    """Build per-node state dict from the UI message node list."""
-    new_node_states: dict[str, dict[str, str | int]] = {}
+) -> dict[str, dict[str, str | int | None]]:
+    """Build per-node state dict from the UI message node list.
+
+    ``pipeline`` ('fm' | 'e2e') and ``drone`` (drone name or None) are only sent
+    for single-node identification; they default to the monolithic VibroFM and
+    no drone.
+    """
+    new_node_states: dict[str, dict[str, str | int | None]] = {}
     for node_state in msg_nodes:
         node_id = node_state['nodeId'].lower()
         mapped_node_id: str = map_node_mapping.get(node_id, node_id)
@@ -216,12 +238,90 @@ def _build_node_states(
             'modality': modality,
             'scene': scene,
             'run_id': run_id,
+            'pipeline': (node_state.get('pipeline') or _DEFAULT_PIPELINE).lower(),
+            'drone': node_state.get('drone'),
         }
     return new_node_states
 
 
+def _build_fm_ops(
+    map_cfg: dict[str, Any],
+    services: dict[str, str],
+    node_id: str,
+    use_fm: bool,
+    drone: str | None,
+) -> tuple[list[tuple[str, Sequence[KvEntry]]], list[tuple[str, Sequence[KvEntry]]], list[str]]:
+    """Build KV ops for the shared VibroFM encoder, its task heads, and drone audio replay on one node.
+
+    The encoder runs whenever the 'fm' vehicle pipeline or a drone is selected; the vehicle
+    and drone heads are activated independently. All three are already deactivated by the
+    generic model deactivation pass, so only activation is emitted here.
+
+    Returns (deactivate_pass, data_pass, targets).
+    """
+    deactivate_pass: list[tuple[str, Sequence[KvEntry]]] = []
+    data_pass: list[tuple[str, Sequence[KvEntry]]] = []
+    targets: list[str] = []
+    models_cfg: dict[str, Any] = map_cfg.get('models', {})
+    drone_cfg: dict[str, Any] = models_cfg.get('drone', {})
+
+    if drone is not None and drone not in drone_cfg.get('runs', {}):
+        logger.error(
+            '%s: drone %r not in [models.drone.runs] (available: %s)', node_id, drone, list(drone_cfg.get('runs', {}))
+        )
+        drone = None
+
+    # --- drone audio replay: on with the selected drone's run, off otherwise ---
+    if 'drone_mic' in services:
+        deactivate_pass.append((services['drone_mic'], [kv_set('deactivated', value=drone is None)]))
+        if drone is not None:
+            drone_data_ops: list[KvEntry] = [
+                kv_set('scene', value=drone_cfg.get('scene', 'audrok')),
+                kv_set('run', value=int(drone_cfg['runs'][drone])),
+                kv_set('node', value=drone_cfg.get('node', 'rs1')),
+            ]
+            data_pass.append((services['drone_mic'], drone_data_ops))
+            targets.append(services['drone_mic'])
+    elif drone is not None:
+        logger.warning('%s: drone %r selected but no drone_mic service found in heartbeat', node_id, drone)
+
+    # --- shared encoder ---
+    if (use_fm or drone is not None) and 'vfm_encoder' in services:
+        encoder_weight: str = models_cfg.get('vfm_encoder', {}).get('weight', '')
+        data_pass.append(
+            (services['vfm_encoder'], [kv_set('deactivated', value=False), kv_set('weight', value=encoder_weight)])
+        )
+        targets.append(services['vfm_encoder'])
+    elif use_fm or drone is not None:
+        logger.warning('%s: fm pipeline or drone selected but no vfm_encoder service found in heartbeat', node_id)
+
+    # --- task heads ---
+    vfm_cfg: dict[str, Any] = models_cfg.get('vfm', {})
+    vehicle_cfg = {'head': vfm_cfg.get('fm', {}).get('head', ''), 'labels': vfm_cfg.get('labels')}
+    heads: list[tuple[str, dict[str, Any], bool]] = [
+        ('vfm_vehicle', vehicle_cfg, use_fm),
+        ('vfm_drone', drone_cfg, drone is not None),
+    ]
+    for head, cfg, active in heads:
+        if not active:
+            continue
+        if head not in services:
+            logger.warning('%s: %s selected but no %s service found in heartbeat', node_id, head, head)
+            continue
+        head_weight: str = cfg.get('head', '')
+        head_ops: list[KvEntry] = [
+            kv_set('deactivated', value=False),
+            kv_set('weight', value=head_weight),
+            kv_set('labels', value=cfg.get('labels')),
+        ]
+        data_pass.append((services[head], head_ops))
+        targets.append(services[head])
+
+    return deactivate_pass, data_pass, targets
+
+
 def _build_reconfig_ops(
-    node_states: dict[str, dict[str, str | int]],
+    node_states: dict[str, dict[str, str | int | None]],
     heartbeat_buf: TimeWindow,
     map_cfg: dict[str, Any],
     edge_services: dict[str, str],
@@ -288,8 +388,18 @@ def _build_reconfig_ops(
             data_pass.append((services['geo'], data_ops))
             all_targets.append(services['geo'])
 
-        # --- per-node model activation + config (vfm, diffphys) ---
-        if selected_model != 'spar' and selected_model in services:
+        # --- VibroFM split pipeline (encoder + task heads) and drone add-on ---
+        use_fm = selected_model == 'vfm' and state['pipeline'] == 'fm'
+        drone = None if spar_active else state['drone']
+        fm_deactivate, fm_data, fm_targets = _build_fm_ops(
+            map_cfg, services, node_id, use_fm, None if drone is None else str(drone)
+        )
+        deactivate_pass.extend(fm_deactivate)
+        data_pass.extend(fm_data)
+        all_targets.extend(fm_targets)
+
+        # --- per-node model activation + config (vfm e2e, diffphys) ---
+        if selected_model != 'spar' and not use_fm and selected_model in services:
             model_cfg = map_cfg.get('models', {}).get(selected_model, {})
             model_weights: dict[str, str] = model_cfg.get('weight', {})
             model_labels: list[str] | None = model_cfg.get('labels')

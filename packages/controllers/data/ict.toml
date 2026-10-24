@@ -92,6 +92,28 @@ audio = "/model/Parkland_TransformerV4_vehicle_classification_finetune_ict2024_1
 [models.spar.weight]
 both = "/model/spar_2024-03-29-ICT.pt"
 
+# Split VibroFM (UI pipeline "fm"): shared encoder + per-task heads.
+# The encoder also serves the drone head, so it runs whenever "fm" or a drone is selected.
+[models.vfm_encoder]
+weight = "/model/Parkland_ict2024_encoder.pt"
+
+[models.vfm.fm]
+head = "/model/Parkland_ict2024_class_layer.pt"
+
+# Drone add-on (UI "Drone" toggle): replays 8 kHz AuDroK audio on <node>/drone_mic
+# and classifies it with the vfm_drone head. `labels` must match the head's class order.
+[models.drone]
+head = "/model/AuDroK_class_layer.pt"
+labels = ["cartonic_toy_drone", "dji_avata", "dji_inspire_2", "dji_matrice_300", "dji_matrice_30_t", "dji_mavic_3e", "dji_mini_3", "dji_phantom_4", "emotion", "hp_e616p_1", "hpx4", "mavic_air_2", "potensic_firefly"]
+scene = "audrok"
+node = "rs1"
+
+# UI drone value -> run ID in {data_dir}/{scene}/run<ID>_<node>_mic.parquet
+[models.drone.runs]
+dji_avata = 1
+potensic_firefly = 2
+cartonic_toy_drone = 3
+
 # Confidence threshold to filter multi-label output
 [confidence_threshold.vfm]
 miata = 0.85

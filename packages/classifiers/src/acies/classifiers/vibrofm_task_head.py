@@ -14,7 +14,7 @@ Usage::
                    [--output TOPIC]
                    [--labels car,truck,person]
                    [--ensemble-win N] [--ensemble-size N]
-                   [--embed-dim N]
+                   [--embed-dim N] [--deactivated]
                    [--acies-namespace NS] [--acies-name NAME]
 """
 
@@ -197,6 +197,13 @@ def on_embedding(ctx: AciesContext, msg: AciesEmbedding) -> None:
     show_default=True,
     help='Embedding dimension produced by the encoder.',
 )
+@click.option(
+    '--deactivated',
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help='Start deactivated; inference begins once the deactivated key is set to false.',
+)
 def main(
     weight: str,
     input_topic: str,
@@ -205,10 +212,11 @@ def main(
     ensemble_win: int,
     ensemble_size: int,
     embed_dim: int,
+    deactivated: bool,
 ) -> None:
     app.state.config.update(
         {
-            'deactivated': False,
+            'deactivated': deactivated,
             'weight': weight,
             'input_topic': input_topic,
             'output_topic': output_topic,
