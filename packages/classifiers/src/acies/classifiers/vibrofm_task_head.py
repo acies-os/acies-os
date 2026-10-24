@@ -30,6 +30,7 @@ import click
 import numpy as np
 import numpy.typing as npt
 import torch
+from acies.classifiers.timing import LOG_INTERVAL_S, Timings
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesEmbedding, AciesInference, AciesKvChange, AciesPrediction
 from acies.FoundationSense.task_head import VibrofmTaskHead  # pyright: ignore[reportMissingTypeStubs]
@@ -46,10 +47,14 @@ app = AciesApp()
 def setup(ctx: AciesContext) -> None:
     ensemble_win: int = ctx.cfg.get('ensemble_win', 1)
 
-    model = VibrofmTaskHead(Path(ctx.cfg['weight']), embed_dim=ctx.cfg.get('embed_dim', 256))
+    timings = Timings()
+    with timings.measure('load'):
+        model = VibrofmTaskHead(Path(ctx.cfg['weight']), embed_dim=ctx.cfg.get('embed_dim', 256))
+    ctx.app['timings'] = timings
     logger.info(
-        'loaded task head from %s; embed_dim=%d num_classes=%d',
+        'loaded task head from %s in %.1f ms; embed_dim=%d num_classes=%d',
         ctx.cfg['weight'],
+        timings.last('load'),
         model.embed_dim,
         model.num_classes,
     )
@@ -74,8 +79,16 @@ def setup(ctx: AciesContext) -> None:
 
 
 @app.on_shutdown
-def teardown(_ctx: AciesContext) -> None:
-    logger.info('vibrofm task head stopped')
+def teardown(ctx: AciesContext) -> None:
+    logger.info('vibrofm task head stopped; timing: %s', ctx.app['timings'].format())
+
+
+@app.schedule(LOG_INTERVAL_S)
+def log_timings(ctx: AciesContext) -> None:
+    """Log rolling load/reload/inference timings and keep them in sys/timing (not published)."""
+    timings: Timings = ctx.app['timings']
+    ctx.app.config.setdefault('sys', {})['timing'] = timings.summary()
+    logger.info('timing: %s', timings.format())
 
 
 @app.subscribe(OnChange('start_at'))
@@ -91,11 +104,15 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     """Reload task head weights when the weight file changes."""
     new_weight = msg.value
     logger.info('weight changed to %s; reloading', new_weight)
-    ctx.app['model'].reload(new_weight)
+    timings: Timings = ctx.app['timings']
+    with timings.measure('reload'):
+        ctx.app['model'].reload(new_weight)
 
     with ctx.app.lock:
         ctx.app['ensemble_buf'].clear()
-    logger.info('weight reload complete; num_classes=%d', ctx.app['model'].num_classes)
+    logger.info(
+        'weight reload complete in %.1f ms; num_classes=%d', timings.last('reload'), ctx.app['model'].num_classes
+    )
 
 
 @app.subscribe(OnChange('deactivated'))
@@ -129,6 +146,7 @@ def on_embedding(ctx: AciesContext, msg: AciesEmbedding) -> None:
     t0 = time.perf_counter_ns()
     logit = ctx.app['model'](torch.from_numpy(feat.astype(np.float32)))  # pyright: ignore[reportUnknownMemberType]
     head_ms = (time.perf_counter_ns() - t0) / 1_000_000
+    ctx.app['timings'].record('infer', head_ms)
 
     # logit shape: (num_targets, num_classes), values are probabilities
     probs: list[list[float]] = np.array(logit).tolist()

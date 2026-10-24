@@ -36,6 +36,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from acies.buffers import TemporalBuffer
+from acies.classifiers.timing import LOG_INTERVAL_S, Timings
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
 from acies.FoundationSense.inference import ModelForInference  # pyright: ignore[reportMissingTypeStubs]
@@ -67,17 +68,21 @@ def setup(ctx: AciesContext) -> None:
 
     # ModelForInference calls argparse.parse_args() internally at construction;
     # clear sys.argv so it does not see our Click arguments and error out.
+    timings = Timings()
     _saved_argv = sys.argv[:]
     sys.argv = sys.argv[:1]
     try:
-        model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
+        with timings.measure('load'):
+            model = ModelForInference(Path(ctx.cfg['weight']), freq_mae, modality=ctx.cfg.get('modality'))
     finally:
         sys.argv = _saved_argv
+    ctx.app['timings'] = timings
     raw_mods: list[str] = model.args.dataset_config['modality_names']
     modalities = [_MOD_MAPPING[m] for m in raw_mods]
     logger.info(
-        'loaded model from %s; modalities=%s freq_mae=%s #params=%d',
+        'loaded model from %s in %.0f ms; modalities=%s freq_mae=%s #params=%d',
         ctx.cfg['weight'],
+        timings.last('load'),
         modalities,
         freq_mae,
         sum(p.numel() for p in model.parameters()),
@@ -106,8 +111,16 @@ def setup(ctx: AciesContext) -> None:
 
 
 @app.on_shutdown
-def teardown(_ctx: AciesContext) -> None:
-    logger.info('vibrofm stopped')
+def teardown(ctx: AciesContext) -> None:
+    logger.info('vibrofm stopped; timing: %s', ctx.app['timings'].format())
+
+
+@app.schedule(LOG_INTERVAL_S)
+def log_timings(ctx: AciesContext) -> None:
+    """Log rolling load/reload/inference timings and keep them in sys/timing (not published)."""
+    timings: Timings = ctx.app['timings']
+    ctx.app.config.setdefault('sys', {})['timing'] = timings.summary()
+    logger.info('timing: %s', timings.format())
 
 
 @app.subscribe(OnChange('start_at'))
@@ -125,13 +138,15 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     new_weight = msg.value
     modality_cfg = ctx.cfg.get('modality')
     logger.info('weight changed to %s (modality=%s); reloading', new_weight, modality_cfg)
-    ctx.app['model'].reload(new_weight, modality_cfg)
+    timings: Timings = ctx.app['timings']
+    with timings.measure('reload'):
+        ctx.app['model'].reload(new_weight, modality_cfg)
     ctx.app['modalities'] = [_MOD_MAPPING[m] for m in ctx.app['model'].args.dataset_config['modality_names']]
 
     with ctx.app.lock:
         ctx.app['buffer'].clear()
         ctx.app['ensemble_buf'].clear()
-    logger.info('weight reload complete; modalities=%s', ctx.app['modalities'])
+    logger.info('weight reload complete in %.0f ms; modalities=%s', timings.last('reload'), ctx.app['modalities'])
 
 
 @app.subscribe(OnChange('deactivated'))
@@ -216,6 +231,7 @@ def run_inference(ctx: AciesContext) -> None:
     t0 = time.perf_counter_ns()
     logit, _feat = ctx.app['model'](data)  # returns [[score_0, score_1, ...]]
     infer_ms = (time.perf_counter_ns() - t0) / 1_000_000
+    ctx.app['timings'].record('infer', infer_ms)
 
     # logit shape: (num_targets, num_classes), values are probabilities
     probs: list[list[float]] = np.array(logit).tolist()
