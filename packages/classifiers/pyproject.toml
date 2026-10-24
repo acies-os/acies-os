@@ -29,6 +29,7 @@ dependencies = [
   # "deepsense-augmented @ git+ssh://github.com/acies-os/deepsense-augmented.git",
   "foundation-sense @ git+ssh://github.com/acies-os/FoundationSense.git",
   "numpy>=1.24.4,<2",
+  "psutil>=7.2.2",
   "spar @ git+ssh://github.com/acies-os/SPAR.git@demo2",
 ]
 scripts.acies-diffphys = "acies.classifiers.diffphys:main"
