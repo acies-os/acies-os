@@ -36,6 +36,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from acies.buffers import TemporalBuffer
+from acies.classifiers.memory import sample_memory
 from acies.classifiers.timing import LOG_INTERVAL_S, Timings
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesInference, AciesKvChange, AciesPrediction, AciesTimeSeries
@@ -66,6 +67,9 @@ def setup(ctx: AciesContext) -> None:
     freq_mae: bool = ctx.cfg.get('freq_mae', False)
     ensemble_win: int = ctx.cfg.get('ensemble_win', 1)
 
+    # runtime cost without the model (imports are done at module load)
+    mem_base = sample_memory(ctx, 'baseline')
+
     # ModelForInference calls argparse.parse_args() internally at construction;
     # clear sys.argv so it does not see our Click arguments and error out.
     timings = Timings()
@@ -87,6 +91,7 @@ def setup(ctx: AciesContext) -> None:
         freq_mae,
         sum(p.numel() for p in model.parameters()),
     )
+    sample_memory(ctx, 'loaded', model, since=mem_base)
 
     output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('vehicle')
     ctx.app['model'] = model
@@ -113,12 +118,14 @@ def setup(ctx: AciesContext) -> None:
 @app.on_shutdown
 def teardown(ctx: AciesContext) -> None:
     logger.info('vibrofm stopped; timing: %s', ctx.app['timings'].format())
+    sample_memory(ctx, 'final', ctx.app.get('model'))
 
 
 @app.schedule(LOG_INTERVAL_S)
-def log_timings(ctx: AciesContext) -> None:
-    """Log rolling load/reload/inference timings (kept in app state, not published)."""
+def log_stats(ctx: AciesContext) -> None:
+    """Log rolling timings (app state) and process memory (also in sys/memory); nothing is published."""
     logger.info('timing: %s', ctx.app['timings'].format())
+    sample_memory(ctx, 'periodic', ctx.app['model'])
 
 
 @app.subscribe(OnChange('start_at'))
@@ -137,6 +144,7 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     modality_cfg = ctx.cfg.get('modality')
     logger.info('weight changed to %s (modality=%s); reloading', new_weight, modality_cfg)
     timings: Timings = ctx.app['timings']
+    mem_before = sample_memory(ctx, 'pre-reload', ctx.app['model'])
     with timings.measure('reload'):
         ctx.app['model'].reload(new_weight, modality_cfg)
     ctx.app['modalities'] = [_MOD_MAPPING[m] for m in ctx.app['model'].args.dataset_config['modality_names']]
@@ -145,6 +153,7 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
         ctx.app['buffer'].clear()
         ctx.app['ensemble_buf'].clear()
     logger.info('weight reload complete in %.0f ms; modalities=%s', timings.last('reload'), ctx.app['modalities'])
+    sample_memory(ctx, 'reloaded', ctx.app['model'], since=mem_before)
 
     # inference stats describe the previous weights; log them, then start fresh
     logger.info('timing of previous weights: %s', timings.format())
