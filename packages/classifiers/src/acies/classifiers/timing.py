@@ -19,7 +19,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import Counter, defaultdict, deque
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -43,7 +43,7 @@ class Timings:
             self._count[op] += 1
 
     @contextmanager
-    def measure(self, op: str) -> Iterator[None]:
+    def measure(self, op: str) -> Generator[None]:
         """Record the wall time of the ``with`` block under ``op`` (also when it raises)."""
         t0 = time.perf_counter_ns()
         try:
