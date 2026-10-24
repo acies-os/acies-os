@@ -99,6 +99,9 @@ def setup(ctx: AciesContext) -> None:
     output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('vehicle', 'embedding')
     drone_output_topic: str = ctx.cfg.get('drone_output_topic') or ctx.ns.topic('drone', 'embedding')
     ctx.app['model'] = model
+    # (weight, modality) currently loaded: the backbone is shared by every task head and map, so a
+    # deploy that sends the same weight again keeps it instead of reloading
+    ctx.app['loaded'] = (str(ctx.cfg['weight']), ctx.cfg.get('modality'))
     ctx.app['modalities'] = modalities
     ctx.app['output_topic'] = output_topic
     ctx.app['drone_output_topic'] = drone_output_topic
@@ -149,11 +152,15 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     """Reload encoder weights and update modalities when the weight file changes."""
     new_weight = msg.value
     modality_cfg = ctx.cfg.get('modality')
+    if (str(new_weight), modality_cfg) == ctx.app['loaded']:
+        logger.info('weight unchanged (%s, modality=%s); keeping the loaded encoder', new_weight, modality_cfg)
+        return
     logger.info('weight changed to %s (modality=%s); reloading', new_weight, modality_cfg)
     timings: Timings = ctx.app['timings']
     mem_before = sample_memory(ctx, 'pre-reload', ctx.app['model'])
     with timings.measure('reload'):
         ctx.app['model'].reload(new_weight, modality_cfg)
+    ctx.app['loaded'] = (str(new_weight), modality_cfg)
     ctx.app['modalities'] = [_MOD_MAPPING[m] for m in ctx.app['model'].args.dataset_config['modality_names']]
 
     with ctx.app.lock:
