@@ -12,8 +12,15 @@
 #   SCENE             Scene name (e.g. 2024-03-29-ICT)
 #   RUN               Run ID (e.g. 2)
 #   NODE              Replay node name if different from ACIES_NAMESPACE
+#   DRONE_SCENE       Drone audio scene (default: audrok); starts deactivated
+#   DRONE_RUN         Drone audio run ID (default: 1)
+#   DRONE_NODE        Drone audio node name in filename (default: rs1)
 #   MODEL_DIR         Host path to model directory (default: /model)
-#   VFM_WEIGHT        Weight filename inside MODEL_DIR
+#   VFM_ENCODER_WEIGHT       Shared VibroFM encoder weight (geo+mic and audio-only) inside MODEL_DIR
+#   VFM_VEHICLE_HEAD_WEIGHT  Vehicle task head weight (multimodal embedding) inside MODEL_DIR
+#   VFM_DRONE_HEAD_WEIGHT    Drone task head weight (audio embedding) inside MODEL_DIR
+#   VFM_LABELS / VFM_DRONE_LABELS  Comma-separated labels for each head
+#   VFM_WEIGHT        Legacy single-model weight (only with --profile legacy-vfm)
 #   ZENOH_CONNECT     Local zenoh endpoint (default: tcp/127.0.0.1:7501)
 #   ZENOH_BRIDGE      Connect to edge zenohd (e.g. --connect tcp/192.168.1.10:7447)
 #   ACIES_LOG         Per-logger level overrides
@@ -62,8 +69,81 @@ services:
       <<: *env
       ACIES_NAME: mic
 
+  # Drone audio (8 kHz recording, upsampled to 16 kHz) on <ns>/drone_mic, separate from mic.
+  # Starts deactivated; set its `deactivated` key to false to begin playback.
+  drone_mic:
+    <<: *replay
+    command: >-
+      acies-replay --data-dir /data
+      --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE:-rs1} --run ${DRONE_RUN:-1}
+      --modality drone_mic --deactivated
+    environment:
+      <<: *env
+      ACIES_NAME: drone_mic
+
+  # One encoder, three inputs (geo, mic, drone_mic), two embedding outputs:
+  #   <ns>/vfm_encoder/embedding/vehicle  (geo + mic)  -> vfm_vehicle head
+  #   <ns>/vfm_encoder/embedding/drone    (drone_mic)  -> vfm_drone head
+  vfm_encoder:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm-encoder
+      --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo ${ACIES_NAMESPACE:-}/geo
+      --mic ${ACIES_NAMESPACE:-}/mic
+      --drone-mic ${ACIES_NAMESPACE:-}/drone_mic
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm_encoder
+    volumes:
+      - /data:/data
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # Publishes to <ns>/vfm_vehicle/vehicle (consumed by tracker/gateway via **/vehicle).
+  vfm_vehicle:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm-head
+      --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input ${ACIES_NAMESPACE:-}/vfm_encoder/embedding/vehicle
+      --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS}
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm_vehicle
+    volumes:
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # Publishes to <ns>/vfm_drone/drone, kept off **/vehicle so the tracker ignores drone classes.
+  vfm_drone:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm-head
+      --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input ${ACIES_NAMESPACE:-}/vfm_encoder/embedding/drone
+      --output ${ACIES_NAMESPACE:-}/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256}
+      --labels ${VFM_DRONE_LABELS}
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm_drone
+    volumes:
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # Legacy single-model classifier (geo + mic only); run with --profile legacy-vfm
+  # instead of the encoder/heads above to avoid duplicate **/vehicle results.
   vfm:
     image: acies-pi:latest
+    profiles: [legacy-vfm]
     command: >-
       acies-vfm
       --weight /model/${VFM_WEIGHT}

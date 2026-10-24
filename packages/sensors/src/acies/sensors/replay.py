@@ -11,6 +11,8 @@ Data format (parquet columns):
 
 File naming convention:
   {data_dir}/{scene}/run{run}_{node}_{modality}.parquet
+  (drone_mic reads 8 kHz *_mic.parquet, e.g. {data_dir}/audrok/run1_rs1_mic.parquet,
+  and publishes it upsampled 2x to 16 kHz like the regular mic)
 
 Synchronization:
   Pass the same --start-at epoch timestamp to multiple replay nodes.
@@ -21,8 +23,8 @@ Usage::
 
     acies-replay --data-dir packages/sensors/data \
                  --scene 2024-08-gq \
-                 --node gq-1 --run 50 --modality geo \
-                 [--speed 1.0] [--start-at EPOCH] [--loop] \
+                 --node gq-1 --run 50 --modality geo|mic|drone_mic \
+                 [--speed 1.0] [--start-at EPOCH] [--loop] [--deactivated] \
                  [--acies-namespace NS] [--acies-name NAME]
 """
 
@@ -45,9 +47,13 @@ logger = logging.getLogger(__name__)
 app = AciesApp()
 
 
-_SAMPLING_RATE = {'geo': 200, 'mic': 16000}
-_DTYPE = {'geo': 'int32', 'mic': 'int16'}
-_CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0', 'mono'}}
+_SAMPLING_RATE = {'geo': 200, 'mic': 16000, 'drone_mic': 16000}
+_DTYPE = {'geo': 'int32', 'mic': 'int16', 'drone_mic': 'int16'}
+_CHANNEL = {'geo': {'SH3', 'EH3'}, 'mic': {'0', 'mono'}, 'drone_mic': {'0', 'mono'}}
+# filename suffix per modality; drone audio (8 kHz) is stored as *_mic.parquet in its own scene
+_FILE_SUFFIX = {'geo': 'geo', 'mic': 'mic', 'drone_mic': 'mic'}
+# modalities recorded at half the published rate; upsampled 2x on load to match the 16 kHz mic
+_UPSAMPLE_2X = {'drone_mic'}
 _NS_PER_S = 1_000_000_000
 
 
@@ -64,6 +70,20 @@ def _ts_to_ns(ts: float) -> int:
     return int(ts * _NS_PER_S)
 
 
+def _upsample_2x(arr: npt.NDArray[np.int_]) -> npt.NDArray[np.int_]:
+    """Upsample 2x by linear interpolation, keeping original samples at even indices.
+
+    ``out[::2] == arr`` exactly, so consumers that decimate with ``[::2]``
+    (e.g. VibroFM) see the original recording.
+    """
+    wide = arr.astype(np.int32)
+    out = np.empty(len(arr) * 2, dtype=arr.dtype)
+    out[::2] = arr
+    out[1:-1:2] = (wide[:-1] + wide[1:]) // 2
+    out[-1] = arr[-1]
+    return out
+
+
 def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list[str], int, str]]:
     """Load a parquet file and chunk samples into 1-second windows.
 
@@ -75,6 +95,8 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
     sampling_rate, dtype) tuples.
     """
     sampling_rate: int = _SAMPLING_RATE[modality]
+    factor = 2 if modality in _UPSAMPLE_2X else 1
+    src_rate = sampling_rate // factor  # samples per second in the parquet file
     dtype: str = _DTYPE[modality]
     wanted: set[str] = _CHANNEL[modality]
     np_dtype = np.dtype(dtype)
@@ -119,11 +141,16 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
             logger.warning('channel %s has %d samples, expected %d; truncating', ch, len(arr), n_samples)
             ch_arrays[ch] = arr[:n_samples]
 
-    # Chunk in lockstep across all channels
+    if factor > 1:
+        logger.info('upsampling %s from %d Hz to %d Hz', path, src_rate, sampling_rate)
+        ch_arrays = {ch: _upsample_2x(arr) for ch, arr in ch_arrays.items()}
+
+    # Chunk in lockstep across all channels; i indexes source samples (and timestamps)
     windows: list[tuple[int, list[bytes], list[str], int, str]] = []
-    for i in range(0, n_samples, sampling_rate):
+    for i in range(0, n_samples, src_rate):
         ts_ns = _ts_to_ns(ch_timestamps[i])
-        payloads = [bytes(ch_arrays[ch][i : i + sampling_rate].tobytes()) for ch in present]
+        j = i * factor
+        payloads = [bytes(ch_arrays[ch][j : j + sampling_rate].tobytes()) for ch in present]
         windows.append((ts_ns, payloads, present, sampling_rate, dtype))
 
     logger.info(
@@ -145,7 +172,7 @@ def setup(ctx: AciesContext) -> None:
     run: int = ctx.cfg['run']
     modality: str = ctx.cfg['modality']
 
-    path = f'{data_dir}/{scene}/run{run}_{node}_{modality}.parquet'
+    path = f'{data_dir}/{scene}/run{run}_{node}_{_FILE_SUFFIX[modality]}.parquet'
     windows = _load_windows(path, modality)
     if not windows:
         logger.error('no data in %s', path)
@@ -156,6 +183,9 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['reload'] = threading.Event()
     ctx.app['start_at_ev'] = threading.Event()
     ctx.app['last_start_at'] = None
+
+    is_deactivated = ctx.cfg.get('deactivated', False)
+    ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
 
 
 @app.subscribe(OnChange('scene'), OnChange('node'), OnChange('run'), OnChange('modality'), OnChange('data_dir'))
@@ -215,7 +245,7 @@ def _try_reload(ctx: AciesContext) -> bool:
     node = ctx.cfg['node']
     run = ctx.cfg['run']
     modality = ctx.cfg['modality']
-    path = f'{data_dir}/{scene}/run{run}_{node}_{modality}.parquet'
+    path = f'{data_dir}/{scene}/run{run}_{node}_{_FILE_SUFFIX[modality]}.parquet'
     try:
         logger.debug('loading windows from %s', path)
         windows = _load_windows(path, modality)
@@ -385,13 +415,20 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
 @click.option(
     '--modality',
     required=True,
-    type=click.Choice(['geo', 'mic']),
-    help='Sensor modality.',
+    type=click.Choice(['geo', 'mic', 'drone_mic']),
+    help='Sensor modality. drone_mic replays 8 kHz audio from *_mic.parquet files, upsampled to 16 kHz.',
 )
 @click.option('--speed', default=1.0, type=float, show_default=True, help='Replay speed multiplier.')
 @click.option('--start-at', default=None, type=float, help='Start wallclock as epoch timestamp.')
 @click.option('--loop/--no-loop', default=False, show_default=True, help='Loop replay indefinitely.')
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
+@click.option(
+    '--deactivated',
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help='Start deactivated; playback begins once the deactivated key is set to false.',
+)
 def main(
     data_dir: str,
     scene: str,
@@ -402,10 +439,11 @@ def main(
     start_at: float | None,
     loop: bool,
     topic: str | None,
+    deactivated: bool,
 ) -> None:
     app.state.config.update(
         {
-            'deactivated': False,
+            'deactivated': deactivated,
             'data_dir': data_dir,
             'scene': scene,
             'node': node,

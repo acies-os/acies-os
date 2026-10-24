@@ -11,6 +11,9 @@
 #   SCENE=2024-03-29-ICT RUN=2 \
 #     docker compose -f edge.yml -f replay.yml --profile all up
 #
+# Each node also runs a drone audio replay (8 kHz upsampled to 16 kHz, <ns>/drone_mic) that starts
+# deactivated; set its `deactivated` key to false to begin playback.
+#
 # Override replay node names (e.g. for GCQ mapping):
 #   SCENE=2024-08-06-GQ RUN=29 NODE_RS1=gq-1 NODE_RS3=gq-2 \
 #     docker compose -f edge.yml -f replay.yml --profile rs1 --profile rs3 up
@@ -19,6 +22,9 @@
 #   SCENE             Scene name (required)
 #   RUN               Run ID (required)
 #   NODE_RS*          Override replay node name per host
+#   DRONE_SCENE       Drone audio scene (default: audrok)
+#   DRONE_RUN         Drone audio run ID (default: 1)
+#   DRONE_NODE_RS*    Drone audio node name in filename per host (default: rs1)
 #   DATA_DIR          Host path to data directory (default: /data)
 #   ZENOH_CONNECT     Zenoh endpoint (default: tcp/127.0.0.1:7501)
 #   ACIES_LOG         Per-logger level overrides
@@ -50,6 +56,12 @@ services:
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS1:-rs1} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: mic }
 
+  rs1-drone-mic:
+    <<: *replay
+    profiles: [rs1, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS1:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs1, ACIES_NAME: drone_mic }
+
   # --- rs2 ---
   rs2-geo:
     <<: *replay
@@ -62,6 +74,12 @@ services:
     profiles: [rs2, all]
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS2:-rs2} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: mic }
+
+  rs2-drone-mic:
+    <<: *replay
+    profiles: [rs2, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS2:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs2, ACIES_NAME: drone_mic }
 
   # --- rs3 ---
   rs3-geo:
@@ -76,6 +94,12 @@ services:
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS3:-rs3} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: mic }
 
+  rs3-drone-mic:
+    <<: *replay
+    profiles: [rs3, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS3:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs3, ACIES_NAME: drone_mic }
+
   # --- rs5 ---
   rs5-geo:
     <<: *replay
@@ -88,6 +112,12 @@ services:
     profiles: [rs5, all]
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS5:-rs5} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: mic }
+
+  rs5-drone-mic:
+    <<: *replay
+    profiles: [rs5, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS5:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs5, ACIES_NAME: drone_mic }
 
   # --- rs6 ---
   rs6-geo:
@@ -102,6 +132,12 @@ services:
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS6:-rs6} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: mic }
 
+  rs6-drone-mic:
+    <<: *replay
+    profiles: [rs6, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS6:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs6, ACIES_NAME: drone_mic }
+
   # --- rs7 ---
   rs7-geo:
     <<: *replay
@@ -114,6 +150,12 @@ services:
     profiles: [rs7, all]
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS7:-rs7} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: mic }
+
+  rs7-drone-mic:
+    <<: *replay
+    profiles: [rs7, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS7:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs7, ACIES_NAME: drone_mic }
 
   # --- rs8 ---
   rs8-geo:
@@ -128,6 +170,12 @@ services:
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS8:-rs8} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: mic }
 
+  rs8-drone-mic:
+    <<: *replay
+    profiles: [rs8, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS8:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs8, ACIES_NAME: drone_mic }
+
   # --- rs10 ---
   rs10-geo:
     <<: *replay
@@ -140,3 +188,9 @@ services:
     profiles: [rs10, all]
     command: acies-replay --data-dir /data --scene ${SCENE} --node ${NODE_RS10:-rs10} --run ${RUN} --modality mic
     environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: mic }
+
+  rs10-drone-mic:
+    <<: *replay
+    profiles: [rs10, all]
+    command: acies-replay --data-dir /data --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE_RS10:-rs1} --run ${DRONE_RUN:-1} --modality drone_mic --deactivated
+    environment: { <<: *env, ACIES_NAMESPACE: rs10, ACIES_NAME: drone_mic }
