@@ -6,7 +6,7 @@ normal data-plane handlers.
 
 Usage::
 
-    from acies.core.ctl import kv_get, kv_set, kv_del, kv_call
+    from acies.core.ctl import kv_get, kv_set, kv_del, kv_call, io_call
 
     # build ops (no I/O)
     ops = [
@@ -29,6 +29,8 @@ from .context import AciesContext
 from .msg import (
     AciesDel,
     AciesGet,
+    AciesIoRequest,
+    AciesIoResponse,
     AciesKvRequest,
     AciesKvResponse,
     AciesResult,
@@ -103,3 +105,25 @@ def kv_call(
         logger.error('unexpected response type from %s/ctl/kv: %s', target, type(resp))
         return []
     return list(resp.results)
+
+
+def io_call(ctx: AciesContext, target: str, *, timeout: float = 1.0) -> AciesIoResponse | None:
+    """Query ``<target>/ctl/io`` and return the target's I/O routing snapshot.
+
+    Returns None if the target does not respond within *timeout*.
+
+    Example::
+
+        resp = io_call(ctx, 'rs1/mic')
+        if resp is not None:
+            resp.io  # {spec_id: {'name': ..., 'inputs': [...], 'outputs': [...]}}
+    """
+    req = AciesIoRequest(source=target, timestamp=ctx.now())
+    resp = ctx.query(f'{target}/ctl/io', req, timeout=timeout, reply_type=AciesIoResponse)
+    if resp is None:
+        logger.warning('no response from %s/ctl/io (timeout=%.1fs)', target, timeout)
+        return None
+    if not isinstance(resp, AciesIoResponse):
+        logger.error('unexpected response type from %s/ctl/io: %s', target, type(resp))
+        return None
+    return resp
