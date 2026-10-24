@@ -2,8 +2,9 @@
 
 Records how long model loads, weight reloads, and inference calls take, keeps
 the last ``window`` samples per operation, and summarises them. Nothing is
-published; nodes keep a ``Timings`` in app state (``ctx.app['timings']``) and
-log the summary periodically and on shutdown.
+published; nodes keep a ``Timings`` in app state (``ctx.app['timings']``), log
+the summary periodically and on shutdown, and keep the latest summary in
+``sys/timing`` (``record_timing``) so a controller can read it with a kv get.
 
 Usage::
 
@@ -24,6 +25,7 @@ from contextlib import contextmanager
 from typing import Any
 
 import numpy as np
+from acies.core import AciesContext
 
 # how often nodes log the summary
 LOG_INTERVAL_S = 60.0
@@ -94,3 +96,12 @@ class Timings:
             for op, s in self.summary().items()
         ]
         return ' | '.join(parts) or 'no samples'
+
+
+def record_timing(ctx: AciesContext, timings: Timings) -> None:
+    """Store the current summary in ``sys/timing`` as ``{'time_ns': ..., 'ops': summary}``.
+
+    ``time_ns`` tells a reader how old the summary is. The whole dict is replaced at once, so a
+    concurrent ``kv get`` never sees a partial update.
+    """
+    ctx.app.config.setdefault('sys', {})['timing'] = {'time_ns': ctx.now(), 'ops': timings.summary()}

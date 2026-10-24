@@ -33,7 +33,7 @@ import numpy as np
 import tomli as tomllib
 from acies.buffers.temporal import TimeWindow
 from acies.core import AciesApp, AciesContext, setup_logging
-from acies.core.ctl import io_call, kv_call, kv_set
+from acies.core.ctl import io_call, kv_call, kv_get, kv_set
 from acies.core.msg import (
     AciesHeartbeat,
     AciesInference,
@@ -42,10 +42,12 @@ from acies.core.msg import (
     AciesResult,
     Err,
     KvEntry,
+    Ok,
 )
 from acies.core.namespace import matches
 
 from .graph import build_io_graph
+from .stats import build_stats
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,11 @@ _IO_QUERY_TIMEOUT_S = 2.0  # must stay well below the interval so runs do not ov
 _IO_QUERY_MAX_WORKERS = 16
 _IO_QUERY_STATES = frozenset({'active'})  # only apps in these states are queried
 _GRAPH_PUBLISH_INTERVAL_S = 2  # re-publish so a newly connected UI does not wait for the next io query
+# nodes refresh sys/memory and sys/timing every 60 s, so polling twice as fast keeps snapshots at most ~30 s old
+_STATS_QUERY_INTERVAL_S = 30
+_STATS_QUERY_TIMEOUT_S = 2.0  # must stay well below the interval so runs do not overlap
+_STATS_QUERY_MAX_WORKERS = 16
+_STATS_PUBLISH_INTERVAL_S = 2  # re-publish so a newly connected UI does not wait for the next poll
 _MODALITY_MAP = {
     'seismic': 'geo',
     'acoustic': 'mic',
@@ -688,6 +695,24 @@ def system_health(ctx: AciesContext) -> None:
     ctx.publish('ws://health', {'map': ctx.app.get('active_map'), 'hosts': hosts})
 
 
+def _alive_sources(ctx: AciesContext, states: frozenset[str] | None = None) -> list[str]:
+    """Sources whose latest heartbeat is recent, optionally limited to the given states."""
+    heartbeat_buf: TimeWindow = ctx.app['heartbeat']
+    now = ctx.now()
+    heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
+    alive_timeout_ns = ctx.cfg.get('alive_timeout', heartbeat_interval * _DEFAULT_ALIVE_MULTIPLIER) * _NS_PER_S
+
+    sources: list[str] = []
+    for source in heartbeat_buf.keys():
+        entry = heartbeat_buf.latest(source)
+        if entry is None:
+            continue
+        ts, state = entry
+        if (now - ts) < alive_timeout_ns and (states is None or state in states):
+            sources.append(source)
+    return sources
+
+
 def _store_io_cache(ctx: AciesContext, io_cache: dict[str, AciesIoResponse]) -> None:
     """Replace the io cache and the graph derived from it."""
     graph = build_io_graph(io_cache)
@@ -706,19 +731,7 @@ def collect_io(ctx: AciesContext) -> None:
     previous response (``response.timestamp`` tells how old it is) until its
     heartbeat is no longer alive or its state is filtered out.
     """
-    heartbeat_buf: TimeWindow = ctx.app['heartbeat']
-    now = ctx.now()
-    heartbeat_interval = ctx.cfg.get('heartbeat_interval', _DEFAULT_HEARTBEAT_INTERVAL_S)
-    alive_timeout_ns = ctx.cfg.get('alive_timeout', heartbeat_interval * _DEFAULT_ALIVE_MULTIPLIER) * _NS_PER_S
-
-    targets: list[str] = []
-    for source in heartbeat_buf.keys():
-        entry = heartbeat_buf.latest(source)
-        if entry is None:
-            continue
-        ts, state = entry
-        if (now - ts) < alive_timeout_ns and state in _IO_QUERY_STATES:
-            targets.append(source)
+    targets = _alive_sources(ctx, _IO_QUERY_STATES)
 
     if not targets:
         _store_io_cache(ctx, {})
@@ -749,6 +762,59 @@ def publish_graph(ctx: AciesContext) -> None:
     with ctx.app.lock:
         graph = ctx.app['graph']
     ctx.publish('ws://graph', {'timestamp': ctx.now(), **graph})
+
+
+def _ok_value(results: Sequence[AciesResult], i: int) -> Any:
+    """Value of the i-th kv result, or None if it is missing or an error (e.g. key not found)."""
+    if i < len(results) and isinstance(results[i], Ok):
+        return results[i].value  # pyright: ignore[reportAttributeAccessIssue]
+    return None
+
+
+@app.schedule(_STATS_QUERY_INTERVAL_S)
+def collect_stats(ctx: AciesContext) -> None:
+    """Read ``sys/memory`` and ``sys/timing`` from every live node and cache them.
+
+    Result: ``ctx.app['stats_cache']``, a ``{source: {'memory', 'timing', 'queried_at'}}`` dict that is
+    replaced as a whole each run. Nodes are queried in any state, because a deactivated model still holds
+    its weights in memory. Nodes that do not report stats (sensors, ...) answer with key-not-found and are
+    left out. A node that fails to answer keeps its previous entry (``queried_at`` tells how old it is)
+    until its heartbeat is no longer alive.
+    """
+    targets = [s for s in _alive_sources(ctx) if not matches('**/infra/**', s)]
+    old: dict[str, dict[str, Any]] = ctx.app['stats_cache']
+    new: dict[str, dict[str, Any]] = {}
+
+    if targets:
+        ops = [kv_get('sys', 'memory'), kv_get('sys', 'timing')]
+        with ThreadPoolExecutor(max_workers=min(len(targets), _STATS_QUERY_MAX_WORKERS)) as pool:
+            futures = {t: pool.submit(kv_call, ctx, t, ops, timeout=_STATS_QUERY_TIMEOUT_S) for t in targets}
+        now = ctx.now()
+        for target, f in futures.items():
+            try:
+                results = f.result()
+            except Exception:
+                logger.exception('stats query to %s failed', target)
+                results = []
+            if not results:  # no answer: keep what we had
+                if target in old:
+                    new[target] = old[target]
+                continue
+            memory, timing = _ok_value(results, 0), _ok_value(results, 1)
+            if memory is not None or timing is not None:
+                new[target] = {'memory': memory, 'timing': timing, 'queried_at': now}
+
+    with ctx.app.lock:
+        ctx.app['stats_cache'] = new
+    logger.debug('stats cache: %d/%d node(s) reporting', len(new), len(targets))
+
+
+@app.schedule(_STATS_PUBLISH_INTERVAL_S)
+def publish_stats(ctx: AciesContext) -> None:
+    """Publish the latest per-node and per-host stats to the UI."""
+    with ctx.app.lock:
+        cache = ctx.app['stats_cache']
+    ctx.publish('ws://stats', build_stats(cache, ctx.now()))
 
 
 @app.schedule(1.0)
@@ -823,6 +889,7 @@ def setup(ctx: AciesContext) -> None:
     ctx.app['heartbeat'] = TimeWindow(int(alive_timeout * 2) * _NS_PER_S)
     ctx.app['io_cache'] = {}  # source -> latest AciesIoResponse, filled by collect_io
     ctx.app['graph'] = build_io_graph({})  # derived from io_cache, published on ws://graph
+    ctx.app['stats_cache'] = {}  # source -> {memory, timing, queried_at}, filled by collect_stats
     logger.info(
         'gateway ready: %d node(s) in gps table, ensemble_win=%ds, alive_timeout=%ds',
         len(ctx.app['gps']),

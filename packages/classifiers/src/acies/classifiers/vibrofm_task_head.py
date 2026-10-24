@@ -31,7 +31,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from acies.classifiers.memory import sample_memory
-from acies.classifiers.timing import LOG_INTERVAL_S, Timings
+from acies.classifiers.timing import LOG_INTERVAL_S, Timings, record_timing
 from acies.core import AciesApp, AciesContext, OnChange, setup_logging
 from acies.core.msg import AciesEmbedding, AciesInference, AciesKvChange, AciesPrediction
 from acies.FoundationSense.task_head import VibrofmTaskHead  # pyright: ignore[reportMissingTypeStubs]
@@ -91,8 +91,10 @@ def teardown(ctx: AciesContext) -> None:
 
 @app.schedule(LOG_INTERVAL_S)
 def log_stats(ctx: AciesContext) -> None:
-    """Log rolling timings (app state) and process memory (also in sys/memory); nothing is published."""
-    logger.info('timing: %s', ctx.app['timings'].format())
+    """Log rolling timings and process memory; both are also kept in sys/timing and sys/memory."""
+    timings: Timings = ctx.app['timings']
+    logger.info('timing: %s', timings.format())
+    record_timing(ctx, timings)
     sample_memory(ctx, 'periodic', ctx.app['model'])
 
 
@@ -124,6 +126,7 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     # inference stats describe the previous weights; log them, then start fresh
     logger.info('timing of previous weights: %s', timings.format())
     timings.reset('infer')
+    record_timing(ctx, timings)  # replace the previous weights' summary in sys/timing right away
 
 
 @app.subscribe(OnChange('deactivated'))
