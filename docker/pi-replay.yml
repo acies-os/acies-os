@@ -53,7 +53,7 @@ services:
   geo:
     <<: *replay
     command: >-
-      acies-replay --data-dir /data
+      acies-replay --data-dir /data/replay
       --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
       --modality geo
     environment:
@@ -63,7 +63,7 @@ services:
   mic:
     <<: *replay
     command: >-
-      acies-replay --data-dir /data
+      acies-replay --data-dir /data/replay
       --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
       --modality mic
     environment:
@@ -75,7 +75,7 @@ services:
   drone_mic:
     <<: *replay
     command: >-
-      acies-replay --data-dir /data
+      acies-replay --data-dir /data/replay
       --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE:-rs1} --run ${DRONE_RUN:-1}
       --modality drone_mic --deactivated
     environment:
