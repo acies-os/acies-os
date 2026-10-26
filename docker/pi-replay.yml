@@ -75,7 +75,7 @@ services:
   drone_mic:
     <<: *replay
     command: >-
-      acies-replay --data-dir /data/replay
+      acies-replay --data-dir /data
       --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE:-rs1} --run ${DRONE_RUN:-1}
       --modality drone_mic --deactivated
     environment:
