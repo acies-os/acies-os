@@ -44,7 +44,7 @@ services:
   geo:
     <<: *replay
     command: >-
-      acies-replay --data-dir /data
+      acies-replay --data-dir /data/replay
       --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
       --modality geo
     environment:
@@ -54,7 +54,7 @@ services:
   mic:
     <<: *replay
     command: >-
-      acies-replay --data-dir /data
+      acies-replay --data-dir /data/replay
       --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
       --modality mic
     environment:

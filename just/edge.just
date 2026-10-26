@@ -3,9 +3,9 @@ acies_namespace := env("ACIES_NAMESPACE", `hostname -s`)
 edge_zenoh_connect := env("ZENOH_CONNECT", "tcp/127.0.0.1:7501")
 edge_zenoh_bridge := env("ZENOH_BRIDGE", "")
 pi_hosts := env("PI_HOSTS", "")
-mqtt_broker := env("MQTT_BROKER")
-mqtt_port := env("MQTT_PORT")
-mqtt_topic := env("MQTT_TOPIC")
+mqtt_broker := env("MQTT_BROKER", "")
+mqtt_port := env("MQTT_PORT", "")
+mqtt_topic := env("MQTT_TOPIC", "")
 
 [private]
 default:
