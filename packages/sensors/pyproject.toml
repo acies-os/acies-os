@@ -1,0 +1,46 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
+
+[project]
+name = "acies-sensors"
+version = "0.1.2"
+description = "Sensor services for AciesOS (microphone, geophone)."
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+  "acies-core",
+  "msgspec>=0.20",
+  "numpy>=1.24",
+  "polars>=1.39.3",
+  "rawshake",
+  "sounddevice>=0.5.5",
+]
+scripts.acies-geo = "acies.sensors.geo:main"
+scripts.acies-gps = "acies.sensors.gps:main"
+scripts.acies-idle = "acies.sensors.idle:main"
+scripts.acies-mic = "acies.sensors.mic:main"
+scripts.acies-replay = "acies.sensors.replay:main"
+
+[dependency-groups]
+dev = [
+  "matplotlib>=3.10.8",
+  "polars>=1.39.3",
+  "scipy>=1.15.3",
+  "scipy-stubs>=1.15.3",
+]
+
+[tool.hatch]
+build.targets.wheel.packages = [ "src/acies" ]
+metadata.allow-direct-references = true
+
+[tool.uv]
+sources.acies-core = { workspace = true }
+sources.rawshake = { git = "https://github.com/jinyangustc/rawshake.git", tag = "v0.1.15" }

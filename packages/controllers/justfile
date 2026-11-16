@@ -1,0 +1,77 @@
+set dotenv-load := true
+
+[private]
+default:
+    @just --list
+
+RUNCMD := `command -v uv || command -v rye || (echo "Please install uv" >&2 && exit 1)`
+zrouter := '$ZROUTER'
+
+# set ZROUTER endpoint (format: <protocol>/<ip>:<port>)
+update-zrouter end-point:
+    @./scripts/set-zrouter.sh {{ end-point }}
+
+echo-zrouter:
+    @echo '{{ zrouter }}='{{ zrouter }}
+
+# delete all *.log files
+clean:
+    rm -f *.log
+
+# start controller expecting <n> services with heartbeat timeout <ht>s
+ctl n ht='10': echo-zrouter
+    LOGLEVEL=debug {{ RUNCMD }} run acies-controller \
+    --namespace "cp" \
+    --connect {{ zrouter }} \
+    --proc_name "controller" \
+    --n_services {{ n }} \
+    --topic "*/vehicle" \
+    --topic "*/noise" \
+    --heartbeat_timeout {{ ht }} \
+    --execution-plan data/ict.toml
+
+# start twinctl expecting <n> twins
+twinctl n:
+    LOGLEVEL=debug {{ RUNCMD }} run acies-twinctl \
+    --namespace "cp" \
+    --proc_name "twinctl" \
+    --connect {{ zrouter }} \
+    --topic "twin/*/**/vehicle" \
+    --n_twins {{ n }}
+
+# start ash listening on <topic>
+ash topic='nothing':
+    {{ RUNCMD }} run ash --namespace "cp" --connect {{ zrouter }} --proc_name "ash" --topic {{ topic }}
+
+# continuously monitor the <log> file for <pat>
+tail log filter="reconfigure":
+    tail -F {{ log }} | grep "{{ filter }}" --line-buffered #| cut -d']' -f2-
+
+# continuously monitor the controller log for system states
+grep-states:
+    @just tail cp_controller.log 'running\|standby\|initializing'
+
+# continuously monitor the controller log for injected failure messages
+grep-failures:
+    @just tail cp_controller.log 'injected'
+
+# continuously monitor the controller log for messages sent to the UI
+grep-ui:
+    @just tail cp_controller.log 'send states to UI:'
+
+# continuously monitor the controller log for ensemble classification results
+grep-ensemble:
+    @just tail cp_controller.log 'Detected:'
+
+# start a count-down timer for <t> seconds
+count-down t:
+    @watch -n1 'echo $(({{ t }}-$(date +%s)))'
+
+# monitor twin performance
+watch-twin-log:
+    @watch -n1 'cat twin_perf.log'
+
+# sync code to the public repo
+publish:
+    rsync -av --delete ./src/acies/controller ../acies-os/src/
+    rsync -av --delete ./src/acies/twin ../acies-os/src/

@@ -6,8 +6,13 @@ dist/
 docs/_build/
 wheels/
 *.egg-info
-*.lock
+# *.lock
 
-# venv
 .venv
+
 *.log
+.env
+data/*
+
+.DS_Store
+replay/*

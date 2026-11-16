@@ -1,0 +1,752 @@
+"""Tests for default control handlers: KV path helpers and the ctl/kv service."""
+
+import threading
+import time
+from contextlib import contextmanager
+
+import msgspec
+import pytest
+
+from acies.core._control import _del_path, _get_path, _set_path  # pyright: ignore[reportPrivateUsage]
+from acies.core.app import AciesApp
+from acies.core.context import AciesContext
+from acies.core.msg import (
+    AciesDel,
+    AciesGet,
+    AciesIoRequest,
+    AciesIoResponse,
+    AciesKvRequest,
+    AciesKvResponse,
+    AciesRouteRequest,
+    AciesRouteResponse,
+    AciesSchemaRequest,
+    AciesSchemaResponse,
+    AciesSet,
+    Err,
+    Ok,
+    TopicRename,
+)
+from acies.core.router import Router
+from acies.core.transport import LocalTransport
+
+# ---------------------------------- helpers ----------------------------------
+
+
+def _make_app() -> tuple[AciesApp, Router, threading.Event]:
+    router = Router()
+    router.add_transport(LocalTransport())
+    app = AciesApp('test-app', namespace='test-host', router=router)
+    ready = threading.Event()
+
+    @app.on_startup
+    def _set_ready(_ctx: AciesContext) -> None:
+        ready.set()
+
+    return app, router, ready
+
+
+@contextmanager
+def running(app: AciesApp, ready: threading.Event, timeout: float = 2.0):
+    t = threading.Thread(target=app.run, daemon=True)
+    t.start()
+    assert ready.wait(timeout=timeout), 'app did not become ready'
+    try:
+        yield
+    finally:
+        app.stop()
+        t.join(timeout=timeout)
+
+
+def _kv_query(
+    router: Router,
+    ops: list,
+    source: str = 'test',
+    timeout: float = 2.0,
+) -> AciesKvResponse:
+    raw = router.query(
+        'test-host/test-app/ctl/kv',
+        msgspec.msgpack.encode(AciesKvRequest(source=source, timestamp=0, ops=ops)),
+        timeout=timeout,
+    )
+    assert raw is not None, 'kv query timed out'
+    return msgspec.msgpack.decode(raw, type=AciesKvResponse)
+
+
+# --------------------------- tests for path helpers ---------------------------
+
+
+class TestGetPath:
+    def test_top_level(self):
+        assert _get_path({'a': 1}, ['a']) == 1
+
+    def test_nested(self):
+        assert _get_path({'a': {'b': {'c': 42}}}, ['a', 'b', 'c']) == 42
+
+    def test_returns_subtree(self):
+        assert _get_path({'a': {'b': 1}}, ['a']) == {'b': 1}
+
+    def test_missing_top_level(self):
+        with pytest.raises(KeyError) as exc:
+            _get_path({}, ['missing'])
+        assert exc.value.args[0] == 'missing'
+
+    def test_missing_nested(self):
+        with pytest.raises(KeyError) as exc:
+            _get_path({'a': {'b': 1}}, ['a', 'x'])
+        assert exc.value.args[0] == 'x'
+
+    def test_through_non_dict(self):
+        with pytest.raises(KeyError) as exc:
+            _get_path({'a': 'scalar'}, ['a', 'b'])
+        assert exc.value.args[0] == 'b'
+
+
+class TestSetPath:
+    def test_top_level(self):
+        config = {'a': 1}
+        _set_path(config, ['a'], 99)
+        assert config['a'] == 99
+
+    def test_nested(self):
+        config = {'a': {'b': 1}}
+        _set_path(config, ['a', 'b'], 42)
+        assert config['a']['b'] == 42
+
+    def test_missing_top_level(self):
+        with pytest.raises(KeyError) as exc:
+            _set_path({}, ['missing'], 1)
+        assert exc.value.args[0] == 'missing'
+
+    def test_missing_nested(self):
+        with pytest.raises(KeyError) as exc:
+            _set_path({'a': {'b': 1}}, ['a', 'x'], 1)
+        assert exc.value.args[0] == 'x'
+
+    def test_missing_intermediate(self):
+        with pytest.raises(KeyError) as exc:
+            _set_path({}, ['missing', 'b'], 1)
+        assert exc.value.args[0] == 'missing'
+
+    def test_intermediate_is_scalar(self):
+        with pytest.raises(KeyError) as exc:
+            _set_path({'a': 'scalar'}, ['a', 'b'], 1)
+        assert exc.value.args[0] == 'a'
+
+
+class TestDelPath:
+    def test_top_level(self):
+        config = {'a': 1, 'b': 2}
+        _del_path(config, ['a'])
+        assert 'a' not in config
+
+    def test_nested(self):
+        config = {'a': {'b': 1, 'c': 2}}
+        _del_path(config, ['a', 'b'])
+        assert config == {'a': {'c': 2}}
+
+    def test_missing_key(self):
+        with pytest.raises(KeyError):
+            _del_path({'a': 1}, ['missing'])
+
+    def test_missing_nested(self):
+        with pytest.raises(KeyError):
+            _del_path({'a': {'b': 1}}, ['a', 'missing'])
+
+
+# -------------------------- tests for ctl/kv service --------------------------
+
+
+class TestKvGet:
+    def test_existing_key(self):
+        app, router, ready = _make_app()
+        app.state.config['threshold'] = 0.5
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=['threshold'])])
+        assert resp.results == [Ok(value=0.5)]
+
+    def test_nested_key(self):
+        app, router, ready = _make_app()
+        app.state.config['model'] = {'threshold': 0.8, 'window': 100}
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=['model', 'threshold'])])
+        assert resp.results == [Ok(value=0.8)]
+
+    def test_subtree(self):
+        app, router, ready = _make_app()
+        app.state.config['model'] = {'threshold': 0.8}
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=['model'])])
+        assert resp.results == [Ok(value={'threshold': 0.8})]
+
+    def test_missing_key(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=['missing'])])
+        assert isinstance(resp.results[0], Err)
+        assert 'missing' in resp.results[0].reason
+
+    def test_empty_path(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=[])])
+        assert isinstance(resp.results[0], Err)
+        assert 'empty' in resp.results[0].reason
+
+    def test_sys_key_readable(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=['sys', 'namespace'])])
+        assert resp.results == [Ok(value='test-host')]
+
+
+class TestKvSet:
+    def test_existing_key(self):
+        app, router, ready = _make_app()
+        app.state.config['threshold'] = 0.5
+        with running(app, ready):
+            resp = _kv_query(router, [AciesSet(key=['threshold'], value=0.9)])
+            assert resp.results == [Ok()]
+        assert app.state.config['threshold'] == 0.9
+
+    def test_nested_key(self):
+        app, router, ready = _make_app()
+        app.state.config['model'] = {'threshold': 0.5}
+        with running(app, ready):
+            resp = _kv_query(router, [AciesSet(key=['model', 'threshold'], value=0.9)])
+            assert resp.results == [Ok()]
+        assert app.state.config['model']['threshold'] == 0.9
+
+    def test_missing_key(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesSet(key=['missing'], value=1)])
+        assert isinstance(resp.results[0], Err)
+        assert 'missing' in resp.results[0].reason
+
+    def test_sys_state_allowed(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesSet(key=['sys', 'state'], value='paused')])
+            assert resp.results == [Ok()]
+        assert app.state.config['sys']['state'] == 'paused'
+
+    def test_sys_namespace_protected(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesSet(key=['sys', 'namespace'], value='other')])
+        assert isinstance(resp.results[0], Err)
+        assert resp.results[0].reason == 'key_protected'
+
+    def test_sys_subtree_protected(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesSet(key=['sys'], value={})])
+        assert isinstance(resp.results[0], Err)
+        assert resp.results[0].reason == 'key_protected'
+
+    def test_empty_path(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesSet(key=[], value=1)])
+        assert isinstance(resp.results[0], Err)
+        assert 'empty' in resp.results[0].reason
+
+
+class TestKvDel:
+    def test_existing_key(self):
+        app, router, ready = _make_app()
+        app.state.config['temp'] = 42
+        with running(app, ready):
+            resp = _kv_query(router, [AciesDel(key=['temp'])])
+            assert resp.results == [Ok()]
+        assert 'temp' not in app.state.config
+
+    def test_nested_key(self):
+        app, router, ready = _make_app()
+        app.state.config['model'] = {'threshold': 0.5, 'window': 100}
+        with running(app, ready):
+            resp = _kv_query(router, [AciesDel(key=['model', 'threshold'])])
+            assert resp.results == [Ok()]
+        assert app.state.config['model'] == {'window': 100}
+
+    def test_missing_key(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesDel(key=['missing'])])
+        assert isinstance(resp.results[0], Err)
+        assert 'missing' in resp.results[0].reason
+
+    def test_sys_protected(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesDel(key=['sys', 'state'])])
+        assert isinstance(resp.results[0], Err)
+        assert resp.results[0].reason == 'key_protected'
+
+    def test_empty_path(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _kv_query(router, [AciesDel(key=[])])
+        assert isinstance(resp.results[0], Err)
+        assert 'empty' in resp.results[0].reason
+
+
+class TestKvMixed:
+    def test_multiple_ops_aligned(self):
+        """Results are positionally aligned with ops."""
+        app, router, ready = _make_app()
+        app.state.config['a'] = 1
+        app.state.config['b'] = 2
+        with running(app, ready):
+            resp = _kv_query(
+                router,
+                [
+                    AciesGet(key=['a']),
+                    AciesSet(key=['b'], value=99),
+                    AciesGet(key=['missing']),
+                    AciesGet(key=['b']),
+                ],
+            )
+        assert len(resp.results) == 4
+        assert resp.results[0] == Ok(value=1)
+        assert resp.results[1] == Ok()
+        assert isinstance(resp.results[2], Err)
+        assert resp.results[3] == Ok(value=99)
+
+    def test_failed_op_does_not_abort_batch(self):
+        """A failed op in the middle does not prevent subsequent ops."""
+        app, router, ready = _make_app()
+        app.state.config['x'] = 10
+        with running(app, ready):
+            resp = _kv_query(
+                router,
+                [
+                    AciesGet(key=['missing']),
+                    AciesGet(key=['x']),
+                ],
+            )
+        assert isinstance(resp.results[0], Err)
+        assert resp.results[1] == Ok(value=10)
+
+
+# ------------------------------ decorator enforcement ------------------------
+
+
+class TestDecoratorEnforcement:
+    def test_subscribe_missing_msg_raises(self):
+        """Registering a subscriber without a 'msg' parameter raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match="must have a 'msg' parameter"):
+
+            @app.subscribe('topic/x')
+            def no_msg(_ctx: AciesContext) -> None:
+                pass
+
+    def test_service_missing_msg_raises(self):
+        """Registering a service without a 'msg' parameter raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match="must have a 'msg' parameter"):
+
+            @app.service('svc/bad')
+            def no_msg(_ctx: AciesContext) -> _Msg:
+                return _Msg()
+
+    def test_service_untyped_msg_raises(self):
+        """Registering a service with bare msgspec.Struct as msg type raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match='specific type annotation'):
+
+            @app.service('svc/bad')
+            def base_msg(_ctx: AciesContext, _msg: msgspec.Struct) -> _Msg:
+                return _Msg()
+
+    def test_service_missing_return_type_raises(self):
+        """Registering a service without a return annotation raises TypeError."""
+        app, _, _ = _make_app()
+        with pytest.raises(TypeError, match='return type annotation'):
+
+            @app.service('svc/bad')
+            def no_return(_ctx: AciesContext, _msg: _Msg):  # type: ignore[return]
+                pass
+
+
+# ---------------------------------- route ------------------------------------
+
+
+def _route_query(
+    router: Router,
+    spec_id: str | None = None,
+    spec_name: str | None = None,
+    inputs: list[TopicRename] | None = None,
+    outputs: list[TopicRename] | None = None,
+    timeout: float = 2.0,
+):
+    raw = router.query(
+        'test-host/test-app/ctl/route',
+        msgspec.msgpack.encode(
+            AciesRouteRequest(
+                source='test',
+                timestamp=0,
+                spec_id=spec_id,
+                spec_name=spec_name,
+                inputs=inputs or [],
+                outputs=outputs or [],
+            )
+        ),
+        timeout=timeout,
+    )
+    assert raw is not None, 'route query timed out'
+    return msgspec.msgpack.decode(raw, type=AciesRouteResponse)
+
+
+class TestRoute:
+    def test_not_found_by_id(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _route_query(router, spec_id='deadbeef')
+        assert isinstance(resp.result, Err)
+        assert 'not found' in resp.result.reason
+
+    def test_not_found_by_name(self):
+        app, router, ready = _make_app()
+        with running(app, ready):
+            resp = _route_query(router, spec_name='no_such_handler')
+        assert isinstance(resp.result, Err)
+        assert 'not found' in resp.result.reason
+
+    def test_reroute_subscriber_by_name(self):
+        received: list[str] = []
+        app, router, ready = _make_app()
+
+        @app.subscribe('sensor/a')
+        def handler(ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            received.append(ctx.app.config.get('_last', ''))
+
+        with running(app, ready):
+            # Subscribe to sensor/b -> unsubscribe from sensor/a
+            resp = _route_query(
+                router,
+                spec_name='handler',
+                inputs=[TopicRename(old='sensor/a', new='sensor/b')],
+            )
+            assert isinstance(resp.result, Ok)
+
+            # sensor/a should no longer trigger the handler
+            router.publish('sensor/a', msgspec.msgpack.encode({'x': 1}))
+            time.sleep(0.05)
+            assert received == []
+
+            # sensor/b should now trigger it
+            router.publish('sensor/b', msgspec.msgpack.encode({'x': 2}))
+            time.sleep(0.05)
+            assert len(received) == 1
+
+    def test_reroute_subscriber_by_id(self):
+        app, router, ready = _make_app()
+
+        @app.subscribe('topic/old')
+        def handler2(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            # Look up the spec id via io_map (keys are spec ids)
+            io = router.io_map
+            spec_id = next(k for k, v in io.items() if v['name'] == 'handler2')
+            resp = _route_query(
+                router,
+                spec_id=spec_id,
+                inputs=[TopicRename(old='topic/old', new='topic/new')],
+            )
+            assert isinstance(resp.result, Ok)
+            assert 'topic/new' in router.io_map[spec_id]['inputs']  # type: ignore[operator]
+            assert 'topic/old' not in router.io_map[spec_id]['inputs']  # type: ignore[operator]
+
+    def test_add_input_only(self):
+        """old=None means add without removing."""
+        app, router, ready = _make_app()
+
+        @app.subscribe('topic/a')
+        def handler3(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='handler3',
+                inputs=[TopicRename(old=None, new='topic/b')],
+            )
+            assert isinstance(resp.result, Ok)
+            io = router.io_map
+            entry = next(v for v in io.values() if v['name'] == 'handler3')
+            assert 'topic/a' in entry['inputs']
+            assert 'topic/b' in entry['inputs']
+
+    def test_remove_input_only(self):
+        """new=None means remove without adding."""
+        app, router, ready = _make_app()
+
+        @app.subscribe('topic/a')
+        def handler4(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='handler4',
+                inputs=[TopicRename(old='topic/a', new=None)],
+            )
+            assert isinstance(resp.result, Ok)
+            io = router.io_map
+            entry = next(v for v in io.values() if v['name'] == 'handler4')
+            assert 'topic/a' not in entry['inputs']
+
+
+# -------------------------------- route outputs --------------------------------
+
+
+class _Msg(msgspec.Struct, frozen=True):
+    v: int = 0
+
+
+class TestRouteOutput:
+    def test_redirect_output(self):
+        """After rerouting, handler publishes to the new topic."""
+        received_on_b: list[_Msg] = []
+        done = threading.Event()
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def producer(ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            ctx.publish('result/a', _Msg(v=1))
+
+        @app.subscribe('result/b')
+        def consumer(_ctx: AciesContext, msg: _Msg) -> None:
+            received_on_b.append(msg)
+            done.set()
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='producer',
+                outputs=[TopicRename(old='result/a', new='result/b')],
+            )
+            assert isinstance(resp.result, Ok)
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'message did not arrive on result/b'
+
+        assert received_on_b[0].v == 1
+
+    def test_suppress_output(self):
+        """new=None suppresses the publish entirely."""
+        received: list[_Msg] = []
+        done = threading.Event()
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def producer2(ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            ctx.publish('result/c', _Msg(v=99))
+            done.set()
+
+        @app.subscribe('result/c')
+        def sink(_ctx: AciesContext, msg: _Msg) -> None:
+            received.append(msg)
+
+        with running(app, ready):
+            resp = _route_query(
+                router,
+                spec_name='producer2',
+                outputs=[TopicRename(old='result/c', new=None)],
+            )
+            assert isinstance(resp.result, Ok)
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'handler never ran'
+            time.sleep(0.05)  # give any stray publish time to arrive
+
+        assert received == []
+
+    def test_consecutive_output_renames(self):
+        """t1->t2, then t2->t3: messages end up on t3."""
+        received_on_t3: list[_Msg] = []
+        done = threading.Event()
+
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def producer3(ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            ctx.publish('out/t1', _Msg(v=7))
+
+        @app.subscribe('out/t3')
+        def sink3(_ctx: AciesContext, msg: _Msg) -> None:
+            received_on_t3.append(msg)
+            done.set()
+
+        with running(app, ready):
+            _ = _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t1', new='out/t2')])
+            _ = _route_query(router, spec_name='producer3', outputs=[TopicRename(old='out/t2', new='out/t3')])
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'message did not arrive on out/t3'
+
+        assert received_on_t3[0].v == 7
+
+
+# ------------------------------------ io -------------------------------------
+
+
+def _io_query(router: Router, timeout: float = 2.0) -> AciesIoResponse:
+    raw = router.query(
+        'test-host/test-app/ctl/io',
+        msgspec.msgpack.encode(AciesIoRequest(source='test', timestamp=0)),
+        timeout=timeout,
+    )
+    assert raw is not None, 'io query timed out'
+    return msgspec.msgpack.decode(raw, type=AciesIoResponse)
+
+
+class TestIo:
+    def test_inputs_appear_in_io_map(self):
+        """ctl/io lists the subscription topic as an input for the handler."""
+        app, router, ready = _make_app()
+
+        @app.subscribe('sensor/data')
+        def handler(_ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _io_query(router)
+
+        assert isinstance(resp, AciesIoResponse)
+        entry = next(v for v in resp.io.values() if v['name'] == 'handler')
+        assert 'sensor/data' in entry['inputs']
+
+    def test_outputs_accumulated_at_runtime(self):
+        """ctl/io shows an output topic only after the handler has published to it."""
+        done = threading.Event()
+        app, router, ready = _make_app()
+
+        @app.subscribe('trigger')
+        def publisher(ctx: AciesContext, _msg: msgspec.Struct) -> None:
+            ctx.publish('result/y', _Msg(v=1))
+            done.set()
+
+        with running(app, ready):
+            # Before any publish: outputs should be empty for this handler
+            resp_before = _io_query(router)
+            entry_before = next(v for v in resp_before.io.values() if v['name'] == 'publisher')
+            assert entry_before['outputs'] == []
+
+            router.publish('trigger', msgspec.msgpack.encode(_Msg()))
+            assert done.wait(timeout=2.0), 'handler never ran'
+
+            resp_after = _io_query(router)
+
+        entry_after = next(v for v in resp_after.io.values() if v['name'] == 'publisher')
+        assert 'result/y' in entry_after['outputs']
+
+    def test_service_input_appears(self):
+        """ctl/io shows the topic for a service handler in inputs."""
+
+        app, router, ready = _make_app()
+
+        @app.service('svc/ping')
+        def pinger(_ctx: AciesContext, _msg: _Msg) -> _Msg:
+            return _Msg(v=42)
+
+        with running(app, ready):
+            resp = _io_query(router)
+
+        entry = next(v for v in resp.io.values() if v['name'] == 'pinger')
+        assert 'svc/ping' in entry['inputs']
+
+
+# ---------------------------------- schema -----------------------------------
+
+
+class _Req(msgspec.Struct, frozen=True):
+    x: int = 0
+
+
+class _Resp(msgspec.Struct, frozen=True):
+    y: str = ''
+
+
+def _schema_query(router: Router, timeout: float = 2.0) -> AciesSchemaResponse:
+    raw = router.query(
+        'test-host/test-app/ctl/schema',
+        msgspec.msgpack.encode(AciesSchemaRequest(source='test', timestamp=0)),
+        timeout=timeout,
+    )
+    assert raw is not None, 'schema query timed out'
+    return msgspec.msgpack.decode(raw, type=AciesSchemaResponse)
+
+
+class TestSchema:
+    def test_service_appears_with_topic(self):
+        """ctl/schema includes a registered service with its resolved topic."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/compute')
+        def compute(_ctx: AciesContext, msg: _Req) -> _Resp:
+            return _Resp(y=str(msg.x))
+
+        with running(app, ready):
+            resp = _schema_query(router)
+
+        assert isinstance(resp, AciesSchemaResponse)
+        entry = next(v for v in resp.schemas.values() if v['name'] == 'compute')
+        assert entry['topic'] == 'svc/compute'
+
+    def test_request_and_response_schemas_present(self):
+        """Both request and response schemas are included when types are annotated."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/typed')
+        def typed_svc(_ctx: AciesContext, msg: _Req) -> _Resp:
+            return _Resp(y=str(msg.x))
+
+        with running(app, ready):
+            resp = _schema_query(router)
+
+        entry = next(v for v in resp.schemas.values() if v['name'] == 'typed_svc')
+        assert 'request' in entry
+        assert 'response' in entry
+        # request/response are {schema, encoding} objects
+        assert '$ref' in entry['request']['schema']
+        assert '$ref' in entry['response']['schema']
+        assert entry['request']['encoding'] == {'format': 'msgpack', 'array_like': False}
+        assert entry['response']['encoding'] == {'format': 'msgpack', 'array_like': False}
+
+    def test_subscribers_excluded(self):
+        """Subscribers do not appear in ctl/schema — only services."""
+        app, router, ready = _make_app()
+
+        @app.subscribe('data/in')
+        def listener(_ctx: AciesContext, _msg: _Req) -> None:
+            pass
+
+        with running(app, ready):
+            resp = _schema_query(router)
+
+        names = {v['name'] for v in resp.schemas.values()}
+        assert 'listener' not in names
+
+    def test_schema_accessible_via_kv(self):
+        """sys.schemas is readable via ctl/kv as a fallback."""
+        app, router, ready = _make_app()
+
+        @app.service('svc/kv_check')
+        def kv_svc(_ctx: AciesContext, _msg: _Req) -> _Resp:
+            return _Resp()
+
+        with running(app, ready):
+            resp = _kv_query(router, [AciesGet(key=['sys', 'schemas'])])
+
+        assert isinstance(resp.results[0], Ok)
+        schemas = resp.results[0].value
+        assert isinstance(schemas, dict)
+        entry = next(v for v in schemas.values() if v['name'] == 'kv_svc')
+        assert entry['topic'] == 'svc/kv_check'

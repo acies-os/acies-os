@@ -1,0 +1,613 @@
+"""AciesApp — user-facing entry point.
+
+Owns the Router, Executor, timer thread, and TaskSpec registry.
+Decorators register TaskSpecs; run() wires everything together and blocks.
+
+Thread model:
+  Main thread       — runs run(); blocks on _stop_event after wiring
+  Transport threads — owned by each Transport; push to router inbound queue
+  Router thread     — drains inbound queue; creates Jobs; calls executor.enqueue()
+  Timer thread      — one shared thread; fires SCHEDULE jobs into executor
+  Dispatcher thread — owned by Executor; drains internal queue; submits to pool
+  Worker threads    — execute handlers; call ctx.publish() synchronously
+  Managed threads   — @app.thread fns; started after startup hooks, joined before shutdown hooks
+"""
+
+from __future__ import annotations
+
+import heapq
+import inspect
+import logging
+import socket
+import threading
+import time
+import uuid
+from collections.abc import Callable
+from types import FunctionType
+from typing import Any, TypeVar, get_type_hints
+from urllib.parse import urlparse
+
+import msgspec
+
+from ._cli import create_acies_cli
+from ._control import make_heartbeat_spec, make_io_spec, make_kv_spec, make_route_spec, make_schema_spec
+from .context import AciesContext, AppState, TaskState, deep_merge
+from .executor import Executor
+from .namespace import CtlTopic, Namespace, OnChange, Topic, TopicArg
+from .router import Router
+from .signal_handlers import temporary_signal_handlers
+from .task import Job, ScheduleSpec, ServiceSpec, SubscriberSpec, TaskSpec, ThreadSpec
+from .transport import WebSocketTransport, ZenohTransport
+
+logger = logging.getLogger(__name__)
+
+# Handlers are plain functions (not partials or callable objects), so they
+# always have __name__ and work with get_type_hints().
+F = TypeVar('F', bound=FunctionType)
+
+_WS_PREFIX = 'ws://'
+_WS_DEFAULT_HOST = '0.0.0.0'
+_WS_DEFAULT_PORT = 8765
+
+
+def _parse_ws_endpoint(endpoint: str) -> tuple[str, int]:
+    """Parse a WebSocket listen endpoint into (host, port)."""
+    parsed = urlparse(endpoint)
+    ws_host = parsed.hostname or _WS_DEFAULT_HOST
+    ws_port = parsed.port or _WS_DEFAULT_PORT
+    return ws_host, ws_port
+
+
+def _get_msg_encoding_metadata(t: type) -> dict[str, str | bool] | None:
+    """Return encoding metadata for a type if it is a msgspec.Struct subclass."""
+    assert isinstance(t, type), f'expected a type, got {t!r}'
+    if issubclass(t, msgspec.Struct):
+        return {'format': 'msgpack', 'array_like': t.__struct_config__.array_like}
+    return None
+
+
+def _has_var_keyword(fn: Callable[..., Any]) -> bool:
+    """Return True if fn accepts **kwargs. If so, all keyword args are absorbed
+    and named parameter checks can be skipped."""
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in inspect.signature(fn).parameters.values())
+
+
+def _check_param(fn: FunctionType, decorator: str, name: str, annotation: str | None = None) -> None:
+    """Raise TypeError if fn is missing a required named parameter.
+
+    Accepts either ``name`` or ``_name`` (underscore prefix to silence LSP
+    unused-variable warnings). Skipped if fn accepts **kwargs.
+    """
+    if _has_var_keyword(fn):
+        return
+    params = inspect.signature(fn).parameters
+    if name not in params and f'_{name}' not in params:
+        param = f'{name}: {annotation}' if annotation else name
+        raise TypeError(f"{decorator} '{fn.__name__}': handler must have a '{param}' parameter")
+
+
+# TODO: consider FastAPI-style dependency injection for handler arguments.
+# Extra parameters beyond the required set (ctx, msg, stop) could be resolved
+# from ctx.app.data by name at dispatch time. A From('key') marker (like
+# Depends() in FastAPI) would keep the source explicit and allow validation
+# at run() time. Deferred because ctx.app['key'] is already concise and
+# the added framework complexity is not yet justified.
+def _call_handler(fn: Callable[..., Any], **kwargs: Any) -> Any:
+    """Call fn with kwargs, remapping canonical names to _name variants if needed.
+
+    Mirrors the ``_name`` acceptance in ``_check_param``: if the caller passes
+    ``ctx=...`` but the function declares ``_ctx``, the value is forwarded under
+    the actual parameter name so the call succeeds.
+    """
+    if _has_var_keyword(fn):
+        return fn(**kwargs)
+    params = inspect.signature(fn).parameters
+    mapped = {(f'_{k}' if f'_{k}' in params else k): v for k, v in kwargs.items()}
+    filtered = {k: v for k, v in mapped.items() if k in params}
+    return fn(**filtered)
+
+
+class AciesApp:
+    def __init__(
+        self,
+        name: str | None = None,
+        namespace: str | None = None,
+        router: Router | None = None,
+    ) -> None:
+        resolved_name = name or uuid.uuid4().hex[:6]
+        resolved_namespace = namespace or socket.gethostname()
+        if router is None:
+            router = Router()
+        self._router: Router = router
+        self._executor: Executor = Executor()
+        self._tasks: list[TaskSpec] = []
+        self._startup_hooks: list[FunctionType] = []
+        self._shutdown_hooks: list[FunctionType] = []
+        self._stop_event: threading.Event = threading.Event()
+        self._startup_ok: bool = False
+        self._timer_thread: threading.Thread | None = None
+        self._task_ctxs: dict[TaskSpec, AciesContext] = {}
+        self._app_state: AppState = AppState()
+        self._app_state.config['sys'] = {
+            'namespace': resolved_namespace,
+            'name': resolved_name,
+            'state': 'initializing',
+        }
+        self._ns: Namespace  # initialized in run() from config['sys']
+
+        # ---------------------------- system tasks ----------------------------
+        # periodic heartbeat
+        self._tasks.append(make_heartbeat_spec())
+        # key-value operations (set/get/del) on app_state.config
+        self._tasks.append(make_kv_spec())
+        # dynamic routing: task inputs/outputs topic updates
+        self._tasks.append(make_route_spec(self._router))
+        # task graph introspection: mapping of tasks to their input and output topics
+        self._tasks.append(make_io_spec(self._router))
+        # service schema introspection: request/response types for registered services
+        self._tasks.append(make_schema_spec())
+
+    @property
+    def name(self) -> str:
+        return self._app_state.config['sys']['name']  # type: ignore[no-any-return]
+
+    @property
+    def namespace(self) -> str:
+        return self._app_state.config['sys']['namespace']  # type: ignore[no-any-return]
+
+    @property
+    def state(self) -> AppState:
+        return self._app_state
+
+    # --------------------------------- CLI -----------------------------------
+
+    def cli(self, **kwargs: Any) -> Callable[[Callable[..., None]], Callable[..., None]]:
+        """Decorator that turns a function into a Click command with middleware options.
+
+        Middleware options (--acies-namespace, --acies-name) are injected and consumed
+        before the user's function runs; they never appear in the user's kwargs.
+        Parsed values are stored in app_state.config['sys'] and are accessible
+        to handlers via ctx.app.config['sys'].
+
+        Usage::
+
+            acies = AciesApp('mic', 'placeholder')
+            cli = acies.cli()
+
+            @cli
+            @click.option('--threshold', default=0.5)
+            def main(**kwargs):
+                acies.state.data.update(kwargs)
+                acies.run()
+
+            if __name__ == '__main__':
+                main()
+        """
+
+        def configure(values: dict[str, Any]) -> None:
+            deep_merge(self._app_state.config, values)
+
+        return create_acies_cli(configure, **kwargs)
+
+    # ----------------------------- Lifecyle hooks -----------------------------
+
+    def on_startup(self, fn: F) -> F:
+        """Called once after all subsystems are started, before managed threads::
+
+        @app.on_startup
+        def setup(ctx: AciesContext) -> None:
+            ...
+        """
+        _check_param(fn, 'on_startup', 'ctx', 'AciesContext')
+        self._startup_hooks.append(fn)
+        return fn
+
+    def on_shutdown(self, fn: F) -> F:
+        """Called once after managed threads are joined, during shutdown::
+
+        @app.on_shutdown
+        def teardown(ctx: AciesContext) -> None:
+            ...
+        """
+        _check_param(fn, 'on_shutdown', 'ctx', 'AciesContext')
+        self._shutdown_hooks.append(fn)
+        return fn
+
+    # ---------------------------- task decorators ----------------------------
+
+    def thread(self, fn: F) -> F:
+        """Long-running thread: fn(ctx, stop) loops until stop.is_set().
+
+        The thread is started after startup hooks and joined (timeout=5s)
+        before shutdown hooks run. Any unhandled exception is logged and
+        triggers global shutdown.
+
+        The function MUST check stop.is_set() and return promptly when set.
+        A thread that ignores stop will be abandoned after the join timeout
+        and will not block process exit (threads are daemon). Signature::
+
+            @app.thread
+            def my_thread(ctx: AciesContext, stop: threading.Event) -> None:
+                while not stop.is_set():
+                    ...
+        """
+
+        _check_param(fn, 'thread', 'ctx', 'AciesContext')
+        _check_param(fn, 'thread', 'stop', 'threading.Event')
+
+        def _run(ctx: AciesContext, stop: threading.Event) -> None:
+            try:
+                _call_handler(fn, ctx=ctx, stop=stop)
+            except Exception:
+                logger.exception('managed thread %r crashed; triggering shutdown', fn.__name__)
+                self.stop()
+
+        self._tasks.append(ThreadSpec(name=fn.__name__, fn=_run))
+        return fn
+
+    def subscribe(self, *topics: TopicArg) -> Callable[[F], F]:
+        """Message-driven: handler is called for each message on any of the topics.
+
+        The handler must have a parameter named ``msg``::
+
+            @app.subscribe('sensor/data')
+            def on_data(ctx: AciesContext, msg: MyMsg) -> None:
+                ...
+        """
+
+        def decorator(fn: F) -> F:
+            _check_param(fn, 'subscriber', 'ctx', 'AciesContext')
+            _check_param(fn, 'subscriber', 'msg')
+            hints = get_type_hints(fn)
+            msg_type = hints.get('msg') or hints.get('_msg')
+            self._tasks.append(SubscriberSpec(name=fn.__name__, fn=fn, topics=topics, msg_type=msg_type))
+            logger.debug('subscribe %r registered on %d topic(s)', fn.__name__, len(topics))
+            return fn
+
+        return decorator
+
+    def schedule(self, interval: float) -> Callable[[F], F]:
+        """Timer-driven: handler is called every `interval` seconds::
+
+        @app.schedule(interval=1.0)
+        def on_tick(ctx: AciesContext) -> None:
+            ...
+        """
+
+        def decorator(fn: F) -> F:
+            _check_param(fn, 'schedule', 'ctx', 'AciesContext')
+            self._tasks.append(ScheduleSpec(name=fn.__name__, fn=fn, interval=interval))
+            logger.debug('schedule %r registered: interval=%.1fs', fn.__name__, interval)
+            return fn
+
+        return decorator
+
+    def service(self, topic: TopicArg) -> Callable[[F], F]:
+        """RPC/queryable: handler is called on queries to topic; return value is the reply.
+
+        The handler must have a ``msg`` parameter with a specific type annotation
+        (not bare ``msgspec.Struct``) and a typed return annotation. Both are
+        required by ``ctl/schema`` for service discovery::
+
+            @app.service('svc/compute')
+            def compute(ctx: AciesContext, msg: MyRequest) -> MyResponse:
+                ...
+        """
+
+        def decorator(fn: F) -> F:
+            _check_param(fn, 'service', 'ctx', 'AciesContext')
+            _check_param(fn, 'service', 'msg')
+            hints = get_type_hints(fn)
+            msg_type = hints.get('msg') or hints.get('_msg')
+            return_type = hints.get('return')
+            if not _has_var_keyword(fn) and (msg_type is None or msg_type is msgspec.Struct):
+                raise TypeError(
+                    f"service '{fn.__name__}': 'msg' parameter must have a specific type annotation "
+                    f'(not bare msgspec.Struct)'
+                )
+            if return_type is None:
+                raise TypeError(f"service '{fn.__name__}': handler must have a return type annotation")
+            self._tasks.append(
+                ServiceSpec(name=fn.__name__, fn=fn, topic=topic, msg_type=msg_type, return_type=return_type)
+            )
+            logger.debug('service %r registered on %r', fn.__name__, topic)
+            return fn
+
+        return decorator
+
+    # -------------------------------- Dispatch --------------------------------
+
+    def dispatch(self, job: Job) -> None:
+        """Decode, execute, and reply. Called by the Executor on a worker thread.
+
+        This is the only place in the system where msgpack decoding and
+        encoding happen — keeping the router and executor byte-agnostic.
+        """
+        if not self._startup_ok:
+            logger.debug('dropping job %r: startup not complete', job.spec.name)
+            return
+        ctx = self._task_ctxs[job.spec]
+        try:
+            match job.spec:
+                case ScheduleSpec():
+                    _call_handler(job.spec.fn, ctx=ctx)
+                case SubscriberSpec() | ServiceSpec() as spec:
+                    assert job.raw is not None, 'SubscriberSpec/ServiceSpec job must have raw bytes'
+                    msg = (  # pyright: ignore[reportUnknownVariableType]
+                        msgspec.msgpack.decode(job.raw, type=spec.msg_type)
+                        if spec.msg_type is not None
+                        else msgspec.msgpack.decode(job.raw)
+                    )
+                    result = _call_handler(spec.fn, ctx=ctx, msg=msg, topic=job.topic)
+                    if job.reply_fn is not None:
+                        job.reply_fn(msgspec.msgpack.encode(result))
+                case ThreadSpec():
+                    raise AssertionError(f'ThreadSpec {job.spec.name!r} must never be dispatched')
+        except msgspec.DecodeError:
+            logger.exception('decode error in %r (%d bytes)', job.spec.name, len(job.raw or b''))
+        except Exception:
+            logger.exception('unhandled exception in handler %r', job.spec.name)
+
+    # ------------------------------- Run & Stop -------------------------------
+
+    def _resolve_topic(self, topic: TopicArg) -> str:
+        """Resolve a topic argument to a concrete string at run() time.
+
+        Handles five forms:
+        - ``str`` — returned as-is, or resolved via ``format_map`` if it
+          contains ``{placeholders}``.
+        - ``Topic`` — resolved via ``ns.topic(*parts, prefix=...)``.
+        - ``CtlTopic`` — resolved via ``ns.ctl(*parts)``.
+        - ``OnChange`` — resolved to ``<host>/<name>/ctl/notify/<key>``.
+        - ``str`` with ``{key}`` — resolved via ``format_map`` from ``app.state.config``.
+        """
+        match topic:
+            case str():
+                if '{' not in topic:
+                    return topic
+                try:
+                    return topic.format_map(self._app_state.config)
+                except KeyError as e:
+                    raise ValueError(f'topic template {topic!r} references unknown config key {e}') from e
+            case Topic():
+                if topic.prefix is True:
+                    return f'{self._ns.base}/{topic.path}'
+                elif topic.prefix:
+                    return f'{topic.prefix}/{topic.path}'
+                else:
+                    return topic.path
+            case CtlTopic():
+                return f'{self._ns.ctl.base}/{topic.path}'
+            case OnChange():
+                return f'{self._ns.ctl.notify}/{topic.key}'
+
+    def run(self) -> None:  # noqa: C901
+        """Start all subsystems, run lifecycle hooks, block until stop() is called.
+
+        Must be called from the main thread. Blocking until shutdown is the
+        intended usage -- call this as the last statement in main().
+
+        Startup order:
+          1. Transports registered (ZenohTransport, WebSocketTransport)
+          2. Task contexts created
+          3. Executor and Router started (transport sessions opened)
+          4. Service schemas populated in config
+          5. Tasks registered with Router (subscribe/advertise)
+          6. Timer thread started (ScheduleSpec)
+          7. State set to 'active'; startup hooks called; startup_ok set
+          8. Managed threads (ThreadSpec) started -- after hooks so ctx.app.data
+             is fully populated before any thread accesses it
+          9. Main thread blocks on _stop_event
+
+        Shutdown order (triggered by stop()):
+          1. _stop_event set -> main thread unblocks
+          2. Managed threads joined (5s shared deadline) -- threads exit because
+             _stop_event is already set; joined first so they can still publish
+             during wind-down (router is still up)
+          3. Router stopped -- no new inbound jobs enqueued after this point
+          4. Executor stopped -- drains queue, then pool shuts down
+          5. Shutdown hooks called -- router already down; hooks must not publish
+        """
+
+        self._ns = Namespace(self._app_state.config['sys']['namespace'], self._app_state.config['sys']['name'])
+        logger.info('starting: namespace=%r name=%r tasks=%d', self._ns.namespace, self._ns.name, len(self._tasks))
+
+        # -------------------------- setup transports --------------------------
+
+        # --- zenoh transport (default) ---
+        # Skip if a default transport was already injected (e.g. LocalTransport in tests).
+        sys_cfg = self._app_state.config['sys']
+        if self._router._default_transport is None:
+            net_mode: str = sys_cfg.get('net_mode', 'client')
+            connect_eps: list[str] = sys_cfg.get('connect', [])
+            zenoh_listen_eps: list[str] = [ep for ep in sys_cfg.get('listen', []) if not ep.startswith(_WS_PREFIX)]
+            self._router.add_transport(ZenohTransport(mode=net_mode, connect=connect_eps, listen=zenoh_listen_eps))
+            logger.info(
+                'zenoh transport registered: mode=%r connect=%r listen=%r', net_mode, connect_eps, zenoh_listen_eps
+            )
+
+        seen_ws: set[str] = set()
+        for endpoint in self._app_state.config['sys'].get('listen', []):
+            if not endpoint.startswith(_WS_PREFIX) or endpoint in seen_ws:
+                continue
+            seen_ws.add(endpoint)
+            ws_host, ws_port = _parse_ws_endpoint(endpoint)
+            self._router.add_transport(WebSocketTransport(host=ws_host, port=ws_port), prefix=_WS_PREFIX)
+            logger.info('ws:// transport registered: %s:%d', ws_host, ws_port)
+
+        has_ws_subs = any(
+            any(isinstance(t, str) and t.startswith(_WS_PREFIX) for t in spec.topics)
+            for spec in self._tasks
+            if isinstance(spec, SubscriberSpec)
+        )
+        if has_ws_subs and not self._router.has_prefix_transport(_WS_PREFIX):
+            logger.warning(
+                'handlers subscribed to `ws://` topics, but no `ws://` listen endpoint is configured; '
+                'these handlers will never be invoked; '
+                'pass `--acies-listen=ws://<host>:<port>` to enable the `ws://` handlers, '
+                'for example `--acies-listen=ws://0.0.0.0:8765'
+            )
+
+        def _make_publish(spec: TaskSpec) -> Callable[[str, bytes], None]:
+            def _publish(topic: str, raw: bytes) -> None:
+                resolved = self._router.resolve_output(spec, topic)
+                if resolved is None:
+                    return  # suppressed
+                self._router.record_output(spec, resolved)
+                self._router.publish(resolved, raw)
+
+            return _publish
+
+        self._task_ctxs = {
+            task: AciesContext(
+                publish_fn=_make_publish(task),
+                query_fn=self._router.query,
+                now_fn=time.time_ns,
+                app=self._app_state,
+                task=TaskState(),
+                ns=self._ns,
+            )
+            for task in self._tasks
+        }
+
+        self._executor.start(self.dispatch, n_workers=self._app_state.config['sys'].get('workers', 4))
+        self._router.start(self._executor)
+        logger.debug('executor and router started')
+
+        # Populate sys.schemas before registering tasks so ctl/schema is
+        # ready as soon as the app is wired.
+        schemas: dict[str, Any] = {}
+        for task in self._tasks:
+            if isinstance(task, ServiceSpec):
+                entry: dict[str, Any] = {'name': task.name, 'topic': self._resolve_topic(task.topic)}
+                if task.msg_type is not None and task.msg_type is not msgspec.Struct:
+                    req: dict[str, Any] = {'schema': msgspec.json.schema(task.msg_type)}
+                    enc = _get_msg_encoding_metadata(task.msg_type)
+                    if enc is not None:
+                        req['encoding'] = enc
+                    entry['request'] = req
+                if task.return_type is not None and task.return_type is not type(None):
+                    resp: dict[str, Any] = {'schema': msgspec.json.schema(task.return_type)}
+                    enc = _get_msg_encoding_metadata(task.return_type)
+                    if enc is not None:
+                        resp['encoding'] = enc
+                    entry['response'] = resp
+                schemas[task.id] = entry
+        self._app_state.config['sys']['schemas'] = schemas
+        logger.debug('service schemas registered: %d', len(schemas))
+
+        # Register tasks before startup hooks so the app is fully wired
+        # when user code in on_startup runs.
+        n_subs, n_svcs = 0, 0
+        for task in self._tasks:
+            match task:
+                case SubscriberSpec():
+                    for topic in task.topics:
+                        self._router.subscribe(self._resolve_topic(topic), task)
+                    n_subs += 1
+                case ServiceSpec():
+                    self._router.advertise(self._resolve_topic(task.topic), task)
+                    n_svcs += 1
+                case ScheduleSpec() | ThreadSpec():
+                    pass  # handled by timer thread
+        logger.debug('tasks registered: %d subscriber(s) %d service(s)', n_subs, n_svcs)
+
+        periodic_tasks = [t for t in self._tasks if isinstance(t, ScheduleSpec)]
+        if periodic_tasks:
+            self._timer_thread = threading.Thread(
+                target=self._timer_loop,
+                args=(periodic_tasks,),
+                name='timer',
+                daemon=True,
+            )
+            self._timer_thread.start()
+            logger.debug('timer started: %d schedule(s)', len(periodic_tasks))
+
+        hook_ctx = AciesContext(
+            publish_fn=self._router.publish,
+            query_fn=self._router.query,
+            now_fn=time.time_ns,
+            app=self._app_state,
+            task=TaskState(),
+            ns=self._ns,
+        )
+
+        with self._app_state.lock:
+            self._app_state.config['sys']['state'] = 'active'
+
+        managed_threads: list[threading.Thread] = []
+        with temporary_signal_handlers(self.stop):
+            try:
+                for hook in self._startup_hooks:
+                    logger.debug('startup hook: %r', hook.__name__)
+                    _call_handler(hook, ctx=hook_ctx)
+                self._startup_ok = True
+                logger.info('startup hooks registered: %d', len(self._startup_hooks))
+
+                for spec in (t for t in self._tasks if isinstance(t, ThreadSpec)):
+                    t = threading.Thread(
+                        target=spec.fn,
+                        args=(self._task_ctxs[spec], self._stop_event),
+                        name=spec.name,
+                        daemon=True,  # process exit is not blocked if thread outlives join timeout
+                    )
+                    t.start()
+                    managed_threads.append(t)
+                    logger.debug('managed thread %r started', spec.name)
+                logger.info('managed threads started: %d', len(managed_threads))
+
+                logger.info('startup ok: entering main loop')
+                # Block until stop() is called (via signal, or directly by app code).
+                # SIGINT/SIGTERM are handled by temporary_signal_handlers above,
+                # which calls stop() -> sets the event -> wait() returns normally.
+                _ = self._stop_event.wait()
+                logger.info('shutdown initiated')
+
+            finally:
+                deadline = time.monotonic() + 5.0
+                for t in managed_threads:
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        t.join(timeout=remaining)
+                    if t.is_alive():
+                        logger.warning('managed thread %r did not exit within deadline', t.name)
+                self._router.stop()
+                self._executor.stop()
+                logger.debug('router and executor stopped')
+                if self._startup_ok:
+                    for hook in self._shutdown_hooks:
+                        logger.debug('shutdown hook: %r', hook.__name__)
+                        _call_handler(hook, ctx=hook_ctx)
+                logger.info(f'{self._ns.base} stopped; hasta luego!')
+
+    def stop(self) -> None:
+        """Signal run() to begin shutdown. Safe to call from any thread."""
+        logger.debug('stop requested')
+        self._stop_event.set()
+
+    def _timer_loop(self, schedule_specs: list[ScheduleSpec]) -> None:
+        """Fire ScheduleSpec jobs at their configured intervals.
+
+        Uses a min-heap of (next_fire_time, spec) so a single thread handles
+        all timers. Sleeps exactly until the next due time via
+        _stop_event.wait(timeout), which also serves as the shutdown signal.
+        """
+        logger.debug('timer thread running: %d schedule(s)', len(schedule_specs))
+        now = time.monotonic()
+        # int tiebreaker prevents ScheduleSpec comparison when fire times are equal.
+        heap: list[tuple[float, int, ScheduleSpec]] = [
+            (now + spec.interval, i, spec) for i, spec in enumerate(schedule_specs)
+        ]
+        heapq.heapify(heap)
+
+        while True:
+            next_fire, idx, spec = heap[0]
+            delay = next_fire - time.monotonic()
+            if delay > 0 and self._stop_event.wait(timeout=delay):
+                break  # shutdown signalled during sleep
+            if self._stop_event.is_set():
+                break
+            _ = heapq.heapreplace(heap, (time.monotonic() + spec.interval, idx, spec))
+            logger.debug('timer firing %r', spec.name)
+            self._executor.enqueue(Job(spec=spec, raw=None))
+        logger.debug('timer thread exiting')

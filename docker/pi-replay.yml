@@ -1,0 +1,207 @@
+# Pi demo deployment: zenohd (client) + replay sensors + classifier.
+# Scenario 3 (tabletop demo).
+#
+# Usage:
+#
+#   ACIES_NAMESPACE=rs1 SCENE=2024-03-29-ICT RUN=2 \
+#     ZENOH_BRIDGE="--connect tcp/LAPTOP_IP:7447" \
+#     docker compose -f pi-replay.yml up
+#
+# Env vars:
+#   ACIES_NAMESPACE   Node name (e.g. rs1)
+#   SCENE             Scene name (e.g. 2024-03-29-ICT)
+#   RUN               Run ID (e.g. 2)
+#   NODE              Replay node name if different from ACIES_NAMESPACE
+#   DRONE_SCENE       Drone audio scene (default: audrok); starts deactivated
+#   DRONE_RUN         Drone audio run ID (default: 1)
+#   DRONE_NODE        Drone audio node name in filename (default: rs1)
+#   MODEL_DIR         Host path to model directory (default: /model)
+#   VFM_ENCODER_WEIGHT       Shared VibroFM encoder weight (geo+mic and audio-only) inside MODEL_DIR
+#   VFM_VEHICLE_HEAD_WEIGHT  Vehicle task head weight (multimodal embedding) inside MODEL_DIR
+#   VFM_DRONE_HEAD_WEIGHT    Drone task head weight (audio embedding) inside MODEL_DIR
+#   VFM_LABELS / VFM_DRONE_LABELS  Comma-separated labels for each head
+#   VFM_WEIGHT        End-to-end vehicle VibroFM weight (UI pipeline "e2e")
+#   VFM_DRONE_E2E_WEIGHT     End-to-end drone model weight (full AuDroK checkpoint) inside MODEL_DIR
+#   ZENOH_CONNECT     Local zenoh endpoint (default: tcp/127.0.0.1:7501)
+#   ZENOH_BRIDGE      Connect to edge zenohd (e.g. --connect tcp/192.168.1.10:7447)
+#   ACIES_LOG         Per-logger level overrides
+
+x-env: &env
+  PATH: /acies-os/.venv/bin:/usr/local/bin:/usr/bin:/bin
+  ACIES_LOG: ${ACIES_LOG:-}
+  ACIES_NAMESPACE: ${ACIES_NAMESPACE:-}
+  ACIES_CONNECT: ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+
+x-replay: &replay
+  image: acies-pi:latest
+  network_mode: host
+  volumes:
+    - /data:/data:ro
+    - ~/.acies:/root/.acies
+  restart: unless-stopped
+
+services:
+  zenohd:
+    image: acies-pi:latest
+    command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} --connect ${ZENOH_BRIDGE:-}
+    # command: zenohd --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501} --connect ${ZENOH_BRIDGE:-}
+    network_mode: host
+    volumes:
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  geo:
+    <<: *replay
+    command: >-
+      acies-replay --data-dir /data/replay
+      --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
+      --modality geo
+    environment:
+      <<: *env
+      ACIES_NAME: geo
+
+  mic:
+    <<: *replay
+    command: >-
+      acies-replay --data-dir /data/replay
+      --scene ${SCENE} --node ${NODE:-${ACIES_NAMESPACE}} --run ${RUN}
+      --modality mic
+    environment:
+      <<: *env
+      ACIES_NAME: mic
+
+  # Drone audio (8 kHz recording, upsampled to 16 kHz) on <ns>/drone_mic, separate from mic.
+  # Starts deactivated; set its `deactivated` key to false to begin playback.
+  drone_mic:
+    <<: *replay
+    command: >-
+      acies-replay --data-dir /data
+      --scene ${DRONE_SCENE:-audrok} --node ${DRONE_NODE:-rs1} --run ${DRONE_RUN:-1}
+      --modality drone_mic --deactivated
+    environment:
+      <<: *env
+      ACIES_NAME: drone_mic
+
+  # One encoder, three inputs (geo, mic, drone_mic), two embedding outputs:
+  #   <ns>/vfm_encoder/vehicle/embedding  (geo + mic)  -> vfm_vehicle head
+  #   <ns>/vfm_encoder/drone/embedding    (drone_mic)  -> vfm_drone head
+  # Every model starts deactivated; the gateway activates the pipeline chosen in the UI config panel:
+  #   "fm"  -> vfm_encoder + vfm_vehicle  (+ Drone: vfm_drone + drone_mic)
+  #   "e2e" -> e2e_vehicle                (+ Drone: e2e_drone + drone_mic)
+  vfm_encoder:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm-encoder
+      --weight /model/${VFM_ENCODER_WEIGHT}
+      --geo ${ACIES_NAMESPACE:-}/geo
+      --mic ${ACIES_NAMESPACE:-}/mic
+      --drone-mic ${ACIES_NAMESPACE:-}/drone_mic
+      --deactivated
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm_encoder
+    volumes:
+      - /data:/data
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # Publishes to <ns>/vfm_vehicle/vehicle (consumed by tracker/gateway via **/vehicle).
+  vfm_vehicle:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm-head
+      --weight /model/${VFM_VEHICLE_HEAD_WEIGHT}
+      --input ${ACIES_NAMESPACE:-}/vfm_encoder/vehicle/embedding
+      --embed-dim ${VFM_VEHICLE_EMBED_DIM:-512}
+      --labels ${VFM_LABELS}
+      --deactivated
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm_vehicle
+    volumes:
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # Publishes to <ns>/vfm_drone/drone, kept off **/vehicle so the tracker ignores drone classes.
+  vfm_drone:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm-head
+      --weight /model/${VFM_DRONE_HEAD_WEIGHT}
+      --input ${ACIES_NAMESPACE:-}/vfm_encoder/drone/embedding
+      --output ${ACIES_NAMESPACE:-}/vfm_drone/drone
+      --embed-dim ${VFM_DRONE_EMBED_DIM:-256}
+      --labels ${VFM_DRONE_LABELS}
+      --deactivated
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: vfm_drone
+    volumes:
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # End-to-end vehicle VibroFM (UI pipeline "e2e"); publishes <ns>/e2e_vehicle/vehicle.
+  e2e_vehicle:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm
+      --weight /model/${VFM_WEIGHT}
+      --geo ${ACIES_NAMESPACE:-}/geo
+      --mic ${ACIES_NAMESPACE:-}/mic
+      --labels ${VFM_LABELS}
+      --deactivated
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: e2e_vehicle
+    volumes:
+      - /data:/data
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # End-to-end drone model (UI pipeline "e2e" + Drone): full AuDroK checkpoint on drone audio;
+  # publishes <ns>/e2e_drone/drone.
+  e2e_drone:
+    image: acies-pi:latest
+    command: >-
+      acies-vfm
+      --weight /model/${VFM_DRONE_E2E_WEIGHT}
+      --modality audio
+      --geo ${ACIES_NAMESPACE:-}/geo
+      --mic ${ACIES_NAMESPACE:-}/drone_mic
+      --output ${ACIES_NAMESPACE:-}/e2e_drone/drone
+      --labels ${VFM_DRONE_LABELS}
+      --deactivated
+    network_mode: host
+    environment:
+      <<: *env
+      ACIES_NAME: e2e_drone
+    volumes:
+      - ${MODEL_DIR:-/model}:/model:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # diffphys:
+  #   image: acies-pi:latest
+  #   command: >-
+  #     acies-diffphys
+  #     --weight /model/${DIFFPHYS_WEIGHT}
+  #     --geo ${ACIES_NAMESPACE:-}/geo
+  #     --mic ${ACIES_NAMESPACE:-}/mic
+  #     --labels ${DIFFPHYS_LABELS}
+  #   network_mode: host
+  #   environment:
+  #     <<: *env
+  #     ACIES_NAME: diffphys
+  #   volumes:
+  #     - /data:/data
+  #     - ${MODEL_DIR:-/model}:/model:ro
+  #     - ~/.acies:/root/.acies
+  #   restart: unless-stopped

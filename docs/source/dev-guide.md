@@ -140,7 +140,7 @@ def main(mode, connect, listen, topic, namespace, proc_name,
     ...
 ```
 
-Everything from `mode` → `proc_name` is used by the base `Service` to configure the Zenoh session and topic names; the rest are your app’s knobs.
+Everything from `mode` -> `proc_name` is used by the base `Service` to configure the Zenoh session and topic names; the rest are your app’s knobs.
 
 ---
 

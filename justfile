@@ -1,29 +1,38 @@
+set dotenv-load := true
+set allow-duplicate-variables := true
+set allow-duplicate-recipes := true
+
+import 'just/dev.just'
+import 'just/docker.just'
+import 'just/pi.just'
+import 'just/edge.just'
+
 [private]
 default:
-    @just --list
+    @just -f {{ justfile() }} --list
 
-# delete all *.log files
-clean:
-    rm -f *.log
+# WP exp additioanl routes
+add-routes:
+    sudo route -n add -net 10.7.0.0/24 192.168.68.77
+    sudo route -n add -net 10.7.1.0/24 192.168.68.78
+    netstat -nr
 
-RUNCMD := `command -v uv || command -v rye || (echo "Please install uv" >&2 && exit 1)`
-DOCS_SOURCE := "source"
-DOCS_BUILD := "_build"
+# monitor routers
+pings:
+    @fping -l 192.168.68.77 192.168.68.78
 
-# Build HTML docs with Sphinx
-build-doc:
-    cd docs && {{ RUNCMD }} run sphinx-build -b html {{ DOCS_SOURCE }} {{ DOCS_BUILD }}
-    @echo "Docs built at docs/{{ DOCS_BUILD }}/index.html"
+# server the UI
+serve-via-eugene:
+    @ssh -N \
+       -o ExitOnForwardFailure=yes \
+       -R 127.0.0.1:15173:127.0.0.1:5173 \
+       -R 127.0.0.1:18765:127.0.0.1:8765 \
+       eugene
 
-live-doc:
-    echo $PWD
-    {{ RUNCMD }} run docs/watch-doc.py
-
-# Open docs in a browser (Windows/mac/wsl compatible)
-view-doc:
-    (sleep 1; wslview http://localhost:8000 \
-        || xdg-open http://localhost:8000 \
-        || powershell.exe -NoProfile start http://localhost:8000 \
-        || open http://localhost:8000 \
-        || true) &
-    python3 -m http.server -d docs/{{ DOCS_BUILD }} 8000
+# receive the UI via eugene
+receive-via-eugene:
+    @ssh -N \
+       -o ExitOnForwardFailure=yes \
+       -L 5173:localhost:15173 \
+       -L 8765:localhost:18765 \
+       eugene

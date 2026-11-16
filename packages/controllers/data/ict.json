@@ -1,0 +1,73 @@
+{
+  "gps": {
+    "rs1": [40.2880557, -88.1261142],
+    "rs2": [40.2880399, -88.1265561],
+    "rs3": [40.288536, -88.1261122],
+    "rs5": [40.2885294, -88.1265625],
+    "rs6": [40.2890204, -88.1261176],
+    "rs7": [40.2890153, -88.1265243],
+    "rs8": [40.2894818, -88.1261236],
+    "rs10": [40.2894761, -88.126479]
+  },
+  "multi_label_confidence_threshold": {
+    "miata": 0.5,
+    "cx30": 0.5,
+    "gle350": 0.5,
+    "mustang": 0.5
+  },
+  "ensemble_win": 30,
+  "ensemble_size": 1,
+  "service_types": {
+    "geo": "(?:.*[^_]+|^)(geo).*",
+    "mic": "(?:.*[^_]+|^)(mic).*",
+    "infer": ".*((?:vfm|mae|ds)(?:_geo|_mic)*).*"
+  },
+  "ok_states": [
+    ["mic", "geo", "vfm"],
+    ["mic", "geo", "mae"],
+    ["mic", "geo", "ds"],
+    ["mic", "vfm_mic"],
+    ["mic", "mae_mic"],
+    ["mic", "ds_mic"],
+    ["geo", "vfm_geo"],
+    ["geo", "mae_geo"],
+    ["geo", "ds_geo"]
+  ],
+  "service_failures": [
+    ["mic", "geo", "vfm_geo"],
+    ["mic", "geo", "mae_geo"],
+    ["mic", "geo", "ds_geo"],
+    ["mic", "geo", "vfm_mic"],
+    ["mic", "geo", "mae_mic"],
+    ["mic", "geo", "ds_mic"],
+    ["mic", "geo"],
+    ["mic", "vfm"],
+    ["mic", "mae"],
+    ["mic", "ds"],
+    ["mic", "vfm_geo"],
+    ["mic", "mae_geo"],
+    ["mic", "ds_geo"],
+    ["mic"],
+    ["geo", "vfm"],
+    ["geo", "mae"],
+    ["geo", "ds"],
+    ["geo", "vfm_mic"],
+    ["geo", "mae_mic"],
+    ["geo", "ds_mic"],
+    ["geo"]
+  ],
+  "service_failover": "infer",
+  "node_failures": [
+    [],
+    ["vfm"],
+    ["mae"],
+    ["ds"],
+    ["vfm_geo"],
+    ["mae_geo"],
+    ["ds_geo"],
+    ["vfm_mic"],
+    ["mae_mic"],
+    ["ds_mic"]
+  ],
+  "node_failover": "activate_backup_node"
+}

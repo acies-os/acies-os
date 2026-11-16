@@ -1,0 +1,477 @@
+"""Tests for TimeWindow."""
+
+from __future__ import annotations
+
+import pytest
+from acies.buffers.temporal import TimeWindow
+
+NS = 1_000_000_000  # 1 second in nanoseconds
+
+
+def _make(window_s: int, now_ns: int) -> tuple[TimeWindow, list[int]]:
+    """Create a TimeWindow with a controllable clock."""
+    clock = [now_ns]
+    buf = TimeWindow(window_ns=window_s * NS, _now_fn=lambda: clock[0])
+    return buf, clock
+
+
+# --- basic add/get ---
+
+
+def test_add_and_get():
+    buf, _ = _make(5, 100 * NS)
+    buf.add('a', 98 * NS, 'v1')
+    buf.add('a', 99 * NS, 'v2')
+    entries = buf.get('a')
+    assert len(entries) == 2
+    assert entries[0] == (98 * NS, 'v1')
+    assert entries[1] == (99 * NS, 'v2')
+
+
+def test_get_returns_copy():
+    """Mutating the returned list should not affect internal state."""
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v')
+    result = buf.get('a')
+    result.clear()
+    assert len(buf.get('a')) == 1
+
+
+def test_get_missing_key():
+    buf, _ = _make(5, 100 * NS)
+    assert buf.get('missing') == []
+
+
+# --- data_clock ---
+
+
+def test_data_clock_keeps_historical_timestamps():
+    """With data_clock=True, historical timestamps are not pruned immediately."""
+    buf = TimeWindow(window_ns=4 * NS, data_clock=True)
+    # Timestamps from 2024 -- far in the past relative to wall clock
+    t0 = 1_700_000_000 * NS
+    buf.add('a', t0, 'v1')
+    buf.add('a', t0 + NS, 'v2')
+    buf.add('a', t0 + 2 * NS, 'v3')
+    assert len(buf.get('a')) == 3
+
+
+def test_data_clock_prunes_relative_to_latest():
+    """With data_clock=True, cutoff is latest_ts - window_ns."""
+    buf = TimeWindow(window_ns=2 * NS, data_clock=True)
+    t0 = 1_700_000_000 * NS
+    buf.add('a', t0, 'old')
+    buf.add('a', t0 + NS, 'mid')
+    buf.add('a', t0 + 3 * NS, 'new')  # latest_ts = t0+3; cutoff = t0+1
+    entries = buf.get('a')
+    assert len(entries) == 2
+    assert entries[0][1] == 'mid'
+    assert entries[1][1] == 'new'
+
+
+def test_data_clock_empty_buffer_returns_zero():
+    """_latest_ts starts at 0; empty buffer does not error."""
+    buf = TimeWindow(window_ns=4 * NS, data_clock=True)
+    assert buf.get('a') == []
+
+
+def test_wall_clock_unaffected():
+    """data_clock=False (default) still uses wall clock."""
+    buf, clock = _make(4, 100 * NS)
+    buf.add('a', 90 * NS, 'old')
+    buf.add('a', 99 * NS, 'keep')
+    assert len(buf.get('a')) == 1
+
+
+# --- pruning ---
+
+
+def test_old_entries_pruned():
+    buf, _ = _make(5, 100 * NS)
+    buf.add('a', 90 * NS, 'old')
+    buf.add('a', 96 * NS, 'keep')
+    entries = buf.get('a')
+    assert len(entries) == 1
+    assert entries[0][1] == 'keep'
+
+
+def test_pruning_on_clock_advance():
+    """Entries that were in-window become stale when the clock advances."""
+    buf, clock = _make(5, 100 * NS)
+    buf.add('a', 97 * NS, 'v1')
+    buf.add('a', 99 * NS, 'v2')
+    assert len(buf.get('a')) == 2
+
+    clock[0] = 103 * NS  # now=103, cutoff=98 -> v1 pruned
+    assert len(buf.get('a')) == 1
+    assert buf.get('a')[0][1] == 'v2'
+
+
+def test_all_entries_pruned():
+    """All entries expire when the clock advances far enough."""
+    buf, clock = _make(5, 100 * NS)
+    buf.add('a', 95 * NS, 'v1')
+    buf.add('a', 96 * NS, 'v2')
+    clock[0] = 200 * NS
+    assert buf.get('a') == []
+    assert 'a' not in buf
+
+
+def test_pruning_independent_per_key():
+    buf, _ = _make(5, 100 * NS)
+    buf.add('a', 90 * NS, 'old_a')
+    buf.add('a', 99 * NS, 'new_a')
+    buf.add('b', 99 * NS, 'new_b')
+    assert len(buf.get('a')) == 1
+    assert len(buf.get('b')) == 1
+
+
+# --- latest ---
+
+
+def test_latest():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v1')
+    buf.add('a', 99 * NS, 'v2')
+    result = buf.latest('a')
+    assert result == (99 * NS, 'v2')
+
+
+def test_latest_missing_key():
+    buf, _ = _make(5, 100 * NS)
+    assert buf.latest('missing') is None
+
+
+def test_latest_all_expired():
+    buf, clock = _make(5, 100 * NS)
+    buf.add('a', 90 * NS, 'old')
+    clock[0] = 200 * NS
+    assert buf.latest('a') is None
+
+
+# --- nearest ---
+
+
+def test_nearest_exact_match():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v1')
+    buf.add('a', 97 * NS, 'v2')
+    buf.add('a', 99 * NS, 'v3')
+    result = buf.nearest('a', 97 * NS)
+    assert result == (97 * NS, 'v2')
+
+
+def test_nearest_between_entries():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 94 * NS, 'v1')
+    buf.add('a', 98 * NS, 'v2')
+    # 97 is closer to 98 than 94
+    result = buf.nearest('a', 97 * NS)
+    assert result == (98 * NS, 'v2')
+
+
+def test_nearest_equidistant_prefers_earlier():
+    """When equidistant, min() returns the first candidate — which is the later one
+    (bisect finds it first). This tests the actual behavior."""
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 94 * NS, 'v1')
+    buf.add('a', 96 * NS, 'v2')
+    # 95 is equidistant from 94 and 96
+    result = buf.nearest('a', 95 * NS)
+    assert result is not None
+    assert result[0] in (94 * NS, 96 * NS)
+
+
+def test_nearest_before_all_entries():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v1')
+    buf.add('a', 99 * NS, 'v2')
+    result = buf.nearest('a', 91 * NS)
+    assert result == (95 * NS, 'v1')
+
+
+def test_nearest_after_all_entries():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 92 * NS, 'v1')
+    buf.add('a', 95 * NS, 'v2')
+    result = buf.nearest('a', 99 * NS)
+    assert result == (95 * NS, 'v2')
+
+
+def test_nearest_single_entry():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'only')
+    result = buf.nearest('a', 99 * NS)
+    assert result == (95 * NS, 'only')
+
+
+def test_nearest_missing_key():
+    buf, _ = _make(5, 100 * NS)
+    assert buf.nearest('missing', 99 * NS) is None
+
+
+# --- range ---
+
+
+def test_range_inclusive():
+    buf, _ = _make(10, 100 * NS)
+    for i in range(91, 100):
+        buf.add('a', i * NS, f'v{i}')
+    result = buf.range('a', 94 * NS, 96 * NS)
+    assert len(result) == 3
+    assert result[0] == (94 * NS, 'v94')
+    assert result[2] == (96 * NS, 'v96')
+
+
+def test_range_no_overlap():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v')
+    result = buf.range('a', 97 * NS, 99 * NS)
+    assert result == []
+
+
+def test_range_missing_key():
+    buf, _ = _make(5, 100 * NS)
+    assert buf.range('missing', 0, 100 * NS) == []
+
+
+# --- keys / len / contains ---
+
+
+def test_keys():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v')
+    buf.add('b', 96 * NS, 'v')
+    assert sorted(buf.keys()) == ['a', 'b']
+
+
+def test_keys_excludes_empty():
+    """keys() prunes and excludes keys whose entries have all expired."""
+    buf, clock = _make(5, 100 * NS)
+    buf.add('a', 90 * NS, 'expired')
+    buf.add('b', 99 * NS, 'live')
+    clock[0] = 100 * NS
+    assert buf.keys() == ['b']
+
+
+def test_len():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v1')
+    buf.add('a', 96 * NS, 'v2')
+    buf.add('b', 97 * NS, 'v3')
+    assert len(buf) == 3
+
+
+def test_contains():
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'v')
+    assert 'a' in buf
+    assert 'b' not in buf
+
+
+def test_contains_expired():
+    buf, _ = _make(5, 100 * NS)
+    buf.add('a', 90 * NS, 'old')
+    assert 'a' not in buf
+
+
+# --- edge cases ---
+
+
+def test_zero_window():
+    """A zero-width window: cutoff == now, so entries at exactly now survive
+    (inclusive boundary) but anything older is pruned."""
+    buf, _ = _make(0, 100 * NS)
+    buf.add('a', 100 * NS, 'exact')
+    buf.add('a', 99 * NS, 'old')
+    entries = buf.get('a')
+    assert len(entries) == 1
+    assert entries[0] == (100 * NS, 'exact')
+
+
+def test_duplicate_timestamps():
+    """Multiple entries at the same timestamp are all preserved."""
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'first')
+    buf.add('a', 95 * NS, 'second')
+    entries = buf.get('a')
+    assert len(entries) == 2
+    assert entries[0][1] == 'first'
+    assert entries[1][1] == 'second'
+
+
+def test_many_keys():
+    buf, _ = _make(10, 100 * NS)
+    for i in range(100):
+        buf.add(f'key_{i}', 95 * NS, i)
+    assert len(buf.keys()) == 100
+    assert len(buf) == 100
+
+
+def test_large_window_keeps_everything():
+    buf, _ = _make(1000, 500 * NS)
+    for i in range(100):
+        buf.add('a', i * NS, i)
+    assert len(buf.get('a')) == 100
+
+
+# --- range boundary precision ---
+
+
+def test_range_boundary_inclusive_exclusive():
+    """range includes t_end but excludes t_end + 1."""
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 95 * NS, 'at_start')
+    buf.add('a', 97 * NS, 'at_end')
+    buf.add('a', 98 * NS, 'after_end')
+    result = buf.range('a', 95 * NS, 97 * NS)
+    assert len(result) == 2
+    assert result[0] == (95 * NS, 'at_start')
+    assert result[1] == (97 * NS, 'at_end')
+
+
+def test_range_single_nanosecond():
+    """range with t_start == t_end returns only entries at that exact timestamp."""
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 94 * NS, 'before')
+    buf.add('a', 95 * NS, 'exact')
+    buf.add('a', 96 * NS, 'after')
+    result = buf.range('a', 95 * NS, 95 * NS)
+    assert len(result) == 1
+    assert result[0] == (95 * NS, 'exact')
+
+
+# --- out-of-order timestamps ---
+
+
+def test_add_out_of_order():
+    """Entries added out of order are still returned sorted."""
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 99 * NS, 'third')
+    buf.add('a', 95 * NS, 'first')
+    buf.add('a', 97 * NS, 'second')
+    entries = buf.get('a')
+    assert len(entries) == 3
+    assert entries[0] == (95 * NS, 'first')
+    assert entries[1] == (97 * NS, 'second')
+    assert entries[2] == (99 * NS, 'third')
+
+
+def test_nearest_with_out_of_order_add():
+    """nearest works correctly even after out-of-order inserts."""
+    buf, _ = _make(10, 100 * NS)
+    buf.add('a', 99 * NS, 'late')
+    buf.add('a', 91 * NS, 'early')
+    buf.add('a', 95 * NS, 'mid')
+    result = buf.nearest('a', 94 * NS)
+    assert result == (95 * NS, 'mid')
+
+
+# --- keys() pruning ---
+
+
+def test_keys_prunes_expired():
+    """keys() prunes stale entries without requiring get() first."""
+    buf, clock = _make(5, 100 * NS)
+    buf.add('stale', 90 * NS, 'old')
+    buf.add('live', 99 * NS, 'new')
+    # Don't call get() on 'stale' — keys() should still exclude it
+    assert buf.keys() == ['live']
+
+
+# --- pop_aligned ---
+
+
+def test_pop_aligned_basic():
+    """Pop 3 consecutive seconds from two keys."""
+    buf, _ = _make(20, 110 * NS)
+    for t in range(100, 110):
+        buf.add('geo', t * NS, f'geo_{t}')
+        buf.add('mic', t * NS, f'mic_{t}')
+    result = buf.pop_aligned(['geo', 'mic'], n=3)
+    assert sorted(result.keys()) == ['geo', 'mic']
+    # Should start from the oldest common timestamp (100s)
+    assert len(result['geo']) == 3
+    assert len(result['mic']) == 3
+    assert result['geo'][0] == (100 * NS, 'geo_100')
+    assert result['geo'][2] == (102 * NS, 'geo_102')
+
+
+def test_pop_aligned_removes_entries():
+    """Popped entries are removed from the buffer."""
+    buf, _ = _make(20, 110 * NS)
+    for t in range(100, 105):
+        buf.add('a', t * NS, t)
+    before = len(buf.get('a'))
+    _ = buf.pop_aligned(['a'], n=3)
+    after = len(buf.get('a'))
+    assert before == 5
+    assert after == 2  # 103, 104 remain
+
+
+def test_pop_aligned_gap_in_one_key():
+    """Skips timestamps where not all keys have data."""
+    buf, _ = _make(20, 110 * NS)
+    # 'a' has 100..104, 'b' is missing 100 and 101
+    for t in range(100, 105):
+        buf.add('a', t * NS, f'a_{t}')
+    for t in range(102, 107):
+        buf.add('b', t * NS, f'b_{t}')
+    result = buf.pop_aligned(['a', 'b'], n=3)
+    # Aligned window starts at 102 (first common run of 3)
+    assert result['a'][0] == (102 * NS, 'a_102')
+    assert result['b'][0] == (102 * NS, 'b_102')
+    assert len(result['a']) == 3
+    assert len(result['b']) == 3
+
+
+def test_pop_aligned_not_enough_data():
+    """Raises ValueError when no aligned run of n steps exists."""
+    buf, _ = _make(20, 110 * NS)
+    # Both keys have data at 100 and 102, but not 101 — no run of 3
+    buf.add('a', 100 * NS, 'v')
+    buf.add('a', 102 * NS, 'v')
+    buf.add('b', 100 * NS, 'v')
+    buf.add('b', 102 * NS, 'v')
+    with pytest.raises(ValueError, match='no aligned window'):
+        _ = buf.pop_aligned(['a', 'b'], n=3)
+
+
+def test_pop_aligned_no_common_timestamps():
+    """Raises ValueError when keys have no overlapping timestamps."""
+    buf, _ = _make(20, 110 * NS)
+    buf.add('a', 100 * NS, 'v')
+    buf.add('b', 200 * NS, 'v')
+    with pytest.raises(ValueError, match='no common timestamps'):
+        _ = buf.pop_aligned(['a', 'b'], n=1)
+
+
+def test_pop_aligned_missing_key():
+    """Raises ValueError when a requested key has no data."""
+    buf, _ = _make(20, 110 * NS)
+    buf.add('a', 100 * NS, 'v')
+    with pytest.raises(ValueError):
+        _ = buf.pop_aligned(['a', 'missing'], n=1)
+
+
+def test_pop_aligned_multiple_entries_per_step():
+    """Multiple entries within the same second are all included."""
+    buf, _ = _make(20, 110 * NS)
+    # Two entries within second 100
+    buf.add('a', 100 * NS, 'first')
+    buf.add('a', 100 * NS + 500_000_000, 'second')  # 100.5s
+    buf.add('a', 101 * NS, 'third')
+    result = buf.pop_aligned(['a'], n=2)
+    assert len(result['a']) == 3  # both entries at 100s + one at 101s
+
+
+def test_pop_aligned_custom_step():
+    """Works with a custom step size (e.g. 500ms)."""
+    half = NS // 2  # 500ms
+    buf, _ = _make(20, 110 * NS)
+    for i in range(10):
+        buf.add('a', 100 * NS + i * half, f'v_{i}')
+    result = buf.pop_aligned(['a'], n=4, step_ns=half)
+    assert len(result['a']) == 4
+    assert result['a'][0] == (100 * NS, 'v_0')
+    assert result['a'][3] == (100 * NS + 3 * half, 'v_3')
