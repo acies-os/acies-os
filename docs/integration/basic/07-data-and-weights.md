@@ -18,7 +18,8 @@ Vehicle classification with the FM pipeline needs two files:
 
 The class labels are already set in the template: `VFM_LABELS=gle350,miata,cx30,mustang`.
 
-Copy both files to `/model/` on every device, from the edge server:
+Put both files in `MODEL_DIR` on the edge server (used by the [server-only test](03-server.md#test-the-server-on-its-own)),
+and copy them to `/model/` on every device, from the edge server:
 
 ```bash
 just upload-model ~/acies/models/Parkland_ict2024_encoder.pt
@@ -37,7 +38,7 @@ We use the scene `2024-03-29-ICT`, run `2`. Files are named:
 
 | Machine | Needs | Location |
 | --- | --- | --- |
-| Edge server | the GPS file | `<DATA_DIR>/2024-03-29-ICT/` (`DATA_DIR` in the edge `.env`) |
+| Edge server | the GPS file, plus `rs1`'s geo and mic files for the [server-only test](03-server.md#test-the-server-on-its-own) | `<DATA_DIR>/2024-03-29-ICT/` (`DATA_DIR` in the edge `.env`) |
 | Each device | its own geo and mic files | `/data/replay/2024-03-29-ICT/` |
 
 Copy each device its own files from the edge server:
