@@ -17,12 +17,14 @@ Read the pages in order:
 
 ## Files you will edit
 
-You do not need to read or change any Python code. Everything is configured through these files:
+You do not need to read or change any code or Docker files. Everything is configured through these
+three files:
 
 | File | Where | Purpose |
 | --- | --- | --- |
-| `.env` (copied from `docker/.env.edge.example`) | edge server, repo root | Edge settings: device list, ports, replay scene, data folder |
+| `.env` (copied from `docker/.env.edge.example`) | edge server, repo root | Edge settings: device list, ports, replay scene, data and model folders |
 | `.env` (copied from `docker/.env.pi.example`) | each edge device, repo root | Device name, edge server address, model weight filenames |
-| `docker/edge.yml` | edge server (read only) | Services on the edge server |
-| `docker/pi-replay.yml` | edge devices (read only) | Services on each device |
 | `~/.ssh/config` | edge server | SSH shortcuts for GitHub and the devices |
+
+The services themselves are defined in `docker/edge.yml` (edge server) and `docker/pi-replay.yml`
+(edge devices). The `just` commands in this guide use them; you don't need to edit them.

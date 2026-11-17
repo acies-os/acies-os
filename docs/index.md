@@ -1,7 +1,9 @@
 # Acies-OS Documentation
 
-Acies-OS is a content-centric platform for edge AI twinning and orchestration. These pages show
-how to run it on your own hardware: one **edge server** plus one or more **edge devices**.
+Acies-OS is a content-centric platform for edge AI twinning and orchestration, built mostly around
+**Docker**: every service on the edge server and the edge devices runs in a container, so setting it
+up is mainly configuring and running Docker images. These pages show how to run it on your own
+hardware: one **edge server** plus one or more **edge devices**.
 
 ## Integration guide
 
@@ -14,6 +16,19 @@ edge server + edge devices, replayed sensor data with GPS, and vehicle classific
 
 integration/basic/index
 ```
+
+## What you need
+
+No code changes are needed. To run the system you:
+
+1. get access to the private repositories and set up an SSH key for them,
+2. install Docker and `just`,
+3. download the replay data and model weights,
+4. fill in two `.env` files (edge server and each device),
+5. build the Docker images, and
+6. connect the edge server and devices on one network and start everything.
+
+The [overview](integration/basic/01-overview.md) has the full checklist with links to each step.
 
 ## Citation
 

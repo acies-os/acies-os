@@ -1,5 +1,23 @@
 # 1. Overview
 
+## What you need to do
+
+No code changes are needed. Setting up a new system comes down to these steps:
+
+| # | Step | Where | Page |
+| --- | --- | --- | --- |
+| 1 | **Get repository access**: join the `acies-os` GitHub organization, add an SSH key, load it in `ssh-agent` | edge server | [2. Access](02-access.md) |
+| 2 | **Install tools**: Docker (with Buildx and Compose), `just` | edge server | [3. Edge server](03-server.md) |
+| 3 | **Download data and model weights** and put them in two folders | edge server | [7. Data and weights](07-data-and-weights.md) |
+| 4 | **Fill in `.env`**: data and model folders, device list, registry address | edge server | [3. Edge server](03-server.md) |
+| 5 | **Build the Docker images** (server, UI, device) | edge server | [3. Edge server](03-server.md) |
+| 6 | **Prepare each device**: 64-bit Linux, Docker, clone the repo, fill in its `.env` | each device | [4. Edge devices](04-edge-device.md) |
+| 7 | **Connect the network**: same network, edge server IP in each device's `.env` | both | [5. Network](05-network.md) |
+| 8 | **Deploy and run**: push the image and weights to the devices, start everything, choose FM in the UI | both | [6. Build and run](06-build-and-run.md) |
+
+Before step 6 you can test the whole system on the edge server alone; see
+[Test the server on its own](03-server.md#test-the-server-on-its-own).
+
 ## What runs where
 
 ```text
