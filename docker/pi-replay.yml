@@ -1,11 +1,20 @@
 # Pi demo deployment: zenohd (client) + replay sensors + classifier.
 # Scenario 3 (tabletop demo).
 #
-# Usage:
+# By default only the FM vehicle pipeline starts:
+#   zenohd, geo, mic, vfm_encoder, vfm_vehicle
+# Optional extras (each needs its own weights / data):
+#   --profile e2e     end-to-end vehicle model (e2e_vehicle; needs VFM_WEIGHT)
+#   --profile drone   drone audio replay + drone heads (drone_mic, vfm_drone, e2e_drone;
+#                     needs /data/audrok, VFM_DRONE_HEAD_WEIGHT, VFM_DRONE_E2E_WEIGHT)
 #
-#   ACIES_NAMESPACE=rs1 SCENE=2024-03-29-ICT RUN=2 \
-#     ZENOH_BRIDGE="--connect tcp/LAPTOP_IP:7447" \
-#     docker compose -f pi-replay.yml up
+# Usage (from the repo root, with .env in place):
+#
+#   just pi-up-replay                                    # FM vehicle only
+#   just pi-up-replay --profile e2e --profile drone      # everything
+#
+#   or directly:
+#   docker compose -p pi --env-file .env -f docker/pi-replay.yml [--profile ...] up
 #
 # Env vars:
 #   ACIES_NAMESPACE   Node name (e.g. rs1)
@@ -23,7 +32,7 @@
 #   VFM_WEIGHT        End-to-end vehicle VibroFM weight (UI pipeline "e2e")
 #   VFM_DRONE_E2E_WEIGHT     End-to-end drone model weight (full AuDroK checkpoint) inside MODEL_DIR
 #   ZENOH_CONNECT     Local zenoh endpoint (default: tcp/127.0.0.1:7501)
-#   ZENOH_BRIDGE      Connect to edge zenohd (e.g. --connect tcp/192.168.1.10:7447)
+#   ZENOH_BRIDGE      Edge zenohd endpoint (e.g. tcp/192.168.1.10:7500, without --connect)
 #   ACIES_LOG         Per-logger level overrides
 
 x-env: &env
@@ -73,6 +82,7 @@ services:
   # Drone audio (8 kHz recording, upsampled to 16 kHz) on <ns>/drone_mic, separate from mic.
   # Starts deactivated; set its `deactivated` key to false to begin playback.
   drone_mic:
+    profiles: [drone]
     <<: *replay
     command: >-
       acies-replay --data-dir /data
@@ -128,6 +138,7 @@ services:
 
   # Publishes to <ns>/vfm_drone/drone, kept off **/vehicle so the tracker ignores drone classes.
   vfm_drone:
+    profiles: [drone]
     image: acies-pi:latest
     command: >-
       acies-vfm-head
@@ -148,6 +159,7 @@ services:
 
   # End-to-end vehicle VibroFM (UI pipeline "e2e"); publishes <ns>/e2e_vehicle/vehicle.
   e2e_vehicle:
+    profiles: [e2e]
     image: acies-pi:latest
     command: >-
       acies-vfm
@@ -169,6 +181,7 @@ services:
   # End-to-end drone model (UI pipeline "e2e" + Drone): full AuDroK checkpoint on drone audio;
   # publishes <ns>/e2e_drone/drone.
   e2e_drone:
+    profiles: [drone]
     image: acies-pi:latest
     command: >-
       acies-vfm

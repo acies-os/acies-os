@@ -58,6 +58,7 @@ build-pi:
 build-server:
     docker buildx build \
         --ssh default \
+        --ulimit nofile=65536:65536 \
         -t acies-server:{{ tag }} \
         --load \
         -f docker/server/Dockerfile \

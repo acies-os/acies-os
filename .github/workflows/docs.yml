@@ -2,9 +2,9 @@ name: Build and Deploy Documentation
 
 on:
   push:
-    branches: [main]
+    branches: [main, docs]
   pull_request:
-    branches: [main]
+    branches: [main, docs]
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
@@ -57,7 +57,7 @@ jobs:
         uses: extractions/setup-just@v2
 
       - name: Install documentation dependencies
-        run: uv sync --only-group docs
+        run: uv sync --frozen --only-group docs
 
       - name: Build documentation
         run: just build-doc
