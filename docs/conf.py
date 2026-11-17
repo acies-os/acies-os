@@ -29,9 +29,23 @@ myst_heading_anchors = 3
 html_theme = 'pydata_sphinx_theme'
 html_title = 'Acies-OS'
 html_show_sourcelink = False
+html_static_path = ['_static']
+html_css_files = ['custom.css']
+html_context = {'default_mode': 'auto'}   # follow the reader's system setting
 html_theme_options = {
+    'navbar_align': 'left',
+    'navbar_center': [],          # no top-level page links; the sidebar has the navigation
+    'navbar_end': ['search-button-field', 'theme-switcher'],
+    'navbar_persistent': [],
+    'secondary_sidebar_items': {'**': ['page-toc'], 'index': []},   # home page: no 'On this page'
     'navigation_depth': 3,
     'show_toc_level': 2,
+    'show_prev_next': True,
+    'pygments_light_style': 'github-light-high-contrast',
+    'pygments_dark_style': 'github-dark',
+    'footer_start': ['copyright'],
+    'footer_center': [],
+    'footer_end': [],
 }
 
 _ALERT = re.compile(r'^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\n((?:>.*\n?)*)', re.M)

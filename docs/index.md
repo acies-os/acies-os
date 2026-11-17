@@ -5,19 +5,14 @@ how to run it on your own hardware: one **edge server** plus one or more **edge 
 
 ## Integration guide
 
-The guide comes in two versions:
-
-| Version | Best for |
-| --- | --- |
-| [**Basic**](integration/basic/index.md) | Getting the system running with the fewest steps: edge server + edge devices, replayed data with GPS, vehicle classification only. **Start here.** |
-| [**Detailed**](integration/detailed/index.md) | The full reference: every service, all deployment scenarios, and all helper recipes. |
+The [**integration guide**](integration/basic/index.md) walks through the setup step by step:
+edge server + edge devices, replayed sensor data with GPS, and vehicle classification.
 
 ```{toctree}
 :hidden:
 :caption: Integration guide
 
-Basic <integration/basic/index>
-Detailed <integration/detailed/index>
+integration/basic/index
 ```
 
 ## Citation
