@@ -29,23 +29,22 @@ deps-upgrade:
         --upgrade-package foundation-sense \
         --upgrade-package rawshake
 
-# DOCS_SOURCE := "source"
-# DOCS_BUILD := "_build"
-#
-# # Build HTML docs with Sphinx
-# build-doc:
-#     cd docs && uv run sphinx-build -b html {{ DOCS_SOURCE }} {{ DOCS_BUILD }}
-#     @echo "Docs built at docs/{{ DOCS_BUILD }}/index.html"
-#
-# live-doc:
-#     echo $PWD
-#     uv run docs/watch-doc.py
-#
-# # Open docs in a browser (Windows/mac/wsl compatible)
-# view-doc:
-#     (sleep 1; wslview http://localhost:8000 \
-#         || xdg-open http://localhost:8000 \
-#         || powershell.exe -NoProfile start http://localhost:8000 \
-#         || open http://localhost:8000 \
-#         || true) &
-#     python3 -m http.server -d docs/{{ DOCS_BUILD }} 8000
+DOCS_BUILD := "docs/_build"
+
+# Build the documentation website (HTML) into docs/_build
+build-doc:
+    uv run --frozen --only-group docs sphinx-build -b html docs {{ DOCS_BUILD }}
+    @echo "Docs built at {{ DOCS_BUILD }}/index.html"
+
+# Serve the docs with live reload while editing (http://localhost:8000)
+live-doc:
+    uv run --frozen --only-group docs sphinx-autobuild docs {{ DOCS_BUILD }} --port 8000
+
+# Serve the built docs and open them in a browser
+view-doc:
+    (sleep 1; wslview http://localhost:8000 \
+        || xdg-open http://localhost:8000 \
+        || powershell.exe -NoProfile start http://localhost:8000 \
+        || open http://localhost:8000 \
+        || true) &
+    python3 -m http.server -d {{ DOCS_BUILD }} 8000

@@ -117,7 +117,8 @@ just edge-up-infra --profile replay --profile tracker
 **Each Pi:**
 
 ```bash
-just pi-up-replay                    # zenohd + geo/mic/drone_mic replay + all classifier variants (deactivated)
+just pi-up-replay                                  # zenohd + geo/mic replay + FM vehicle (vfm_encoder, vfm_vehicle)
+just pi-up-replay --profile e2e --profile drone    # also e2e_vehicle, drone_mic, vfm_drone, e2e_drone
 ```
 
 Open the UI, choose the pipeline ("fm" or "e2e", with or without drone) in the config panel, and

@@ -35,12 +35,11 @@ This starts `zenohd`, `gateway`, `ui`, and `gps` (the `replay` profile). Leave i
 ```bash
 ssh rs1
 cd /ws/acies/acies-os
-docker compose -p pi --env-file .env -f docker/pi-replay.yml \
-    up -d zenohd geo mic vfm_encoder vfm_vehicle
+just pi-up-replay
 ```
 
-The list at the end starts only the services needed for vehicle classification. The compose
-file defines more services, which you can ignore.
+This starts the five services needed for vehicle classification (`zenohd`, `geo`, `mic`,
+`vfm_encoder`, `vfm_vehicle`). Leave it running.
 
 ## 5. Turn on classification (browser)
 
@@ -53,7 +52,7 @@ file defines more services, which you can ignore.
 
 ```bash
 just edge-down-all                                              # edge server
-ssh rs1 'cd /ws/acies/acies-os && docker compose -p pi down'    # each device
+ssh rs1 'cd /ws/acies/acies-os && just pi-down'                # each device
 ```
 
 ## When something doesn't work

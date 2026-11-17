@@ -12,6 +12,7 @@ the edge services (zenohd, gps, gateway, ui).
     `docker buildx create --name acies-builder --use --driver-opt network=host`.
     On an **x86_64** machine, also run `docker run --privileged --rm tonistiigi/binfmt --install arm64`
     once so it can build the ARM image for the devices.
+      - Need to install both `docker`, `docker-buildx`, and `docker-compose-v2`
 * **just** (<https://just.systems>), **git**, **rsync**, **GNU parallel**.
 
 ## Clone
