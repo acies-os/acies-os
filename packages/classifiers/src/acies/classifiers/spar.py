@@ -10,12 +10,28 @@ Unlike vibrofm (which aligns one geo + one mic stream per inference), spar
 is a global, multi-node model: whatever data arrived for the window gets
 fed in, and the model itself decides how to fuse it.
 
+Windowing. Windows are consecutive 2-second slots on the data clock, starting
+at the first second received after a (re)start. A window closes when either
+
+* every active (node, modality) stream has delivered data for the window's last
+  second or later (streams arrive in order, so nothing more can come for the
+  window; a second the recording skipped does not hold it up), or
+* ``--max-wait`` seconds (wall clock) have passed since the first message for
+  the window's last second (or any later second) arrived at spar.
+
+A stream is active if it delivered anything in the last ``STALE_STREAM_S``
+seconds, so a node that went silent delays windows by ``max_wait`` for a while
+and is then no longer waited for. A late or missing node is left out. Data that arrives after its window closed is dropped. A stream that
+delivered only one of the window's two seconds is also left out (``valid=0`` in
+the model input) rather than zero-padded. Every closed window is processed on
+the next tick, so a slow first inference does not leave a permanent lag.
+
 Usage::
 
     acies-spar --weight /path/to/spar.pt
                --geo '**/geo' --mic '**/mic'
                [--output TOPIC]
-               [--labels car,truck,person]
+               [--labels car,truck,person] [--max-wait 2.0]
                [--acies-namespace NS] [--acies-name NAME]
 """
 
@@ -49,9 +65,15 @@ numba_logger.propagate = False
 # for mic per node.
 INPUT_LEN = 2
 
-# seconds to wait after a window's end before firing inference, to let
-# late-arriving node messages land in the buffer.
-WINDOW_GRACE_S = 1
+# default wall-clock seconds a window waits for missing streams once data for
+# its last second (or later) has started arriving; see "Windowing" above.
+DEFAULT_MAX_WAIT_S = 2.0
+
+# a stream silent for this long (wall clock) is no longer waited for
+STALE_STREAM_S = 10.0
+
+# how often the scheduler checks for windows that are ready
+TICK_S = 0.25
 
 DEFAULT_LABELS = ['polaris', 'warthog', 'truck', 'husky']
 
@@ -110,10 +132,7 @@ def setup(ctx: AciesContext) -> None:
     output_topic: str = ctx.cfg.get('output_topic') or ctx.ns.topic('spar')
     ctx.app['model'] = model
     ctx.app['output_topic'] = output_topic
-    # buffer: {ts_s: {node: {modality: samples}}}
-    ctx.app['buffer'] = {}
-    ctx.app['latest_ts_s'] = 0
-    ctx.app['next_window_start'] = None
+    _reset_window_state(ctx)
     # Single-flight gate: prevents overlapping inferences from racing each
     # other through next_window_start advancement when model inference is
     # slow (e.g. during JIT warmup). Acquired non-blocking at the top of
@@ -139,6 +158,18 @@ def teardown(_ctx: AciesContext) -> None:
     logger.info('spar stopped')
 
 
+def _reset_window_state(ctx: AciesContext) -> None:
+    """Forget buffered data and the window grid (caller holds ctx.app.lock, or is at startup)."""
+    # buffer: {ts_s: {node: {modality: samples}}}
+    ctx.app['buffer'] = {}
+    # first wall-clock (monotonic) arrival of any message per data second
+    ctx.app['first_seen'] = {}
+    # (node, modality) -> (newest data second, monotonic time of its last message)
+    ctx.app['streams'] = {}
+    ctx.app['next_window_start'] = None
+    ctx.app['late_drops'] = 0
+
+
 # --- kv change notifications ----------------------------------------------
 
 
@@ -147,9 +178,7 @@ def on_start_at_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     """Clear buffers when a new replay starts so stale data doesn't pollute inference."""
     logger.info('start_at changed to %s; clearing buffers', msg.value)
     with ctx.app.lock:
-        ctx.app['buffer'].clear()
-        ctx.app['latest_ts_s'] = 0
-        ctx.app['next_window_start'] = None
+        _reset_window_state(ctx)
 
 
 @app.subscribe(OnChange('weight'))
@@ -193,9 +222,7 @@ def on_weight_change(ctx: AciesContext, msg: AciesKvChange) -> None:
 
     with ctx.app.lock:
         ctx.app['model'] = new_model
-        ctx.app['buffer'].clear()
-        ctx.app['latest_ts_s'] = 0
-        ctx.app['next_window_start'] = None
+        _reset_window_state(ctx)
 
 
 @app.subscribe(OnChange('deactivated'))
@@ -228,12 +255,22 @@ def _ingest(ctx: AciesContext, modality: str, msg: AciesTimeSeries) -> None:
     ts_s = msg.timestamp // 1_000_000_000
     node = _node_id(msg.source)
     with ctx.app.lock:
+        next_start: int | None = ctx.app['next_window_start']
+        if next_start is None:
+            ctx.app['next_window_start'] = ts_s
+        elif ts_s < next_start:
+            # its window already closed
+            ctx.app['late_drops'] += 1
+            logger.debug(
+                'dropping late %s/%s t=%d (window starting %d already closed)', node, modality, ts_s, next_start
+            )
+            return
         buf: dict[int, dict[str, dict[str, npt.NDArray[Any]]]] = ctx.app['buffer']
         buf.setdefault(ts_s, {}).setdefault(node, {})[modality] = samples
-        if ts_s > ctx.app['latest_ts_s']:
-            ctx.app['latest_ts_s'] = ts_s
-        if ctx.app['next_window_start'] is None:
-            ctx.app['next_window_start'] = ts_s
+        ctx.app['first_seen'].setdefault(ts_s, time.monotonic())
+        streams: dict[tuple[str, str], tuple[int, float]] = ctx.app['streams']
+        newest = max(ts_s, streams.get((node, modality), (ts_s, 0.0))[0])
+        streams[(node, modality)] = (newest, time.monotonic())
 
 
 @app.subscribe('{geo_topic}')
@@ -249,7 +286,7 @@ def on_mic(ctx: AciesContext, msg: AciesTimeSeries) -> None:
 # --- inference ------------------------------------------------------------
 
 
-@app.schedule(float(INPUT_LEN))
+@app.schedule(TICK_S)
 def run_inference(ctx: AciesContext) -> None:
     if ctx.cfg.get('deactivated'):
         logger.debug('spar deactivated; skipping inference')
@@ -257,62 +294,91 @@ def run_inference(ctx: AciesContext) -> None:
 
     # Single-flight: if a previous tick's inference is still running (e.g.
     # JIT warmup taking ~10 s on the first call), drop this tick rather than
-    # queueing another worker that will race on next_window_start.
+    # queueing another worker; the running one catches up on every ready window.
     infer_lock: threading.Lock = ctx.app['infer_lock']
     if not infer_lock.acquire(blocking=False):
         logger.debug('previous inference still in flight; skipping tick')
         return
     try:
-        _run_inference_body(ctx)
+        while not ctx.cfg.get('deactivated'):
+            window = _take_ready_window(ctx)
+            if window is None:
+                break
+            next_start, collected = window
+            if collected:
+                _infer_window(ctx, next_start, collected)
     finally:
         infer_lock.release()
 
 
-def _run_inference_body(ctx: AciesContext) -> None:
+Collected = dict[str, dict[str, list[tuple[int, npt.NDArray[Any]]]]]
+
+
+def _take_ready_window(ctx: AciesContext) -> tuple[int, Collected] | None:
+    """Close the next window if it is ready (see "Windowing" above) and return its data.
+
+    Returns None if the window is still waiting. An empty ``collected`` means the
+    window closed with no complete stream (nothing to infer).
+    """
     with ctx.app.lock:
         buf: dict[int, dict[str, dict[str, npt.NDArray[Any]]]] = ctx.app['buffer']
-        latest: int = ctx.app['latest_ts_s']
         next_start: int | None = ctx.app['next_window_start']
-
         if next_start is None or not buf:
-            return
+            return None
 
         window_end = next_start + INPUT_LEN - 1
-        if latest < window_end + WINDOW_GRACE_S:
-            return  # still waiting on (possibly late) data for this window
+        window_secs = range(next_start, window_end + 1)
+        now = time.monotonic()
+        streams: dict[tuple[str, str], tuple[int, float]] = ctx.app['streams']
+        active = {key: newest for key, (newest, seen) in streams.items() if now - seen < STALE_STREAM_S}
+        complete = all(newest >= window_end for newest in active.values())
+        if not complete:
+            # wait from the first arrival of data for the window's last second or anything after it
+            arrived = [t for ts, t in ctx.app['first_seen'].items() if ts >= window_end]
+            if not arrived:
+                return None
+            max_wait = float(ctx.cfg.get('max_wait_s', DEFAULT_MAX_WAIT_S))
+            if now - min(arrived) < max_wait:
+                return None
 
-        window_secs = list(range(next_start, window_end + 1))
-        collected: dict[str, dict[str, list[tuple[int, npt.NDArray[Any]]]]] = {}
+        collected: Collected = {}
         for w in window_secs:
             for node, mods in buf.pop(w, {}).items():
                 for modality, samples in mods.items():
                     collected.setdefault(node, {}).setdefault(modality, []).append((w, samples))
+            _ = ctx.app['first_seen'].pop(w, None)
 
-        if not collected:
-            # next_start has overshot real sensor data. Do NOT ratchet forward
-            # (that would keep overshooting forever as latest_ts_s — a max
-            # across publishers — stays ahead). Instead, resync next_start to
-            # the earliest timestamp we actually have buffered, so the next
-            # tick processes real data rather than another empty slot.
-            if buf:
-                ctx.app['next_window_start'] = min(buf)
-                logger.debug(
-                    'empty window [%d..%d]; resync next_start to %d',
-                    next_start,
-                    window_end,
-                    ctx.app['next_window_start'],
-                )
-            else:
-                logger.debug('empty window [%d..%d]; buffer empty', next_start, window_end)
-            return
+        # a stream with only part of the window would be zero-padded yet marked valid; leave it out
+        partial = [(n, m) for n, mods in collected.items() for m, chunks in mods.items() if len(chunks) < INPUT_LEN]
+        for node, modality in partial:
+            del collected[node][modality]
+            if not collected[node]:
+                del collected[node]
 
-        ctx.app['next_window_start'] = next_start + INPUT_LEN
+        if collected:
+            ctx.app['next_window_start'] = next_start + INPUT_LEN
+        else:
+            # nothing usable: jump to the next window that has data instead of stepping through a gap
+            later = [t for t in buf if t > window_end]
+            ctx.app['next_window_start'] = (
+                next_start + INPUT_LEN * ((min(later) - next_start) // INPUT_LEN) if later else next_start + INPUT_LEN
+            )
 
-        # drop any stragglers older than the new window start; they can no
-        # longer contribute to a future window.
-        for old in [t for t in buf if t < ctx.app['next_window_start']]:
-            _ = buf.pop(old, None)
+        if not complete:
+            logger.debug(
+                'window [%d..%d] closed by max_wait; waited for %s; late_drops=%d',
+                next_start,
+                window_end,
+                sorted(f'{n}/{m}' for (n, m), newest in active.items() if newest < window_end),
+                ctx.app['late_drops'],
+            )
+        if partial:
+            logger.debug('window [%d..%d]: left out partial streams %s', next_start, window_end, partial)
+        return next_start, collected
 
+
+def _infer_window(ctx: AciesContext, next_start: int, collected: Collected) -> None:
+    window_end = next_start + INPUT_LEN - 1
     # --- build model input: {node: {modality: concatenated tensor}} ---
     data: dict[str, dict[str, torch.Tensor]] = {}
     for node, mods in collected.items():
@@ -439,6 +505,14 @@ def _run_inference_body(ctx: AciesContext) -> None:
     help='Output topic for AciesInference results. Defaults to <host>/<name>.',
 )
 @click.option(
+    '--max-wait',
+    'max_wait_s',
+    default=DEFAULT_MAX_WAIT_S,
+    type=float,
+    show_default=True,
+    help='Wall-clock seconds a window waits for missing node streams before it is processed without them.',
+)
+@click.option(
     '--labels',
     default=','.join(DEFAULT_LABELS),
     show_default=True,
@@ -450,6 +524,7 @@ def main(
     mic_topic: str,
     output_topic: str | None,
     labels: str,
+    max_wait_s: float,
 ) -> None:
     app.state.config.update(
         {
@@ -459,6 +534,7 @@ def main(
             'mic_topic': mic_topic,
             'output_topic': output_topic,
             'labels': labels.split(','),
+            'max_wait_s': max_wait_s,
         }
     )
     setup_logging(app.name, app.namespace)

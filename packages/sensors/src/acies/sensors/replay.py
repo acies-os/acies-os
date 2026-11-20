@@ -19,12 +19,22 @@ Synchronization:
   Each node loads data, sleeps until that wallclock, then begins.
   With NTP-synced clocks, all nodes start within ms of each other.
 
+  The data timestamp that plays at --start-at is the *origin* (--origin):
+  ``run`` (default) is the earliest first timestamp among all
+  ``run{run}_*_{geo,mic}.parquet`` files of the scene, so nodes whose recording
+  starts late (or has a gap at the start) stay aligned with the others on the
+  data clock and simply begin later. ``self`` uses this node's own first window
+  (the old behaviour); a number is an explicit epoch-seconds origin. If the
+  sibling files are not present (e.g. a Pi with only its own data), ``run``
+  falls back to ``self``; pass an explicit origin there.
+
 Usage::
 
     acies-replay --data-dir packages/sensors/data \
                  --scene 2024-08-gq \
                  --node gq-1 --run 50 --modality geo|mic|drone_mic \
-                 [--speed 1.0] [--start-at EPOCH] [--loop] [--deactivated] \
+                 [--speed 1.0] [--start-at EPOCH] [--origin run|self|EPOCH] \
+                 [--loop] [--deactivated] \
                  [--acies-namespace NS] [--acies-name NAME]
 """
 
@@ -33,6 +43,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 
 import click
 import numpy as np
@@ -164,6 +175,51 @@ def _load_windows(path: str, modality: str) -> list[tuple[int, list[bytes], list
     return windows
 
 
+def _run_origin_ns(data_dir: str, scene: str, run: int) -> int | None:
+    """Earliest first timestamp among the run's geo and mic files (any node), in ns."""
+    starts: list[int] = []
+    for path in sorted(Path(data_dir, scene).glob(f'run{run}_*_*.parquet')):
+        if not path.stem.endswith(('_geo', '_mic')):
+            continue
+        try:
+            first = pl.scan_parquet(path).select(pl.col('timestamp').min()).collect().item()
+        except Exception:
+            logger.warning('cannot read timestamps from %s; ignoring it for the run origin', path, exc_info=True)
+            continue
+        if first is not None:
+            starts.append(_ts_to_ns(float(first)))
+    return min(starts) if starts else None
+
+
+def _resolve_origin(ctx: AciesContext, windows: list[tuple[int, list[bytes], list[str], int, str]]) -> int:
+    """Data timestamp (ns) that plays at start_at; see "Synchronization" in the module docstring."""
+    origin = str(ctx.cfg.get('origin') or 'run')
+    own_ns = windows[0][0]
+    if origin == 'self':
+        origin_ns = own_ns
+    elif origin == 'run':
+        run_ns = _run_origin_ns(ctx.cfg['data_dir'], ctx.cfg['scene'], ctx.cfg['run'])
+        if run_ns is None:
+            logger.warning("no run files found for the run origin; using this node's first window")
+            run_ns = own_ns
+        origin_ns = run_ns
+    else:
+        origin_ns = _ts_to_ns(float(origin))
+    if origin_ns > own_ns:
+        logger.warning(
+            "origin %.3f is after this node's first window %.3f; data before it is skipped",
+            origin_ns / _NS_PER_S,
+            own_ns / _NS_PER_S,
+        )
+    logger.info(
+        'origin=%s -> %.3f; this node starts %.1fs after start_at',
+        origin,
+        origin_ns / _NS_PER_S,
+        (own_ns - origin_ns) / _NS_PER_S,
+    )
+    return origin_ns
+
+
 @app.on_startup
 def setup(ctx: AciesContext) -> None:
     data_dir: str = ctx.cfg['data_dir']
@@ -179,6 +235,7 @@ def setup(ctx: AciesContext) -> None:
         raise SystemExit(1)
 
     ctx.app['windows'] = windows
+    ctx.app['origin_ns'] = _resolve_origin(ctx, windows)
     ctx.app['restart'] = threading.Event()
     ctx.app['reload'] = threading.Event()
     ctx.app['start_at_ev'] = threading.Event()
@@ -188,7 +245,9 @@ def setup(ctx: AciesContext) -> None:
     ctx.app.config.setdefault('sys', {})['state'] = 'deactivated' if is_deactivated else 'active'
 
 
-@app.subscribe(OnChange('scene'), OnChange('node'), OnChange('run'), OnChange('modality'), OnChange('data_dir'))
+@app.subscribe(
+    OnChange('scene'), OnChange('node'), OnChange('run'), OnChange('modality'), OnChange('data_dir'), OnChange('origin')
+)
 def on_data_change(ctx: AciesContext, msg: AciesKvChange) -> None:
     logger.info('data config changed: %s %s', msg.op, msg.key)
     ctx.app['reload'].set()
@@ -256,6 +315,7 @@ def _try_reload(ctx: AciesContext) -> bool:
         logger.error('no data in %s', path)
         return False
     ctx.app['windows'] = windows
+    ctx.app['origin_ns'] = _resolve_origin(ctx, windows)
     return True
 
 
@@ -264,14 +324,20 @@ def _play_windows(
     cancel: list[threading.Event],
     windows: list[tuple[int, list[bytes], list[str], int, str]],
     speed: float,
+    origin_ns: int,
 ) -> bool:
-    """Play all windows at the given speed. Returns True if completed, False if interrupted."""
+    """Play all windows at the given speed, data time ``origin_ns`` at the moment of the call.
+
+    Returns True if completed, False if interrupted.
+    """
     wall_start = time.monotonic()
-    data_start_ns = windows[0][0]
+    data_start_ns = origin_ns
     topic: str = ctx.cfg.get('topic') or ctx.ns.base
     for ts_ns, payloads, channels, sampling_rate, dtype in windows:
         if any(e.is_set() for e in cancel):
             return False
+        if ts_ns < data_start_ns:
+            continue
         data_elapsed_s = (ts_ns - data_start_ns) / 1_000_000_000
         wall_target = wall_start + data_elapsed_s / speed
         sleep_s = wall_target - time.monotonic()
@@ -390,7 +456,7 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
                 continue
 
         # --- play ---
-        completed = _play_windows(ctx, cancel, windows, speed)
+        completed = _play_windows(ctx, cancel, windows, speed, ctx.app['origin_ns'])
         if stop.is_set():
             return
         if not completed:
@@ -420,6 +486,12 @@ def replay(ctx: AciesContext, stop: threading.Event) -> None:
 )
 @click.option('--speed', default=1.0, type=float, show_default=True, help='Replay speed multiplier.')
 @click.option('--start-at', default=None, type=float, help='Start wallclock as epoch timestamp.')
+@click.option(
+    '--origin',
+    default='run',
+    show_default=True,
+    help="Data time that plays at start_at: run (earliest start among the run's files), self, or epoch seconds.",
+)
 @click.option('--loop/--no-loop', default=False, show_default=True, help='Loop replay indefinitely.')
 @click.option('--topic', default=None, help='Publish topic. Defaults to <host>/<name>.')
 @click.option(
@@ -437,6 +509,7 @@ def main(
     modality: str,
     speed: float,
     start_at: float | None,
+    origin: str,
     loop: bool,
     topic: str | None,
     deactivated: bool,
@@ -451,6 +524,7 @@ def main(
             'modality': modality,
             'speed': speed,
             'start_at': start_at,
+            'origin': origin,
             'loop': loop,
             'topic': topic,
         }

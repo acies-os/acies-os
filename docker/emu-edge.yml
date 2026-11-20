@@ -1,0 +1,53 @@
+# Edge stack for network emulation. Combine with edge.yml (+ edge-classifier.yml).
+#
+# The edge services join the network namespace of the Mininet container
+# (`acies-mn`, started by `just emu-up`) instead of the host network, so the
+# emulated nodes reach the edge zenohd at 10.0.0.254:7500 through their shaped
+# links. The host network is not modified.
+#
+# Usage:
+#   just emu-up outage          # Mininet container with 8 emulated nodes
+#   just emu-edge-up            # this file: zenohd, gateway, gps, spar, recorder, ui
+#
+# The gateway's WebSocket is published by the acies-mn container on
+# 127.0.0.1:8765, so the UI and SSH port forwarding work as in the normal setup.
+# If acies-mn is restarted, restart this stack too (its network namespace is gone).
+
+x-emu-net: &emu-net
+  network_mode: container:acies-mn
+
+services:
+  zenohd:
+    <<: *emu-net
+
+  gateway:
+    <<: *emu-net
+    environment:
+      # bind on all interfaces inside the namespace so the published port reaches it
+      - ACIES_LISTEN=ws://0.0.0.0:8765
+
+  gps:
+    <<: *emu-net
+
+  tracker:
+    <<: *emu-net
+
+  edge-spar:
+    <<: *emu-net
+
+  # The UI stays on the host network: it only serves static files, and the
+  # browser connects to the gateway at ${ACIES_LISTEN}/ws (127.0.0.1:8765).
+
+  recorder:
+    image: acies-mn:latest
+    command: python /emu/recorder.py
+    <<: *emu-net
+    environment:
+      - ACIES_LOG=${ACIES_LOG:-}
+      - ACIES_NAMESPACE=${ACIES_NAMESPACE:-}/infra
+      - ACIES_NAME=recorder
+      - ACIES_CONNECT=${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
+    volumes:
+      - ../emulation:/emu:ro
+      - ~/.acies:/root/.acies
+    restart: unless-stopped

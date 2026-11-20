@@ -1,0 +1,31 @@
+# Baseline: healthy links, no faults. Use it as the reference for other experiments.
+#
+#   just emu-up baseline
+
+[nodes]
+# Emulated nodes; names must match the scene's node names (replay files, SPAR scene config).
+names = ["rs1", "rs2", "rs3", "rs5", "rs6", "rs7", "rs8", "rs10"]
+# scene / run default to SCENE / RUN from .env; a gateway deploy replaces them anyway.
+# Also run the split VibroFM encoder + vehicle head on each node (deactivated until a
+# single-node deploy turns them on).
+classifier = true
+
+# Every node <-> switch link. Each parameter is applied on both interfaces of the link,
+# so `delay` is one-way and the RTT is twice it. Raw geo + mic is ~0.27 Mbit/s per node.
+#   bw              Mbit/s
+#   delay, jitter   "5ms", "100ms", ...
+#   loss            percent, 0-100
+#   max_queue_size  packets
+[links.default]
+bw = 10
+delay = "5ms"
+loss = 0
+
+# Per-node overrides, e.g. a node far from the access point:
+# [links.rs10]
+# delay = "40ms"
+# loss = 2
+
+# The edge <-> switch link (shared by every node). Unshaped unless set:
+# [links.edge]
+# bw = 2

@@ -1,0 +1,23 @@
+# Quick end-to-end check (about 2.5 minutes): one blackout and recovery.
+#
+#   just emu-up smoke && just emu-edge-up
+#   just emu-deploy miata
+#   (wait ~2.5 min) just emu-analyze
+
+[nodes]
+names = ["rs1", "rs2", "rs3", "rs5", "rs6", "rs7", "rs8", "rs10"]
+classifier = false  # faster startup; SPAR only needs geo + mic
+
+[links.default]
+bw = 10
+delay = "5ms"
+
+[[events]]
+at = 40
+nodes = ["rs3", "rs6", "rs7"]
+action = "down"
+
+[[events]]
+at = 80
+nodes = ["rs3", "rs6", "rs7"]
+action = "up"

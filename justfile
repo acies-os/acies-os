@@ -6,6 +6,7 @@ import 'just/dev.just'
 import 'just/docker.just'
 import 'just/pi.just'
 import 'just/edge.just'
+import 'just/emu.just'
 
 [private]
 default:

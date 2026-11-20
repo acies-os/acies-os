@@ -1,0 +1,71 @@
+# Transmission failures during a 900 s ICT replay (e.g. Miata, run 2).
+#
+#   just emu-up outage
+#   just emu-edge-up
+#   just emu-deploy miata        # or Deploy in the UI (joint nodes, SPAR)
+#   just emu-analyze             # after the replay
+#
+# Events are timed in seconds from the replay start (the deploy's start_at) and
+# re-armed on every deploy. Actions:
+#   down / up        100% loss both ways, interface stays up (radio blackout) / restore
+#   set              change link parameters (bw, delay, jitter, loss, max_queue_size)
+#   reset            back to this file's link config, clears `down`
+#   unplug / plug    interface down / up (immediate connection errors, not silence)
+# `nodes` is a node name, a list, "all", "edge" (the shared edge uplink) or "all+edge".
+
+[nodes]
+names = ["rs1", "rs2", "rs3", "rs5", "rs6", "rs7", "rs8", "rs10"]
+classifier = true
+
+[links.default]
+bw = 10
+delay = "5ms"
+loss = 0
+
+# 0-120 s: baseline
+
+# 120-240 s: two nodes on one side of the road go silent
+[[events]]
+at = 120
+nodes = ["rs3", "rs5"]
+action = "down"
+
+[[events]]
+at = 240
+nodes = ["rs3", "rs5"]
+action = "up"
+
+# 300-420 s: half of the nodes lose their link
+[[events]]
+at = 300
+nodes = ["rs1", "rs3", "rs6", "rs8"]
+action = "down"
+
+[[events]]
+at = 420
+nodes = ["rs1", "rs3", "rs6", "rs8"]
+action = "up"
+
+# 480-600 s: lossy links everywhere (TCP retransmits, so this shows up as delay)
+[[events]]
+at = 480
+nodes = "all"
+action = "set"
+loss = 10
+
+[[events]]
+at = 600
+nodes = "all"
+action = "reset"
+
+# 660-780 s: congested edge uplink, below the ~2.2 Mbit/s that 8 nodes need
+[[events]]
+at = 660
+nodes = "edge"
+action = "set"
+bw = 1
+
+[[events]]
+at = 780
+nodes = "edge"
+action = "reset"
