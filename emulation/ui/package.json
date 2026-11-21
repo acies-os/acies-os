@@ -1,0 +1,20 @@
+{
+  "name": "acies-emu-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ACIES-OS network emulator UI (served by emulation/monitor.py)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.2.0"
+  }
+}

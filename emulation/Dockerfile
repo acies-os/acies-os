@@ -7,6 +7,15 @@
 # Build (after `just build-server`):
 #   just emu-build
 
+# --- stage 1: the web app (emulation/ui), as the main UI's image builds ui/app ---
+FROM node:22-slim AS ui-build
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+RUN npm run build
+
+# --- stage 2: the emulator ---
 FROM acies-server:latest
 
 # mininet       -- topology, mnexec, TCLink (tc/netem shaping)
@@ -29,3 +38,6 @@ ENV PATH=/acies-os/.venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV PYTHONPATH=/opt/mininet-py
 
 WORKDIR /emu
+
+# the monitor serves this (or a newer host build in /emu/ui/dist)
+COPY --from=ui-build /ui/dist /opt/emu-ui

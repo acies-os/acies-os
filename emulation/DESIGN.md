@@ -125,10 +125,13 @@ Everything that is specific to emulation lives in `emulation/`, `docker/emu-edge
 * `acies-mn` is the `acies-server` image plus Debian's `mininet`, `bridge-utils` and
   `net-tools`. Mininet's Python package is linked into `/opt/mininet-py` and put on
   `PYTHONPATH`, so `topo.py` can use Mininet and the acies venv's `zenoh` in one process.
+* A first build stage (`node:22-slim`, as the main UI's image) builds the web app in `ui/` and
+  copies it to `/opt/emu-ui`, where the monitor serves it.
 * `just emu-up-nodes` runs it `--privileged` (Mininet creates namespaces, veth pairs, bridges and
   `tc` qdiscs), with `nofile` raised to 65536, `DATA_DIR`, `MODEL_DIR` and `~/.acies`
   mounted, and `emulation/` mounted read-only at `/emu`, so script edits need no rebuild.
-  It publishes `127.0.0.1:8765` for the gateway that will later join its namespace.
+  It publishes `127.0.0.1:8765` and `127.0.0.1:8780` for the gateway and the monitor, which
+  later join its namespace.
 
 ### Topology (`topo.py`, `Emulator.build`)
 
@@ -258,7 +261,7 @@ links.<name>: config {bw, delay, ...}, down, unplugged,
               up_bytes, down_bytes, up_drops, down_drops (counters)
 ```
 
-### Monitor (`monitor.py`, `monitor.html`)
+### Monitor (`monitor.py`) and web app (`ui/`)
 
 An edge service (`monitor` in `emu-edge.yml`) with a plain Zenoh client session. It subscribes
 to `emu/state`, `emu/events`, `**/energy`, `**/spar` and `**/gps/truth`, and resets its run
@@ -287,9 +290,10 @@ state on each deploy (`armed`).
 * **Truth on the map** ends `TRUTH_DELAY_S` = 2 s before the newest truth, as the main UI does
   (its `GT_CURRENT_DELAY_MS` is 2.5 s), so it lines up with SPAR's latest window.
 
-It serves `monitor.html` (read on each request, so edits show on reload) and a WebSocket at
-`/ws` with the `websockets` library. Every second each browser gets a JSON snapshot. The same
-metrics, without the per-window history, go out as msgpack on `emu/metrics`, so the gateway
+It serves the web app and a WebSocket at `/ws` with the `websockets` library. The app is built
+into the image (`/opt/emu-ui`) by `just emu-build`; a host build in `emulation/ui/dist`
+(`just emu-ui-build`) is served instead when it is newer, so UI changes need no image rebuild.
+Every second each browser gets a JSON snapshot. The same metrics, without the per-window history, go out as msgpack on `emu/metrics`, so the gateway
 or another UI can use them. From the page it accepts `{"type": "fault", "action", "nodes",
 bw/delay/jitter/loss}`, which it puts on `emu/ctl`; `{"type": "deploy", "target", "map", "plan"}`,
 which first puts the plan on `emu/ctl` as `{"action": "plan", "events": [...]}` and then deploys
@@ -298,16 +302,17 @@ which replaces the running replay's schedule. `topo.py` validates a plan, replac
 with it, records a `plan` event (ignored by `analyze.py`), and, if a replay is armed, runs the
 plan's remaining events against that replay's `start_at`.
 
-The page builds the plan from rows (time, links, change, value, duration); a row with a duration
-becomes the change plus its revert (`down`/`up`, `unplug`/`plug`, `set`/`reset`). The configuring
-window opens on Deploy and counts down to the new `start_at` (the gateway's 30 s
-`_REPLAY_AHEAD_TIME_S`, the time the testbed gets to configure and synchronize the nodes), for
-deploys from the main UI as well.
+The web app (Vue 3 + Vite, as the main UI) is described in [ui/README.md](ui/README.md). It
+builds the plan from rows (time, links, change, value, duration); a row with a duration becomes
+the change plus its revert (`down`/`up`, `unplug`/`plug`, `set`/`reset`). The configuring window
+opens on Deploy and counts down to the new `start_at` (the gateway's 30 s `_REPLAY_AHEAD_TIME_S`,
+the time the testbed gets to configure and synchronize the nodes), for deploys from the main UI
+as well.
 
 ## Status for UI work
 
 Build, topology, scheduled and live faults, recording, offline analysis and the monitor
-page all run. The existing UI works unchanged during emulation: map, SPAR track and
+web app all run. The existing UI works unchanged during emulation: map, SPAR track and
 predictions. For a fuller network-emulation UI in the main `ui` app:
 
 | Missing | Today | What it would take |

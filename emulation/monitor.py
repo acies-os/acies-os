@@ -8,7 +8,7 @@ Listens on the edge zenohd like any edge service and combines:
 * ``**/spar``      -- SPAR localizations
 * ``**/gps/truth`` -- GPS ground truth
 
-Serves ``monitor.html`` and a WebSocket on ``--port`` (``just emu-up-nodes`` publishes it on
+Serves the web app (``emulation/ui``) and a WebSocket on ``--port`` (``just emu-up-nodes`` publishes it on
 http://127.0.0.1:8780). Once a second it sends every browser a JSON snapshot and publishes
 the same metrics (without the per-window history) as msgpack on ``emu/metrics``.
 The page can change links (forwarded to ``emu/ctl``, like fault.py) and deploy a replay
@@ -68,9 +68,20 @@ MAX_WINDOWS = 1000
 EARTH_R = 6_371_000.0
 ACTIONS = ('down', 'up', 'set', 'reset', 'unplug', 'plug')
 LINK_KEYS = ('bw', 'delay', 'jitter', 'loss', 'max_queue_size')
-HTML_PATH = Path(__file__).with_name('monitor.html')
-STATIC_DIR = Path(__file__).with_name('static')
-STATIC_TYPES = {'.png': 'image/png', '.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'text/javascript'}
+# The web app (emulation/ui) built into the image by `just emu-build`, or built on the host
+# (`npm run build` in emulation/ui, mounted at /emu/ui/dist); the newer build wins.
+UI_DIRS = (Path('/opt/emu-ui'), Path(__file__).with_name('ui') / 'dist')
+CONTENT_TYPES = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.json': 'application/json',
+    '.woff2': 'font/woff2',
+    '.map': 'application/json',
+}
 
 
 def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -421,6 +432,11 @@ def _check_plan(plan: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _ui_dir() -> Path | None:
+    built = [d for d in UI_DIRS if (d / 'index.html').is_file()]
+    return max(built, key=lambda d: (d / 'index.html').stat().st_mtime) if built else None
+
+
 def _file_response(path: Path, content_type: str) -> Response:
     body = path.read_bytes()
     headers = Headers([('Content-Type', content_type), ('Content-Length', str(len(body)))])
@@ -433,13 +449,20 @@ async def serve_web(port: int, monitor: Monitor, session: zenoh.Session, gateway
     def process_request(connection: ServerConnection, request: Request) -> Response | None:
         if request.path == '/ws':
             return None
-        if request.path in ('/', '/index.html'):
-            return _file_response(HTML_PATH, 'text/html; charset=utf-8')  # read per request: edits need no restart
-        if request.path.startswith('/static/'):
-            path = STATIC_DIR / Path(request.path).name  # .name: no way out of STATIC_DIR
-            if path.suffix in STATIC_TYPES and path.is_file():
-                return _file_response(path, STATIC_TYPES[path.suffix])
-        return connection.respond(404, 'not found\n')
+        root = _ui_dir()
+        if root is None:
+            return connection.respond(
+                503, 'The web app is not built: run `just emu-build` (or npm run build in emulation/ui).\n'
+            )
+        rel = request.path.split('?', 1)[0].lstrip('/') or 'index.html'
+        path = (root / rel).resolve()
+        if not path.is_relative_to(root.resolve()):
+            return connection.respond(404, 'not found\n')
+        if not path.is_file():
+            if '.' in Path(rel).name:
+                return connection.respond(404, 'not found\n')
+            path = root / 'index.html'  # app routes fall back to the app
+        return _file_response(path, CONTENT_TYPES.get(path.suffix, 'application/octet-stream'))
 
     async def handler(ws: ServerConnection) -> None:
         clients.add(ws)

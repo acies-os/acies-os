@@ -43,7 +43,8 @@ Complete [3. Edge server](03-server.md) (tools, `.env`, `just build-server`, UI 
 * **SPAR weight**: the file named by `SPAR_WEIGHT` in `.env` (`spar_2024-03-29-ICT.pt` in the
   template) in `MODEL_DIR`, from the model weights download.
 
-Build the emulator image once, and again after each `just build-server`:
+Build the emulator image once, and again after each `just build-server`. It also builds the
+monitor web page (pulling the `node:22-slim` image, as the main UI's build does):
 
 ```bash
 just emu-build
@@ -58,7 +59,8 @@ just emu-up
 ```
 
 This starts the emulated devices with healthy links, then the edge services in the
-foreground. Leave it running; `Ctrl-C` stops the edge services.
+foreground. Leave it running; `Ctrl-C` stops the edge services. Running `just emu-up` again
+while it is up reattaches to the running services instead of starting new ones.
 
 ## 3. Run an experiment (browser)
 
@@ -123,6 +125,7 @@ The files are in `emulation/experiments/`. Copy one to make your own.
 | Symptom | Check |
 | --- | --- |
 | Page says **Disconnected** | The edge services are running: `docker ps` lists `edge-emu-monitor-1`. |
+| Page says "The web app is not built" | Run `just emu-build`, then restart with `just emu-down-all` and `just emu-up`. |
 | Map stays grey | The browser needs internet for the map tiles, as in the main UI. |
 | A device shows 0% delivered with a healthy link | Its recording has no data at that time. In GLE350 (run 4), `rs7` stops early (audio at 381 s, seismic at 542 s), so compare failure runs with a run without failures. |
 | Deploy does nothing | `just emu-logs` shows the emulator's log; device logs are in `~/.acies/emu/logs/`. |

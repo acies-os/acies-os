@@ -11,8 +11,9 @@ Prerequisites: the normal replay setup (`.env`, data, models, `just build-server
 `just build-ui`). Stop the normal edge stack first; both use ports 8765 and 5173.
 
 ```bash
-just emu-build      # once, and again after each `just build-server`
+just emu-build      # once, and after each `just build-server`; also builds the monitor web app
 just emu-up         # emulated nodes + edge stack; Ctrl-C stops the edge stack
+                    # (again while running: reattaches to the logs, restarts nothing)
 ```
 
 1. Open the network monitor: http://127.0.0.1:8780
@@ -44,12 +45,14 @@ ssh -L 8780:127.0.0.1:8780 -L 8765:127.0.0.1:8765 -L 5173:127.0.0.1:5173 <server
 
 ## The monitor page
 
+* **Experiment**: site, target, the plan, and **Deploy SPAR**. Targets are the main UI's (ICT:
+  GLE350, the default, and CX30); ones without recordings on this server are greyed out. Presets
+  fill in common plans. The plan is kept in your browser; **Apply to running replay** swaps it
+  into a replay that is already playing. After Deploy, a configuring window counts down while
+  the nodes are set up and synchronized.
 * **Links**: each node's state, its link settings, and what is measured over the last 10 s:
   traffic, packets dropped by the emulator, share of its data that reached the edge, extra
   delay, time since its last data.
-* **Experiment**: site, target (only the site's targets with recordings on this server are
-  selectable), the plan, and **Deploy SPAR**. Presets fill in common plans. The plan is kept in
-  your browser; **Apply to running replay** swaps it into a replay that is already playing.
 * **Fault buttons**: **Down** is a radio blackout (all packets lost, the link stays up);
   **Unplug** takes the interface down (the node gets errors at once). The form below the table
   sets bandwidth, delay, jitter or loss on one link, all nodes, or the edge uplink (which every
@@ -64,7 +67,7 @@ SPAR predicts the vehicle's position at the start of each 2-s window, so its err
 against the GPS truth at that moment.
 
 Only sites whose node names match the emulated nodes are offered (ICT and West Point, not GQ).
-The page follows deploys from the main UI too. It needs internet for the map tiles.
+The page follows deploys from the main UI too. It needs internet for the fonts and map tiles.
 
 ## Results
 
@@ -124,6 +127,18 @@ just emu-shell rs3                               # shell in a node's network (pi
 ```
 
 Node process logs: `~/.acies/emu/logs/<node>-<service>.log`.
+
+## Changing the web app
+
+The monitor page is a Vue 3 + Vite app in `ui/` (same stack as the main UI); see
+[ui/README.md](ui/README.md) for its structure. With Node 22 on the server:
+
+```bash
+just emu-ui-dev     # hot reload at http://127.0.0.1:5174, talking to the running monitor
+just emu-ui-build   # build it; the monitor serves the new build on the next page load
+```
+
+Without Node, `just emu-build` builds it inside Docker (then restart the stack).
 
 ## Things to know
 

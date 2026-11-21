@@ -1,0 +1,33 @@
+/* Design tokens, matching the main acies-os UI (ui/app): Barlow text, Raleway title,
+   IBM Plex Mono values, black outlines, ACIES orange accent. Light only, like the main UI. */
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Raleway:wght@400;500;600&display=swap');
+
+:root {
+  color-scheme: light;
+
+  --font-text: 'Barlow', system-ui, Helvetica, Arial, sans-serif;
+  --font-title: 'Raleway', 'Gill Sans', 'Optima', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+
+  --ink: #1f1f1f;
+  --ink-2: #505050;
+  --muted: #888;
+  --rule: #111;
+  --rule-soft: #ececec;
+  --rule-row: #c8c8c8;
+  --head-bg: #f3f3f3;
+
+  --accent: #e05339;
+  --accent-dark: #cf4830;
+  --accent-tonal: #fdeae5;
+
+  /* link state: table chips (tinted) and map labels (solid, text >= 4.5:1) */
+  --good: #2e9e4a;
+  --good-bg: #e3f5e6;
+  --warn-bg: #fff1d6;
+  --bad-bg: #fde2dc;
+  --map-up: #23843c;
+  --map-impaired: #f2b01e;
+  --map-down: #d03b3b;
+  --map-unknown: #8a8a8a;
+}

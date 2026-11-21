@@ -10,18 +10,34 @@ The latest release is `v0.3.0`.
 
 **Docs website: <https://acies-os.github.io/acies-os/>**
 
-The **[integration guide](docs/integration/basic/index.md)** walks through running Acies-OS on your
+The **[integration guide](docs/integration/index.md)** walks through running Acies-OS on your
 own hardware, step by step:
 
-1. [Overview](docs/integration/basic/01-overview.md)
-2. [Repository access and SSH](docs/integration/basic/02-access.md)
-3. [Edge server](docs/integration/basic/03-server.md)
-4. [Edge devices](docs/integration/basic/04-edge-device.md)
-5. [Network](docs/integration/basic/05-network.md)
-6. [Build and run](docs/integration/basic/06-build-and-run.md)
-7. [Data and model weights](docs/integration/basic/07-data-and-weights.md)
+1. [Overview](docs/integration/01-overview.md)
+2. [Repository access and SSH](docs/integration/02-access.md)
+3. [Edge server](docs/integration/03-server.md)
+4. [Edge devices](docs/integration/04-edge-device.md)
+5. [Network](docs/integration/05-network.md)
+6. [Build and run](docs/integration/06-build-and-run.md)
+7. [Data and model weights](docs/integration/07-data-and-weights.md)
+8. [Network emulation](docs/integration/08-network-emulation.md) (optional)
 
 To browse the docs as a website locally: `just live-doc`, then open <http://localhost:8000>.
+
+## Network emulation
+
+To test without edge devices, or to see what network failures do to localization, the
+network emulator runs all eight devices on the edge server behind an emulated network
+(Mininet). A web page controls the links (blackouts, loss, delay, bandwidth) and shows SPAR's
+localization error as the replay plays:
+
+```bash
+just emu-build    # once
+just emu-up       # then open http://127.0.0.1:8780
+```
+
+Setup: pages 2, 3, 7 and [8](docs/integration/08-network-emulation.md) of the integration
+guide. Day-to-day use: [emulation/README.md](emulation/README.md).
 
 ## Citation
 
