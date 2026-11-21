@@ -1,16 +1,17 @@
 # Edge stack for network emulation. Combine with edge.yml (+ edge-classifier.yml).
 #
 # The edge services join the network namespace of the Mininet container
-# (`acies-mn`, started by `just emu-up`) instead of the host network, so the
+# (`acies-mn`, started by `just emu-up-nodes`) instead of the host network, so the
 # emulated nodes reach the edge zenohd at 10.0.0.254:7500 through their shaped
 # links. The host network is not modified.
 #
 # Usage:
-#   just emu-up outage          # Mininet container with 8 emulated nodes
-#   just emu-edge-up            # this file: zenohd, gateway, gps, spar, recorder, ui
+#   just emu-up-nodes outage    # Mininet container with 8 emulated nodes
+#   just emu-up-infra           # this file: zenohd, gateway, gps, spar, recorder, monitor, ui
 #
 # The gateway's WebSocket is published by the acies-mn container on
 # 127.0.0.1:8765, so the UI and SSH port forwarding work as in the normal setup.
+# The network monitor page is published the same way on http://127.0.0.1:8780.
 # If acies-mn is restarted, restart this stack too (its network namespace is gone).
 
 x-emu-net: &emu-net
@@ -50,4 +51,16 @@ services:
     volumes:
       - ../emulation:/emu:ro
       - ~/.acies:/root/.acies
+    restart: unless-stopped
+
+  # Network monitor: link state, delivery and SPAR error on http://127.0.0.1:8780,
+  # with buttons that change links (emu/ctl) and deploy a replay.
+  monitor:
+    image: acies-mn:latest
+    command: python /emu/monitor.py --map ${ACIES_CONFIG:-ict.toml}
+    <<: *emu-net
+    volumes:
+      - ../emulation:/emu:ro
+      - ../packages/controllers/data:/config:ro
+      - ${DATA_DIR:-/data}:/data:ro   # only to tell which targets have recordings
     restart: unless-stopped

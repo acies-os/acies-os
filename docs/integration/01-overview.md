@@ -16,7 +16,8 @@ No code changes are needed. Setting up a new system comes down to these steps:
 | 8 | **Deploy and run**: push the image and weights to the devices, start everything, choose FM in the UI | both | [6. Build and run](06-build-and-run.md) |
 
 Before step 6 you can test the whole system on the edge server alone; see
-[Test the server on its own](03-server.md#test-the-server-on-its-own).
+[Test the server on its own](03-server.md#test-the-server-on-its-own). To run all eight devices
+on the edge server and test network failures, see [8. Network emulation](08-network-emulation.md).
 
 ## What runs where
 

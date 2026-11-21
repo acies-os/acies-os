@@ -2,7 +2,10 @@
 
 Reads a recorder JSONL file (default: the newest in ~/.acies/emu/records) and
 looks at one deploy (default: the last one). Phases are the intervals between
-the experiment's event times, measured from the replay start.
+the link changes that were applied during the deploy, measured from the replay
+start: scheduled ones from the experiment file and live ones from the monitor
+page or ``just emu-fault`` alike. Changes made before the replay started count
+as the starting state (time 0).
 
 For each phase it reports:
 
@@ -47,6 +50,13 @@ def _pct(values: list[float], q: float) -> float:
     return s[min(len(s) - 1, int(q * len(s)))]
 
 
+def _describe(event: dict[str, Any]) -> str:
+    """'down rs3,rs6' or 'set rs2 loss=20 delay=80ms'."""
+    nodes = event.get('nodes') or []
+    params = ' '.join(f'{k}={v}' for k, v in (event.get('params') or {}).items())
+    return ' '.join(x for x in (event['action'], ','.join(nodes) if len(nodes) < 9 else 'all', params) if x)
+
+
 def load(path: Path, deploy: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     armed = [r for r in records if r['type'] == 'event' and r.get('action') == 'armed']
@@ -56,7 +66,8 @@ def load(path: Path, deploy: int) -> tuple[dict[str, Any], list[dict[str, Any]]]
     start_ns = int(arm['start_at'] * _NS)
     later = [r for r in armed if r['wall_ns'] > arm['wall_ns']]
     end_ns = later[0]['wall_ns'] if later else math.inf
-    window = [r for r in records if start_ns <= r['wall_ns'] < end_ns]
+    # from the deploy itself, so changes made while waiting for start_at are included
+    window = [r for r in records if min(start_ns, arm['wall_ns']) <= r['wall_ns'] < end_ns]
     return arm, window
 
 
@@ -75,7 +86,6 @@ def main() -> None:  # noqa: C901
         path = files[-1]
 
     arm, records = load(path, args.deploy)
-    events: list[dict[str, Any]] = arm.get('events', [])
 
     # --- clocks ---
     # Replays share a data origin (acies-replay --origin run): the run's earliest timestamp plays
@@ -100,8 +110,12 @@ def main() -> None:  # noqa: C901
                 return truth[sec + d]
         return None
 
-    # --- phases between event times ---
-    cuts = sorted({0.0, *(float(e['at']) for e in events if float(e['at']) < duration_s), float(duration_s)})
+    # --- phases between applied link changes (the deploy's own reset is not one) ---
+    events: list[dict[str, Any]] = []
+    for r in records:
+        if r['type'] == 'event' and r.get('action') not in ('armed', 'plan') and r.get('source') != 'arm':
+            events.append({**r, 't': max(0, round((r['wall_ns'] - start_ns) / _NS))})
+    cuts = sorted({0.0, *(float(e['t']) for e in events if e['t'] < duration_s), float(duration_s)})
     phases = list(itertools.pairwise(cuts))
 
     def phase_of(t: float) -> int | None:
@@ -112,7 +126,7 @@ def main() -> None:  # noqa: C901
 
     def label(i: int) -> str:
         a, b = phases[i]
-        acts = [f'{e["action"]} {e.get("nodes", e.get("node"))}' for e in events if float(e['at']) == a]
+        acts = [_describe(e) for e in events if float(e['t']) == a]
         return f'{a:>5.0f}-{b:<5.0f} ' + ('; '.join(acts) if acts else 'baseline')
 
     # --- SPAR windows ---
@@ -153,7 +167,7 @@ def main() -> None:  # noqa: C901
             got[(r['node'], p)] += 1
 
     print(f'record:  {path}')
-    print(f'deploy:  start_at={arm["start_at"]:.3f}  played={duration_s}s  events={len(events)}')
+    print(f'deploy:  start_at={arm["start_at"]:.3f}  played={duration_s}s  link changes={len(events)}')
     print()
     print(f'{"phase (s)":<40} {"windows":>9} {"nodes":>6} {"lag s":>6} {"err med":>8} {"mean":>7} {"p90":>7}')
     for i in range(len(phases)):

@@ -18,6 +18,7 @@ edge-zenohd *args:
     -@docker run --rm -it --init \
         --detach-keys="ctrl-z,z" \
         --network host \
+        -e ZENOH_RUNTIME="${ZENOH_RUNTIME:-(rx: (worker_threads: 8))}" \
         -v ~/.acies:/root/.acies \
         acies-server:latest zenohd --listen {{ edge_zenoh_connect }} {{ edge_zenoh_bridge }} {{ args }}
 

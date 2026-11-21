@@ -1,8 +1,7 @@
-# Transmission failures during a 900 s ICT replay (e.g. Miata, run 2).
+# Transmission failures during a 900 s ICT replay (e.g. GLE350, run 4).
 #
-#   just emu-up outage
-#   just emu-edge-up
-#   just emu-deploy miata        # or Deploy in the UI (joint nodes, SPAR)
+#   just emu-up outage           # nodes + edge stack
+#   just emu-deploy gle350       # or Deploy in the UI (joint nodes, SPAR)
 #   just emu-analyze             # after the replay
 #
 # Events are timed in seconds from the replay start (the deploy's start_at) and

@@ -1,7 +1,7 @@
 # Quick end-to-end check (about 2.5 minutes): one blackout and recovery.
 #
-#   just emu-up smoke && just emu-edge-up
-#   just emu-deploy miata
+#   just emu-up smoke
+#   just emu-deploy gle350
 #   (wait ~2.5 min) just emu-analyze
 
 [nodes]

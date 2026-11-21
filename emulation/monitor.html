@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACIES-OS Network Emulator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Raleway:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  /* Matches the acies-os UI (ui/app): Barlow text, Raleway title, IBM Plex Mono values,
+     black-outlined panels, ACIES orange accent. Light only, like the main UI. */
+  :root {
+    color-scheme: light;
+    --ink: #1f1f1f;
+    --ink-2: #505050;
+    --muted: #888;
+    --rule: #111;
+    --rule-soft: #ececec;
+    --rule-row: #c8c8c8;
+    --head-bg: #f3f3f3;
+    --accent: #e05339;
+    --accent-dark: #cf4830;
+    --good: #2e9e4a;
+    --good-bg: #e3f5e6;
+    --warn: #c98500;
+    --warn-bg: #fff1d6;
+    --bad: #e05339;
+    --bad-bg: #fde2dc;
+    --mono: 'IBM Plex Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-width: 320px; background: #fff; color: var(--ink);
+    font-family: 'Barlow', system-ui, Helvetica, Arial, sans-serif; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── header (as on the Map page) ── */
+  .header {
+    margin: 0 2.5%; height: 100px; width: 95%; display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 8px; border-bottom: 2px solid var(--rule);
+  }
+  .header-left { display: flex; align-items: center; gap: 14px; padding-left: 2.5%; }
+  .header-logo { height: 2.5rem; width: auto; }
+  .header-title {
+    font-family: 'Raleway', 'Gill Sans', 'Optima', sans-serif; font-size: max(min(2rem, 2vw), 1.5rem);
+    font-weight: 500; letter-spacing: 0.2em; color: #222; text-transform: uppercase;
+  }
+  .header-sub {
+    font-size: 0.8rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--accent); border-left: 1.5px solid var(--rule); padding-left: 14px;
+  }
+  .header-right { display: flex; align-items: center; gap: 8px; padding-right: 2.5%; flex-wrap: wrap; }
+  .header-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px;
+    padding: 0 20px; border: 1px solid #c4c7c5; border-radius: 20px; background: transparent;
+    color: #1f1f1f; font: 600 0.9rem 'Barlow', sans-serif; letter-spacing: 0.01em; white-space: nowrap;
+    text-decoration: none; cursor: pointer; transition: background-color .15s, box-shadow .15s;
+  }
+  .header-btn:hover { background-color: rgba(31, 31, 31, 0.08); }
+  .header-btn--filled { background: var(--accent); border-color: transparent; color: #fff; }
+  .header-btn--filled:hover { background: var(--accent-dark); box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15); }
+  select.target-input { width: auto; cursor: pointer; }
+  .target-input {
+    height: 40px; width: 120px; padding: 0 14px; border: 1px solid #c4c7c5; border-radius: 20px;
+    font: 500 0.9rem var(--mono); color: var(--ink); background: #fff;
+  }
+
+  /* ── layout ── */
+  .content { width: 95%; margin: 24px auto 48px; display: flex; flex-direction: column; gap: 24px; }
+  .row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .map-wrapper { flex: 1 1 420px; min-width: 0; height: 560px; border-radius: 10px; overflow: hidden; position: relative; }
+  #map { width: 100%; height: 100%; background: #ddd; }
+  .right-panel { flex: 0 1 clamp(680px, 52vw, 860px); min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+
+  /* ── panels: black outline, stat strip, grey table header ── */
+  .panel { border: 1.5px solid var(--rule); border-radius: 4px; background: #fff; overflow: hidden; }
+  .stats { display: flex; border-bottom: 1.5px solid var(--rule); }
+  .stats:last-child { border-bottom: none; }
+  .stat {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 8px 12px; gap: 2px; border-right: 1px solid #e0e0e0; min-width: 0;
+  }
+  .stat:last-child { border-right: none; }
+  .stat-label { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #000; white-space: nowrap; }
+  .stat-val { font: 500 1rem var(--mono); color: var(--accent); text-align: center; white-space: nowrap; }
+  .stat-val.ok { color: var(--good); }
+  .stat-val.big { font-size: 1.35rem; }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 8px 12px; border-bottom: 1px solid #ddd;
+  }
+  .panel-title { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #000; }
+  .panel-note { font-size: 0.8rem; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; }
+  .table-wrap { overflow-x: auto; scrollbar-width: thin; }
+  th {
+    background: var(--head-bg); padding: 8px 5px; border-inline: 1px solid var(--rule-soft);
+    font-size: 0.66rem; font-weight: 700; letter-spacing: 0.12em; color: var(--ink-2);
+    text-transform: uppercase; text-align: center; white-space: nowrap;
+  }
+  th.group { padding: 4px 5px; border-bottom: 1px solid var(--rule-soft); }
+  td {
+    padding: 5px 5px; font-size: 0.8rem; text-align: center; white-space: nowrap;
+    border-right: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-row);
+  }
+  td:last-child, th:last-child { border-right: none; }
+  tr.edge td { border-top: 1px dashed var(--rule); background: #fafafa; }
+  tbody tr:last-child td { border-bottom: none; }
+  .name { font-weight: 700; font-size: 0.88rem; color: #555; text-transform: uppercase; }
+  .num { font-family: var(--mono); font-weight: 600; color: #333; }
+  .dim { color: #aaa; font-weight: 400; }
+  .chip {
+    display: inline-block; padding: 1px 8px; border-radius: 4px; border: 1px solid #000;
+    font-weight: 600; font-size: 0.78rem;
+  }
+  .chip.up { background: var(--good-bg); }
+  .chip.impaired { background: var(--warn-bg); }
+  .chip.down { background: var(--bad-bg); color: #7d2a13; }
+  .bar { display: inline-block; width: 38px; height: 6px; border: 1px solid var(--rule); border-radius: 3px; margin-left: 5px; vertical-align: middle; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--rule); }
+
+  /* segmented buttons in the panel's black-outline style (as the graph's node switch) */
+  .seg { display: inline-flex; border: 1.5px solid var(--rule); border-radius: 4px; overflow: hidden; vertical-align: middle; }
+  .seg button {
+    margin: 0; padding: 1px 8px; border: none; border-right: 1px solid var(--rule); border-radius: 0;
+    background: #fff; color: #111; font: 600 0.68rem var(--mono); letter-spacing: 0.05em;
+    text-transform: uppercase; cursor: pointer; transition: background-color .15s, color .15s;
+  }
+  .seg button:last-child { border-right: none; }
+  .seg button:hover { background: #f1f1f1; }
+  .seg button.on { background: #111; color: #fff; }
+
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-top: 1.5px solid var(--rule); }
+  .controls label { display: inline-flex; align-items: center; gap: 5px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+  .controls input, .controls select {
+    width: 62px; height: 26px; padding: 0 6px; border: 1.5px solid var(--rule); border-radius: 4px;
+    font: 500 0.8rem var(--mono); color: var(--ink); background: #fff;
+  }
+  .controls select { width: auto; }
+  .btn-small {
+    height: 26px; padding: 0 12px; border-radius: 4px; border: 1.5px solid var(--rule); background: #fff;
+    font: 700 0.7rem 'Barlow', sans-serif; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer;
+  }
+  .btn-small:hover { background: #f1f1f1; }
+  .btn-small.dark { background: #111; color: #fff; }
+  .btn-small.dark:hover { background: #333; }
+  .btn-small.accent { color: var(--accent); border-color: var(--accent); }
+  #toast { font: 500 0.75rem var(--mono); color: var(--ink-2); margin-left: auto; }
+  #toast.err { color: var(--accent); }
+
+  /* ── map overlays ── */
+  .map-legend {
+    position: absolute; top: 10px; right: 10px; z-index: 500; background: rgba(255,255,255,.92);
+    border: 1.5px solid var(--rule); border-radius: 4px; padding: 6px 10px; font-size: 0.78rem; font-weight: 600;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .map-legend span[hidden] { display: none; }
+  .lg-gt { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #000; background: var(--c); }
+  .lg-spar { width: 10px; height: 10px; border: 2px dashed #000; background: var(--c); }
+  .lg-link { width: 10px; height: 10px; border-radius: 2px; border: 1px solid #000; background: var(--c); }
+  /* map node labels: the whole box takes the link state's colour; text keeps >= 4.5:1 contrast */
+  :root { --map-up: #23843c; --map-impaired: #f2b01e; --map-down: #d03b3b; --map-unknown: #8a8a8a; }
+  .node-label {
+    display: inline-flex; align-items: baseline; gap: 4px; border: 1.5px solid #000; border-radius: 3px;
+    padding: 1px 6px; font: 700 0.78rem 'Barlow', sans-serif; letter-spacing: 0.04em; text-transform: uppercase;
+    white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.5); background: var(--map-unknown); color: #fff;
+  }
+  .node-label small { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; }
+  .node-label.st-up { background: var(--map-up); color: #fff; }
+  .node-label.st-impaired { background: var(--map-impaired); color: #111; }
+  .node-label.st-down { background: var(--map-down); color: #fff; }
+  .spar-mark { width: 100%; height: 100%; border: 2px dashed #000; background: var(--c); }
+
+  /* ── charts ── */
+  .chart { position: relative; padding: 4px 8px 6px; }
+  canvas { display: block; width: 100%; }
+  .tip {
+    position: absolute; pointer-events: none; display: none; z-index: 2; white-space: nowrap;
+    background: #fff; border: 1.5px solid var(--rule); border-radius: 4px; padding: 6px 9px;
+    font-size: 0.78rem; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  }
+  .tip b { font-family: var(--mono); }
+  .legend { display: flex; gap: 14px; font-size: 0.78rem; font-weight: 600; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--c); }
+  .legend i.dash { border-top-style: dashed; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; }
+  .cols > div + div { border-left: 1.5px solid var(--rule); }
+  ul.log { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; font-size: 0.82rem; scrollbar-width: thin; }
+  ul.log li { padding: 5px 12px; border-bottom: 1px solid var(--rule-soft); }
+  ul.log .t { font-family: var(--mono); color: var(--accent); display: inline-block; min-width: 60px; margin-right: 14px; }
+  ul.log .src { color: var(--muted); }
+  ul.log li.done { color: #999; }
+
+  /* experiment panel */
+  .setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 12px; border-bottom: 1px solid #ddd; }
+  .setup label { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+  .setup select {
+    height: 36px; min-width: 150px; padding: 0 10px; border: 1.5px solid var(--rule); border-radius: 4px;
+    font: 500 0.9rem var(--mono); color: var(--ink); background: #fff; cursor: pointer;
+  }
+  .setup-status { font: 500 0.95rem var(--mono); color: var(--accent); margin-left: auto; }
+  .plan-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 10px 12px 6px; }
+  .sub-title { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+  table.plan td { border-bottom: 1px solid var(--rule-soft); }
+  table.plan tr.done td { color: #999; background: #fafafa; }
+  table.plan input, table.plan select {
+    height: 26px; padding: 0 6px; border: 1.5px solid var(--rule); border-radius: 4px;
+    font: 500 0.8rem var(--mono); color: var(--ink); background: #fff;
+  }
+  table.plan input { width: 70px; }
+  table.plan input:disabled { border-color: #ddd; background: #f5f5f5; }
+  .chips { display: inline-flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
+  .chips button {
+    padding: 0 6px; height: 22px; border: 1px solid var(--rule); border-radius: 3px; background: #fff;
+    font: 600 0.66rem var(--mono); text-transform: uppercase; cursor: pointer;
+  }
+  .chips button.on { background: #111; color: #fff; }
+  .chips button.all { border-style: dashed; }
+  .row-del { border: none; background: none; font-size: 1.1rem; line-height: 1; cursor: pointer; color: #999; }
+  .row-del:hover { color: var(--accent); }
+  .plan-empty { padding: 10px 12px; color: var(--muted); font-size: 0.85rem; }
+  .preset-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-left: 8px; }
+  .plan-actions { border-top: 1px solid #ddd; }
+  #plan-apply { margin-left: auto; }
+
+  /* configuring window, as in the main UI's deploy dialog */
+  .overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(255,255,255,.95); display: flex; align-items: center; justify-content: center; }
+  .overlay[hidden] { display: none; }
+  .overlay-box { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .spinner { width: 48px; height: 48px; border: 4px solid #fdeae5; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .overlay-text { margin-top: 16px; font-size: 1rem; font-weight: 600; }
+  .overlay-bar { width: 260px; height: 4px; background: #fdeae5; border-radius: 2px; overflow: hidden; margin-top: 16px; }
+  .overlay-fill { height: 100%; width: 0; background: var(--accent); transition: width .3s linear; }
+  .overlay-sub { margin: 8px 0 18px; font-size: 0.82rem; color: #555; text-align: center; }
+  .node-label { cursor: pointer; }
+
+  .copyright { position: fixed; bottom: 10px; right: 14px; font-size: 0.68rem; font-weight: 500; color: #999; pointer-events: none; }
+  @media (max-width: 900px) {
+    .header { height: auto; padding: 12px 0; }
+    .header-btn { height: 34px; padding: 0 14px; font-size: 0.82rem; }
+    .target-input { height: 34px; }
+    .right-panel { flex-basis: 100%; }
+    .cols { grid-template-columns: 1fr; }
+    .cols > div + div { border-left: none; border-top: 1.5px solid var(--rule); }
+    .stats { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-left">
+    <img src="/static/uiuclogo.png" class="header-logo" alt="UIUC">
+    <div class="header-title">ACIES-OS</div>
+    <div class="header-sub">Network Emulator</div>
+  </div>
+  <div class="header-right">
+    <a class="header-btn" id="main-ui" href="#">Main UI</a>
+  </div>
+</header>
+
+<main class="content">
+  <div class="panel" id="experiment">
+    <div class="panel-head">
+      <span class="panel-title">Experiment</span>
+      <span class="panel-note">1. Pick the site and target. 2. Plan the network changes (optional). 3. Deploy. You can also change links live below.</span>
+    </div>
+    <div class="setup">
+      <label>Site <select id="site"></select></label>
+      <label>Target <select id="target"></select></label>
+      <span class="setup-status" id="run-status">Not deployed</span>
+      <button class="header-btn header-btn--filled" id="deploy-btn" type="button">Deploy SPAR</button>
+    </div>
+    <div class="plan-head">
+      <span class="sub-title">Planned network changes</span>
+      <span class="panel-note">Seconds after the replay starts; they fire automatically. Leave "For" empty to keep the change until the end.</span>
+    </div>
+    <div class="table-wrap">
+      <table class="plan">
+        <thead><tr><th>At (s)</th><th>Links</th><th>Change</th><th>Value</th><th>For (s)</th><th></th></tr></thead>
+        <tbody id="plan-rows"></tbody>
+      </table>
+    </div>
+    <div class="controls plan-actions">
+      <button class="btn-small dark" type="button" id="plan-add">+ Add change</button>
+      <span class="preset-label">Presets</span>
+      <button class="btn-small" type="button" data-preset="blackout">3 links black out</button>
+      <button class="btn-small" type="button" data-preset="loss">20% loss on all</button>
+      <button class="btn-small" type="button" data-preset="edge">Edge uplink 1 Mbit/s</button>
+      <button class="btn-small" type="button" data-preset="clear">Clear</button>
+      <button class="btn-small accent" type="button" id="plan-apply" title="Replace the running replay's schedule with this plan">Apply to running replay</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="map-wrapper">
+      <div id="map"></div>
+      <div class="map-legend">
+        <span><i class="lg-gt" style="--c:#816EE0"></i><span id="lg-gt">Truth</span></span>
+        <span id="lg-spar-row" hidden><i class="lg-spar" style="--c:#816EE0"></i><span id="lg-spar">SPAR</span></span>
+        <span><i class="lg-link" style="--c:var(--map-up)"></i>Link up</span>
+        <span><i class="lg-link" style="--c:var(--map-impaired)"></i>Impaired</span>
+        <span><i class="lg-link" style="--c:var(--map-down)"></i>Down / unplugged</span>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div class="panel">
+        <div class="stats">
+          <div class="stat"><span class="stat-label">Status</span><span class="stat-val" id="s-conn">Disconnected</span></div>
+          <div class="stat"><span class="stat-label">Experiment</span><span class="stat-val" id="s-exp">–</span></div>
+          <div class="stat"><span class="stat-label">Replay</span><span class="stat-val" id="s-time">–</span></div>
+          <div class="stat"><span class="stat-label">Links down</span><span class="stat-val" id="s-down">–</span></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th rowspan="2">Node</th><th rowspan="2">State</th>
+                <th class="group" colspan="3">Link settings</th>
+                <th class="group" colspan="5">Measured (last 10 s)</th>
+                <th rowspan="2">Fault</th>
+              </tr>
+              <tr>
+                <th>BW Mb/s</th><th>Delay</th><th>Loss %</th>
+                <th>Up kb/s</th><th>Drops/s</th><th>Delivered</th><th>Extra delay</th><th>Last data</th>
+              </tr>
+            </thead>
+            <tbody id="links"></tbody>
+          </table>
+        </div>
+        <form class="controls" id="setform">
+          <label>Link <select id="set-target"></select></label>
+          <label>BW <input id="set-bw" type="number" min="0" step="any" placeholder="Mb/s"></label>
+          <label>Delay <input id="set-delay" type="number" min="0" step="any" placeholder="ms"></label>
+          <label>Jitter <input id="set-jitter" type="number" min="0" step="any" placeholder="ms"></label>
+          <label>Loss <input id="set-loss" type="number" min="0" max="100" step="any" placeholder="%"></label>
+          <button class="btn-small dark" type="submit">Apply</button>
+          <button class="btn-small" type="button" id="reset-target">Reset</button>
+          <button class="btn-small accent" type="button" id="reset-all">Reset all</button>
+          <span id="toast"></span>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="stats">
+      <div class="stat"><span class="stat-label">Median error</span><span class="stat-val big" id="k-med">–</span></div>
+      <div class="stat"><span class="stat-label">P90 error</span><span class="stat-val big" id="k-p90">–</span></div>
+      <div class="stat"><span class="stat-label">Latest error</span><span class="stat-val big" id="k-last">–</span></div>
+      <div class="stat"><span class="stat-label">Nodes / window</span><span class="stat-val big" id="k-nodes">–</span></div>
+      <div class="stat"><span class="stat-label">Windows</span><span class="stat-val big" id="k-win">–</span></div>
+      <div class="stat"><span class="stat-label">Output lag</span><span class="stat-val big" id="k-lag">–</span></div>
+    </div>
+    <div class="panel-head">
+      <span class="panel-title">SPAR localization error</span>
+      <span class="panel-note">Distance from the GPS truth at the start of each 2-s window, the position SPAR predicts. Stats: last 30 s of replay.</span>
+      <span class="legend"><span><i style="--c:var(--accent)"></i>Error (m)</span><span><i class="dash" style="--c:#111"></i>Link change</span></span>
+    </div>
+    <div class="chart" id="err-wrap"><canvas id="err" style="height:230px"></canvas><div class="tip" id="err-tip"></div></div>
+    <div class="panel-head" style="border-top:1px solid #ddd">
+      <span class="panel-title">Nodes in each window</span>
+      <span class="panel-note">Nodes whose data reached the window before SPAR closed it.</span>
+    </div>
+    <div class="chart" id="nodes-wrap"><canvas id="nodes" style="height:110px"></canvas><div class="tip" id="nodes-tip"></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">Applied changes</span><span class="panel-note">Seconds after replay start; every change is recorded for <code>just emu-analyze</code></span></div>
+    <ul class="log" id="events"></ul>
+  </div>
+</main>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="overlay-box">
+    <div class="spinner"></div>
+    <div class="overlay-text">Deploying configuration…</div>
+    <div class="overlay-bar"><div class="overlay-fill" id="overlay-fill"></div></div>
+    <div class="overlay-sub" id="overlay-sub">Configuring the nodes and synchronizing their start time</div>
+    <button class="btn-small" type="button" id="overlay-hide">Hide</button>
+  </div>
+</div>
+<div class="copyright">© <span id="year"></span> UIUC CyPhy Group. All rights reserved.</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+$('year').textContent = new Date().getFullYear();
+$('main-ui').href = `${location.protocol}//${location.hostname}:5173/`;
+
+// vehicle colours from ui/app/src/config/app.js (TARGET_COLORS)
+const TARGET_COLORS = {
+  gle350: '#E05339', suv: '#E05339', miata: '#816EE0', mustang: '#06b6d4', cx30: '#f59e0b',
+  polaris: '#ec4899', warthog: '#8b5cf6', mazdacx30: '#84cc16', truck: '#fb7185', wagoneer: '#7079F3',
+  kona: '#36A553', others: '#36A553',
+};
+const targetColor = (label) => TARGET_COLORS[String(label || '').toLowerCase()] || '#E05339';
+
+let sites = {};
+let activeMap = null;  // the site the gateway is using
+let site = { nodes: {}, road: [] };
+let siteTouched = false;  // the user picked a site/target; don't overwrite it
+let snap = null;
+let ws = null;
+
+// ------------------------------- connection -------------------------------
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => setConn(true);
+  ws.onclose = () => { setConn(false); setTimeout(connect, 2000); };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'sites') {
+      sites = msg.sites;
+      fillSites();
+    } else if (msg.type === 'snapshot') {
+      const first = !snap;
+      snap = msg;
+      if (first) { fillSites(); initPlan(); }
+      if (snap.map !== activeMap && sites[snap.map]) {
+        activeMap = snap.map; site = sites[activeMap]; initMap();
+        if (!siteTouched) { $('site').value = activeMap; fillTargets(); }
+      }
+      followTarget();
+      render();
+      updateOverlay();
+    }
+    else if (msg.type === 'ack') {
+      toast(msg.message, !msg.ok);
+      if (!msg.ok) { deployedAt = null; showOverlay(false); }
+    }
+  };
+}
+function setConn(ok) { $('s-conn').textContent = ok ? 'Connected' : 'Disconnected'; $('s-conn').className = `stat-val${ok ? ' ok' : ''}`; }
+function send(cmd) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { toast('not connected', true); return; }
+  ws.send(JSON.stringify(cmd));
+}
+function fault(action, nodes, params = {}) { send({ type: 'fault', action, nodes, ...params }); }
+function toast(text, err = false) { $('toast').textContent = text; $('toast').className = err ? 'err' : ''; }
+
+// --------------------------------- links ---------------------------------
+function linkStatus(l) {
+  if (!l || !l.config) return ['–', '', '--muted'];
+  if (l.unplugged) return ['Unplugged', 'down', '--bad'];
+  if (l.down) return ['Down', 'down', '--bad'];
+  const c = l.config;
+  if ((c.loss || 0) > 0 || parseFloat(c.delay || 0) >= 50 || c.jitter || (c.bw !== undefined && c.bw < 1))
+    return ['Impaired', 'impaired', '--warn'];
+  return ['Up', 'up', '--good'];
+}
+const val = (v, suffix = '') => (v === null || v === undefined || v === '') ? '<span class="dim">–</span>' : `${v}${suffix}`;
+
+function renderLinks() {
+  const names = [...snap.nodes, 'edge'];
+  $('links').innerHTML = names.map((name) => {
+    const l = snap.links[name] || {};
+    const c = l.config || {};
+    const [label, cls] = linkStatus(l);
+    const edge = name === 'edge';
+    const delay = c.delay ? `${c.delay}${c.jitter ? ` ±${c.jitter}` : ''}` : null;
+    const deliv = l.delivery_pct;
+    const delivered = edge || deliv === undefined ? val(null) : `${deliv}%<span class="bar"><i style="width:${deliv}%"></i></span>`;
+    return `<tr class="${edge ? 'edge' : ''}">
+      <td class="name">${name}</td>
+      <td><span class="chip ${cls}">${label}</span></td>
+      <td class="num">${val(c.bw)}</td><td class="num">${val(delay)}</td><td class="num">${val(c.loss)}</td>
+      <td class="num">${val(l.up_kbps)}</td><td class="num">${val(l.up_drops_ps)}</td>
+      <td class="num">${delivered}</td>
+      <td class="num">${edge ? val(null) : val(l.delay_ms, ' ms')}</td>
+      <td class="num">${edge ? val(null) : val(l.last_data_s, ' s')}</td>
+      <td><span class="seg">
+        <button class="${l.down ? 'on' : ''}" data-act="${l.down ? 'up' : 'down'}" data-node="${name}" title="100% loss, interface stays up">Down</button>
+        <button class="${l.unplugged ? 'on' : ''}" data-act="${l.unplugged ? 'plug' : 'unplug'}" data-node="${name}" title="interface down">Unplug</button>
+      </span></td></tr>`;
+  }).join('');
+
+  const sel = $('set-target');
+  const options = ['all', ...snap.nodes, 'edge'];
+  if (sel.options.length !== options.length) {
+    const keep = sel.value;
+    sel.innerHTML = options.map((o) => `<option value="${o}">${o === 'all' ? 'All nodes' : o.toUpperCase()}</option>`).join('');
+    if (options.includes(keep)) sel.value = keep;
+  }
+  const down = snap.nodes.filter((n) => snap.links[n]?.down || snap.links[n]?.unplugged);
+  $('s-down').textContent = down.length ? down.map((n) => n.toUpperCase()).join(' ') : 'None';
+}
+$('links').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (b) fault(b.dataset.act, [b.dataset.node]);
+});
+const targetNodes = () => { const v = $('set-target').value; return v === 'all' ? 'all' : [v]; };
+$('setform').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const num = (id) => $(id).value === '' ? null : Number($(id).value);
+  const params = {};
+  if (num('set-bw') !== null) params.bw = num('set-bw');
+  if (num('set-delay') !== null) params.delay = `${num('set-delay')}ms`;
+  if (num('set-jitter') !== null) params.jitter = `${num('set-jitter')}ms`;
+  if (num('set-loss') !== null) params.loss = num('set-loss');
+  if (!Object.keys(params).length) { toast('enter at least one value', true); return; }
+  fault('set', targetNodes(), params);
+});
+$('reset-target').addEventListener('click', () => fault('reset', targetNodes()));
+$('reset-all').addEventListener('click', () => fault('reset', 'all+edge'));
+// ---------------------------- site and target ----------------------------
+// Only sites whose node list covers the emulated nodes (e.g. ICT and West Point, not GQ).
+function usableSites() {
+  const nodes = snap?.nodes || [];
+  return Object.keys(sites).filter((k) => nodes.length && nodes.every((n) => n in sites[k].nodes));
+}
+function fillSites() {
+  const keep = $('site').value || activeMap;
+  const names = usableSites();
+  $('site').innerHTML = names.map((k) => `<option value="${k}">${k.toUpperCase()}</option>`).join('');
+  if (names.includes(keep)) $('site').value = keep;
+  fillTargets();
+}
+// Targets are the site's routes; ones without recordings on this server are disabled.
+// The targets offered per site, as in the main UI (ui/app/src/config/maps.js MAP_TARGETS);
+// a site not listed here offers all its routes.
+const SITE_TARGETS = { ict: ['gle350', 'cx30'], wp: ['wagoneer', 'kona'] };
+const TARGET_LABELS = { kona: 'Others' };
+const DEFAULT_TARGET = 'gle350';
+function fillTargets() {
+  const keep = $('target').value || load('target');
+  const siteName = $('site').value;
+  const routes = sites[siteName]?.targets || {};
+  const keys = (SITE_TARGETS[siteName] || Object.keys(routes)).filter((k) => k in routes);
+  const need = (snap?.nodes || []).length;
+  $('target').innerHTML = keys.map((k) => {
+    const v = routes[k];
+    const ok = v.nodes_with_data > 0;
+    const note = !ok ? ' (no data)' : v.nodes_with_data < need ? ` (${v.nodes_with_data}/${need} nodes)` : '';
+    const label = (TARGET_LABELS[k] || k).toUpperCase().replace(/_/g, ' + ');
+    return `<option value="${k}" ${ok ? '' : 'disabled'}>${label}${note}</option>`;
+  }).join('');
+  const usable = [...$('target').options].filter((o) => !o.disabled).map((o) => o.value);
+  $('target').value = usable.includes(keep) ? keep : usable.includes(DEFAULT_TARGET) ? DEFAULT_TARGET : (usable[0] || '');
+}
+// Show the target that is playing: the route whose vehicles match the GPS truth's labels.
+function followTarget() {
+  if (siteTouched || $('site').value !== activeMap) return;
+  const labels = Object.keys(snap.truth_trail || {}).map((l) => l.toLowerCase()).sort().join(',');
+  if (!labels) return;
+  const route = Object.keys(sites[activeMap]?.targets || {}).find((k) => k.split('_').sort().join(',') === labels);
+  if (route && $('target').value !== route && ![...$('target').options].find((o) => o.value === route)?.disabled) $('target').value = route;
+}
+$('site').addEventListener('change', () => { siteTouched = true; fillTargets(); });
+$('target').addEventListener('change', () => { siteTouched = true; save('target', $('target').value); });
+
+// --------------------------------- plan ---------------------------------
+// Rows are edited here and sent with the deploy; the emulator fires them at replay times.
+const CHANGES = {
+  down:   { label: 'Blackout', unit: null, revert: 'up' },
+  unplug: { label: 'Unplug', unit: null, revert: 'plug' },
+  loss:   { label: 'Loss', unit: '%', revert: 'reset' },
+  delay:  { label: 'Delay', unit: 'ms', revert: 'reset' },
+  jitter: { label: 'Jitter', unit: 'ms', revert: 'reset' },
+  bw:     { label: 'Bandwidth', unit: 'Mbit/s', revert: 'reset' },
+  up:     { label: 'End blackout', unit: null },
+  plug:   { label: 'Plug back in', unit: null },
+  reset:  { label: 'Restore link', unit: null },
+};
+let plan = [];
+function load(key) { try { return JSON.parse(localStorage.getItem(`emu-${key}`)); } catch { return null; } }
+function save(key, v) { try { localStorage.setItem(`emu-${key}`, JSON.stringify(v)); } catch { /* storage off */ } }
+
+// Start from this browser's last plan, else from the emulator's current schedule.
+function initPlan() {
+  const saved = load('plan');
+  plan = Array.isArray(saved) ? saved : rowsFromEvents(snap.schedule || []);
+  renderPlan();
+}
+// Schedule events -> rows; a change followed by its revert on the same links becomes one row with a duration.
+function rowsFromEvents(events) {
+  const rows = [];
+  const open = [];  // rows that a later up/plug/reset can close
+  const key = (nodes) => [...nodes].sort().join(',');
+  for (const e of events) {
+    const nodes = e.nodes === 'all' || e.nodes === 'all+edge' ? [...snap.nodes, ...(e.nodes === 'all+edge' ? ['edge'] : [])] : [].concat(e.nodes ?? e.node);
+    const closer = { up: ['down'], plug: ['unplug'], reset: ['loss', 'delay', 'jitter', 'bw'] }[e.action];
+    if (closer) {
+      const matches = open.filter((r) => closer.includes(r.change) && key(r.nodes) === key(nodes));
+      if (matches.length) {
+        for (const r of matches) { r.dur = e.at - r.at; open.splice(open.indexOf(r), 1); }
+        continue;
+      }
+    }
+    if (e.action === 'set') {
+      for (const k of ['loss', 'delay', 'jitter', 'bw']) if (e[k] !== undefined) {
+        const r = { at: e.at, nodes, change: k, value: parseFloat(e[k]), dur: '' }; rows.push(r); open.push(r);
+      }
+    } else {
+      const r = { at: e.at, nodes, change: e.action, value: '', dur: '' }; rows.push(r);
+      if (CHANGES[e.action]?.revert) open.push(r);
+    }
+  }
+  return rows;
+}
+function eventsFromRows() {
+  const events = [];
+  for (const r of plan) {
+    if (!r.nodes.length || r.at === '' || isNaN(Number(r.at))) continue;
+    const c = CHANGES[r.change];
+    const ev = { at: Number(r.at), nodes: r.nodes };
+    if (c.unit) {
+      if (r.value === '' || isNaN(Number(r.value))) continue;
+      Object.assign(ev, { action: 'set', [r.change]: c.unit === 'ms' ? `${Number(r.value)}ms` : Number(r.value) });
+    } else ev.action = r.change;
+    events.push(ev);
+    if (c.revert && r.dur !== '' && Number(r.dur) > 0) events.push({ at: Number(r.at) + Number(r.dur), nodes: r.nodes, action: c.revert });
+  }
+  return events.sort((a, b) => a.at - b.at);
+}
+function renderPlan() {
+  const nodes = [...(snap?.nodes || []), 'edge'];
+  const t = snap?.t_replay;
+  const running = t !== null && t !== undefined && t >= 0;
+  $('plan-rows').innerHTML = plan.map((r, i) => {
+    const c = CHANGES[r.change];
+    const done = running && t >= Number(r.at) + (r.dur ? Number(r.dur) : 0);
+    const allOn = (snap?.nodes || []).every((n) => r.nodes.includes(n));
+    const chips = `<button class="all ${allOn ? 'on' : ''}" data-i="${i}" data-node="*">All</button>` +
+      nodes.map((n) => `<button class="${r.nodes.includes(n) ? 'on' : ''}" data-i="${i}" data-node="${n}">${n}</button>`).join('');
+    const opts = Object.entries(CHANGES).map(([k, v]) => `<option value="${k}" ${k === r.change ? 'selected' : ''}>${v.label}</option>`).join('');
+    return `<tr class="${done ? 'done' : ''}">
+      <td><input type="number" min="0" step="1" value="${r.at}" data-i="${i}" data-f="at"></td>
+      <td><span class="chips">${chips}</span></td>
+      <td><select data-i="${i}" data-f="change">${opts}</select></td>
+      <td><input type="number" min="0" step="any" value="${c.unit ? r.value : ''}" placeholder="${c.unit || '–'}" ${c.unit ? '' : 'disabled'} data-i="${i}" data-f="value"></td>
+      <td><input type="number" min="0" step="1" value="${c.revert ? r.dur : ''}" placeholder="${c.revert ? 'to end' : '–'}" ${c.revert ? '' : 'disabled'} data-i="${i}" data-f="dur"></td>
+      <td><button class="row-del" title="Remove" data-i="${i}" data-del="1">×</button></td></tr>`;
+  }).join('') || '';
+  $('plan-rows').closest('.table-wrap').querySelector('.plan-empty')?.remove();
+  if (!plan.length) $('plan-rows').closest('.table-wrap').insertAdjacentHTML('beforeend', '<div class="plan-empty">No planned changes: the replay runs on healthy links.</div>');
+  $('plan-apply').hidden = !running;
+}
+function planChanged() { save('plan', plan); renderPlan(); }
+$('plan-rows').addEventListener('change', (e) => {
+  const el = e.target; const i = Number(el.dataset.i);
+  if (!el.dataset.f) return;
+  plan[i][el.dataset.f] = el.value;
+  if (el.dataset.f === 'change' && !CHANGES[el.value].unit) plan[i].value = '';
+  planChanged();
+});
+$('plan-rows').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const i = Number(b.dataset.i);
+  if (b.dataset.del) { plan.splice(i, 1); return planChanged(); }
+  const n = b.dataset.node; const row = plan[i];
+  if (n === '*') {
+    const all = snap.nodes.every((x) => row.nodes.includes(x));
+    row.nodes = all ? row.nodes.filter((x) => x === 'edge') : [...new Set([...snap.nodes, ...row.nodes])];
+  } else row.nodes = row.nodes.includes(n) ? row.nodes.filter((x) => x !== n) : [...row.nodes, n];
+  planChanged();
+});
+$('plan-add').addEventListener('click', () => {
+  const last = plan[plan.length - 1];
+  plan.push({ at: last ? Number(last.at) + 30 : 30, nodes: [], change: 'down', value: '', dur: 30 });
+  planChanged();
+});
+document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => {
+  const n = snap?.nodes || [];
+  const presets = {
+    blackout: [{ at: 40, nodes: n.slice(2, 5), change: 'down', value: '', dur: 40 }],
+    loss: [{ at: 40, nodes: [...n], change: 'loss', value: 20, dur: 40 }],
+    edge: [{ at: 40, nodes: ['edge'], change: 'bw', value: 1, dur: 40 }],
+    clear: [],
+  };
+  plan = b.dataset.preset === 'clear' ? [] : [...plan, ...presets[b.dataset.preset]];
+  planChanged();
+}));
+$('plan-apply').addEventListener('click', () => send({ type: 'plan', plan: eventsFromRows() }));
+
+// -------------------------------- deploy --------------------------------
+let deployedAt = null;   // when this page sent a deploy
+let overlayStartAt = null;  // the start_at the configuring window is counting down to
+let overlayHidden = false;
+$('deploy-btn').addEventListener('click', () => {
+  if (!$('target').value) { toast('pick a target with data', true); return; }
+  send({ type: 'deploy', target: $('target').value, map: $('site').value, plan: eventsFromRows() });
+  deployedAt = Date.now(); overlayHidden = false; siteTouched = false;
+  showOverlay(true);
+});
+$('overlay-hide').addEventListener('click', () => { overlayHidden = true; showOverlay(false); });
+function showOverlay(on) { $('overlay').hidden = !on; }
+// The testbed gets about 30 s after a deploy to configure the nodes and synchronize their start
+// (start_at); the window counts down to it, for deploys from this page or the main UI alike.
+function updateOverlay() {
+  const t = snap.t_replay;
+  if (t !== null && t < 0) {
+    // counting down to a new start_at, whether this page or the main UI deployed
+    if (snap.start_at !== overlayStartAt) {
+      overlayStartAt = snap.start_at; overlayHidden = false;
+      if (!deployedAt || Date.now() - deployedAt > 20000) deployedAt = Date.now();
+    }
+    const total = Math.max(1, snap.start_at * 1000 - deployedAt);
+    $('overlay-fill').style.width = `${Math.min(100, 100 * (Date.now() - deployedAt) / total)}%`;
+    $('overlay-sub').textContent = `Configuring the nodes and synchronizing their start time. Replay starts in ${Math.ceil(-t)} s.`;
+    showOverlay(!overlayHidden);
+  } else if (deployedAt && Date.now() - deployedAt < 20000 && snap.start_at === overlayStartAt) {
+    // sent, but the emulator has not armed the new start yet
+    $('overlay-fill').style.width = '3%';
+    $('overlay-sub').textContent = 'Sending the configuration to the nodes…';
+    showOverlay(!overlayHidden);
+  } else {
+    deployedAt = null;
+    showOverlay(false);
+  }
+}
+
+// ------------------------------------ map ------------------------------------
+// Leaflet with the same Esri imagery as the main UI.
+let map = null;
+const layers = {};
+function initMap() {
+  if (!window.L) { $('map').textContent = 'Map unavailable (Leaflet could not load).'; return; }
+  if (!map) {
+    map = L.map('map', { maxZoom: 22, attributionControl: false, zoomControl: true });
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 22, maxNativeZoom: 18 }).addTo(map);
+    layers.road = L.layerGroup().addTo(map);
+    layers.truth = L.layerGroup().addTo(map);
+    layers.spar = L.layerGroup().addTo(map);
+    layers.nodes = L.layerGroup().addTo(map);
+  }
+  const pts = [...Object.values(site.nodes), ...site.road];
+  if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
+  else map.setView([40.289, -88.1263], 18);
+  layers.road.clearLayers();
+  if (site.road.length) L.polyline(site.road, { color: '#ffffff', weight: 2, opacity: 0.5, dashArray: '6 6' }).addTo(layers.road);
+  layers.nodeMarkers = {};
+  layers.nodes.clearLayers();
+  // labels of nodes west of the site's middle extend to the left, so the two columns don't collide
+  const lons = Object.values(site.nodes).map((p) => p[1]);
+  const midLon = lons.reduce((a, b) => a + b, 0) / Math.max(1, lons.length);
+  for (const [name, p] of Object.entries(site.nodes)) {
+    const marker = L.marker(p, { icon: nodeIcon(name, '', '', p[1] < midLon) });
+    marker.west = p[1] < midLon;
+    layers.nodeMarkers[name] = marker;
+    marker.on('click', () => { const l = snap?.links?.[name]; if (l) fault(l.down ? 'up' : 'down', [name]); })
+      .bindTooltip('Click: blackout on / off', { direction: 'top' }).addTo(layers.nodes);
+  }
+}
+function nodeIcon(name, cls, label, west) {
+  const state = cls && cls !== 'up' ? `<small>${label}</small>` : '';
+  const shift = west ? ' style="transform: translateX(-100%)"' : '';
+  return L.divIcon({ className: '', iconSize: null, iconAnchor: [0, 10],
+    html: `<div class="node-label st-${cls || 'unknown'}"${shift}>${name}${state}</div>` });
+}
+function renderMap() {
+  if (!map) return;
+  for (const [name, marker] of Object.entries(layers.nodeMarkers || {})) {
+    const [label, cls] = linkStatus(snap.links[name]);
+    if (marker.state !== label) { marker.state = label; marker.setIcon(nodeIcon(name, cls, label, marker.west)); }  // only on change
+  }
+  layers.truth.clearLayers();
+  layers.spar.clearLayers();
+  const labels = Object.keys(snap.truth_trail || {});
+  for (const [label, trail] of Object.entries(snap.truth_trail || {})) {
+    if (!trail.length) continue;
+    const c = targetColor(label);
+    L.polyline(trail, { color: '#000', weight: 5, opacity: 0.6 }).addTo(layers.truth);
+    L.polyline(trail, { color: c, weight: 3 }).addTo(layers.truth);
+    L.circleMarker(trail[trail.length - 1], { radius: 7, color: '#000', weight: 2, fillColor: c, fillOpacity: 1 })
+      .bindTooltip(`${label.toUpperCase()} truth (shown 2 s late, like the main UI)`).addTo(layers.truth);
+  }
+  // the last 8 SPAR windows as dashed squares, older ones fainter
+  // SPAR is "running" while its newest window is within the last 10 s of the replay; otherwise
+  // (not deployed, replay over, or SPAR silent) its markers and legend entry are hidden
+  const all = snap.windows || [];
+  const newest = all[all.length - 1];
+  const sparRunning = !!newest && snap.t_replay !== null && newest.t !== null && snap.t_replay - newest.t <= 10;
+  const recent = sparRunning ? all.slice(-8) : [];
+  $('lg-spar-row').hidden = !sparRunning;
+  recent.forEach((w, i) => {
+    const c = targetColor(w.label);
+    const latest = i === recent.length - 1;
+    const opacity = 0.35 + 0.65 * (i + 1) / recent.length;
+    const size = latest ? 16 : 10;
+    L.marker([w.lat, w.lon], {
+      opacity,
+      icon: L.divIcon({ className: '', iconSize: [size, size], html: `<div class="spar-mark" style="--c:${c}"></div>` }),
+    }).bindTooltip(`SPAR ${w.t}–${w.t + 2} s · error ${w.error_m ?? '–'} m · ${w.nodes.length} nodes`).addTo(layers.spar);
+  });
+  const label = labels[0] || recent[recent.length - 1]?.label;
+  if (label) {
+    $('lg-gt').textContent = `${label.toUpperCase()} truth`;
+    $('lg-spar').textContent = `${label.toUpperCase()} SPAR`;
+    document.querySelectorAll('.lg-gt, .lg-spar').forEach((el) => el.style.setProperty('--c', targetColor(label)));
+  }
+}
+
+// ------------------------------ time charts ------------------------------
+function setupCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = parseFloat(canvas.style.height);
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '500 11px "IBM Plex Mono", monospace';
+  return [ctx, w, h];
+}
+function niceStep(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+const pad = { l: 46, r: 14, t: 22, b: 22 };
+function timeRange() {
+  const ws = snap?.windows || [];
+  return [0, Math.max(120, (snap?.t_replay || 0) + 5, ...ws.map((w) => (w.t || 0) + 2))];
+}
+function axes(ctx, w, h, x1, yMax, ticks, fmt) {
+  const X = (t) => pad.l + t / x1 * (w - pad.l - pad.r);
+  const Y = (v) => h - pad.b - v / yMax * (h - pad.t - pad.b);
+  ctx.lineWidth = 1; ctx.strokeStyle = '#ececec'; ctx.fillStyle = '#888'; ctx.textAlign = 'right';
+  for (const v of ticks) {
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(w - pad.r, Y(v)); ctx.stroke();
+    ctx.fillText(fmt(v), pad.l - 6, Y(v) + 4);
+  }
+  ctx.textAlign = 'center';
+  const step = niceStep(x1 / 8);
+  for (let t = 0; t <= x1; t += step) ctx.fillText(`${t}s`, X(t), h - 5);
+  ctx.textAlign = 'left';
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(pad.l, Y(0)); ctx.lineTo(w - pad.r, Y(0)); ctx.stroke();
+  return [X, Y];
+}
+function eventMarks(ctx, X, h, labels) {
+  const evs = (snap?.events || []).filter((e) => e.action !== 'armed' && snap.start_at && e.start_at === snap.start_at);
+  let row = 0, lastX = -1e9;
+  ctx.font = '700 10px Barlow, sans-serif';
+  for (const e of evs) {
+    const t = e.wall_ns / 1e9 - snap.start_at;
+    if (t < 0) continue;
+    const x = X(t);
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(x, pad.t - 8); ctx.lineTo(x, h - pad.b); ctx.stroke(); ctx.setLineDash([]);
+    if (labels) {
+      row = x - lastX < 150 ? (row + 1) % 2 : 0; lastX = x;
+      const nodes = (e.nodes || []).length > 3 ? `${e.nodes.length} LINKS` : (e.nodes || []).join(' ').toUpperCase();
+      ctx.fillStyle = '#111'; ctx.fillText(`${e.action.toUpperCase()} ${nodes}`, x + 4, 9 + row * 11);
+    }
+  }
+  ctx.font = '500 11px "IBM Plex Mono", monospace';
+  if (snap?.t_replay > 0) {
+    const x = X(snap.t_replay);
+    ctx.strokeStyle = '#c4c7c5'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, pad.t - 8); ctx.lineTo(x, h - pad.b); ctx.stroke();
+  }
+}
+let hoverT = null;
+function renderCharts() {
+  const ws = (snap?.windows || []).filter((w) => w.t !== null);
+  const [, x1] = timeRange();
+  const accent = css('--accent');
+
+  // a window's error is plotted at its start: the moment SPAR's position refers to
+  let [ctx, w, h] = setupCanvas($('err'));
+  const errs = ws.map((x) => x.error_m).filter((v) => v !== null).sort((a, b) => a - b);
+  const step = niceStep((errs.length ? errs[Math.floor(0.98 * (errs.length - 1))] : 20) / 4);
+  const yMax = 4 * step;
+  let [X, Y] = axes(ctx, w, h, x1, yMax, [0, step, 2 * step, 3 * step, yMax], (v) => `${v} m`);
+  eventMarks(ctx, X, h, true);
+  ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
+  let prev = null;
+  for (const x of ws) {
+    if (x.error_m === null) { prev = null; continue; }
+    const px = X(x.t), py = Y(Math.min(x.error_m, yMax));
+    prev !== null && x.t - prev <= 4 ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    prev = x.t;
+  }
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  for (const x of ws) if (x.error_m !== null) { ctx.beginPath(); ctx.arc(X(x.t), Y(Math.min(x.error_m, yMax)), 2.5, 0, 2 * Math.PI); ctx.fill(); }
+  hover(ctx, X, h, ws, 'err', (x) => x.error_m === null ? null : Y(Math.min(x.error_m, yMax)), accent);
+
+  [ctx, w, h] = setupCanvas($('nodes'));
+  const n = Math.max(1, snap?.nodes?.length || 8);
+  [X, Y] = axes(ctx, w, h, x1, n, [0, Math.ceil(n / 2), n], (v) => `${v}`);
+  eventMarks(ctx, X, h, false);
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.beginPath();
+  prev = null;
+  for (const x of ws) {
+    const y = Y(x.nodes.length);
+    if (prev && x.t - prev.t <= 4) { ctx.lineTo(X(x.t), Y(prev.nodes.length)); ctx.lineTo(X(x.t), y); } else ctx.moveTo(X(x.t), y);
+    ctx.lineTo(X(x.t + 2), y);
+    prev = x;
+  }
+  ctx.stroke();
+  hover(ctx, X, h, ws, 'nodes', (x) => Y(x.nodes.length), '#111', true);
+}
+function nearest(ws, t) {
+  let best = null;
+  for (const w of ws) if (!best || Math.abs(w.t - t) < Math.abs(best.t - t)) best = w;
+  return best && Math.abs(best.t - t) <= 6 ? best : null;
+}
+function hover(ctx, X, h, ws, id, yOf, color, step = false) {
+  const tip = $(`${id}-tip`);
+  const w = hoverT === null ? null : nearest(ws, hoverT);
+  if (!w) { tip.style.display = 'none'; return; }
+  const x = X(w.t) + (step ? (X(w.t + 2) - X(w.t)) / 2 : 0);
+  ctx.strokeStyle = '#c4c7c5'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+  const y = yOf(w);
+  if (y !== null) {
+    ctx.fillStyle = color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+  }
+  if (id !== 'err') { tip.style.display = 'none'; return; }
+  tip.innerHTML = `Window <b>${w.t}–${w.t + 2} s</b><br>Error <b>${w.error_m ?? '–'} m</b> vs truth at ${w.t} s<br>` +
+    `${w.nodes.length} nodes: ${w.nodes.join(' ').toUpperCase()}<br>Lag <b>${w.lag_s ?? '–'} s</b> · ${w.label.toUpperCase()} ${w.score}`;
+  tip.style.display = 'block';
+  const wrapW = $('err-wrap').clientWidth;
+  tip.style.left = `${Math.min(x + 14, wrapW - tip.offsetWidth - 6)}px`;
+  tip.style.top = `${Math.max(0, (y ?? 40) - 24)}px`;
+}
+for (const id of ['err', 'nodes']) {
+  const c = $(id);
+  c.addEventListener('mousemove', (e) => {
+    const [, x1] = timeRange();
+    const r = c.getBoundingClientRect();
+    hoverT = (e.clientX - r.left - pad.l) / (r.width - pad.l - pad.r) * x1;
+    renderCharts();
+  });
+  c.addEventListener('mouseleave', () => { hoverT = null; renderCharts(); });
+}
+
+// ----------------------------- stats and lists -----------------------------
+function renderSummary() {
+  const s = snap.spar;
+  const t = snap.t_replay;
+  $('s-exp').textContent = snap.experiment || '–';
+  $('s-time').textContent = t === null ? 'Not deployed' : t < 0 ? `Starts in ${Math.round(-t)} s` : `${Math.round(t)} s`;
+  const set = (id, v, unit = '') => { $(id).textContent = v === null || v === undefined ? '–' : `${v}${unit}`; };
+  set('k-med', s.error_median_30s, ' m'); set('k-p90', s.error_p90_30s, ' m'); set('k-last', s.last?.error_m, ' m');
+  set('k-nodes', s.nodes_mean_30s); set('k-lag', s.lag_30s, ' s');
+  set('k-win', `${s.windows_30s} / ${s.expected_30s}`);
+
+  $('run-status').textContent = t === null ? 'Not deployed' : t < 0 ? `Starting in ${Math.ceil(-t)} s`
+    : `Replaying ${(snap.windows || []).slice(-1)[0]?.label?.toUpperCase() || ''} · ${Math.round(t)} s`;
+  if (!$('plan-rows').contains(document.activeElement)) renderPlan();  // don't re-render under the cursor
+
+  $('events').innerHTML = (snap.events || []).filter((e) => e.action !== 'plan').slice().reverse().map((e) => {
+    const rel = snap.start_at && e.start_at === snap.start_at ? `${Math.round(e.wall_ns / 1e9 - snap.start_at)} s`
+      : new Date(e.wall_ns / 1e6).toLocaleTimeString();
+    const params = Object.entries(e.params || {}).map(([k, v]) => `${k}=${v}`).join(' ');
+    return `<li><span class="t">${rel}</span>${e.action} ${(e.nodes || []).join(', ').toUpperCase()} ${params} ` +
+      `<span class="src">(${e.source})</span></li>`;
+  }).join('') || '<li class="done">None yet</li>';
+}
+
+function render() {
+  if (!snap) return;
+  renderSummary();
+  renderLinks();
+  renderMap();
+  renderCharts();
+}
+window.addEventListener('resize', render);
+connect();
+</script>
+</body>
+</html>

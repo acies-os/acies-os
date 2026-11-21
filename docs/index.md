@@ -7,14 +7,16 @@ hardware: one **edge server** plus one or more **edge devices**.
 
 ## Integration guide
 
-The [**integration guide**](integration/basic/index.md) walks through the setup step by step:
-edge server + edge devices, replayed sensor data with GPS, and vehicle classification.
+The [**integration guide**](integration/index.md) walks through the setup step by step:
+edge server + edge devices, replayed sensor data with GPS, and vehicle classification. Its last
+page, [**network emulation**](integration/08-network-emulation.md), runs all devices on the edge
+server behind an emulated network for network-failure experiments.
 
 ```{toctree}
 :hidden:
 :caption: Integration guide
 
-integration/basic/index
+integration/index
 ```
 
 ## What you need
@@ -28,7 +30,7 @@ No code changes are needed. To run the system you:
 5. build the Docker images, and
 6. connect the edge server and devices on one network and start everything.
 
-The [overview](integration/basic/01-overview.md) has the full checklist with links to each step.
+The [overview](integration/01-overview.md) has the full checklist with links to each step.
 
 ## Citation
 

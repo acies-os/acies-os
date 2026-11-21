@@ -17,6 +17,7 @@
 #   UI_PORT               UI HTTP port (default: 5173)
 #   ZENOH_CONNECT         Zenoh local endpoint (default: tcp/127.0.0.1:7501)
 #   ZENOH_LISTEN          Zenoh external listen for pi peers (default: tcp/0.0.0.0:7447)
+#   ZENOH_RUNTIME         zenohd runtime config (default: 8 rx threads, see below)
 #   ACIES_LOG             Per-logger level overrides
 #   ACIES_GATEWAY_DEBUG   Enable debug energy subscriber in gateway (unset to disable)
 #   SCENE                 Scene name for GPS replay (required with replay profile)
@@ -35,6 +36,12 @@ services:
       --listen ${ZENOH_LISTEN:-tcp/0.0.0.0:7447}
       --listen ${ZENOH_CONNECT:-tcp/127.0.0.1:7501}
     network_mode: host
+    environment:
+      # zenohd closes a dead node's link on a receive thread, and close() can block for 10 s
+      # (SO_LINGER). With the default 2 rx threads, 3+ nodes dropping out at once freeze the
+      # router for every node (eclipse-zenoh/zenoh#1101). Keep this above the number of
+      # nodes that can fail together. See emulation/README.md.
+      - "ZENOH_RUNTIME=${ZENOH_RUNTIME:-(rx: (worker_threads: 8))}"
     volumes:
       - ~/.acies:/root/.acies
     restart: unless-stopped

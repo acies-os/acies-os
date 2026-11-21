@@ -14,6 +14,8 @@ Read the pages in order:
 5. [Network](05-network.md): IP addresses and ports, and how to check them
 6. [Build and run](06-build-and-run.md): deploy and start everything
 7. [Data and model weights](07-data-and-weights.md): what to download and where it goes
+8. [Network emulation](08-network-emulation.md): run all devices on the edge server behind an
+   emulated network, and test what network failures do to localization (optional)
 
 ## Files you will edit
 

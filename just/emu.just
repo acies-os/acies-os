@@ -12,12 +12,18 @@ default:
 emu-build:
     docker build -t acies-mn:latest -f emulation/Dockerfile emulation
 
-# Start the Mininet container with an experiment from emulation/experiments/ (detached).
+# Start emulated nodes and edge stack together; monitor at http://127.0.0.1:8780.
 emu-up experiment="baseline":
+    just emu-up-nodes {{ experiment }}
+    just emu-up-infra
+
+# Start the emulated nodes (emulation's edge-up-nodes; run first). Default: baseline, healthy links.
+emu-up-nodes experiment="baseline":
     docker run -d --rm --name {{ emu_container }} \
         --privileged --init \
         --ulimit nofile=65536:65536 \
         -p 127.0.0.1:8765:8765 \
+        -p 127.0.0.1:8780:8780 \
         -v {{ emu_data_dir }}:/data:ro \
         -v {{ emu_model_dir }}:/model:ro \
         -v ~/.acies:/root/.acies \
@@ -25,10 +31,10 @@ emu-up experiment="baseline":
         -e SCENE -e RUN -e ACIES_LOG \
         -e VFM_ENCODER_WEIGHT -e VFM_VEHICLE_HEAD_WEIGHT -e VFM_LABELS -e VFM_VEHICLE_EMBED_DIM \
         acies-mn:latest python /emu/topo.py /emu/experiments/{{ experiment }}.toml
-    @echo "emulator started; follow it with: just emu-logs"
+    @echo "emulated nodes started; now: just emu-up-infra (logs: just emu-logs)"
 
-# Start the edge stack (zenohd, gateway, gps, spar, recorder, ui) inside the emulator's network.
-emu-edge-up *args:
+# Start the edge stack on the emulated network (emulation's edge-up-infra), with recorder and monitor.
+emu-up-infra *args:
     ACIES_NAMESPACE=$(hostname -s) docker compose -p edge-emu \
         --env-file .env \
         -f docker/edge.yml \
@@ -42,8 +48,8 @@ emu-edge-up *args:
 emu-logs:
     docker logs -f {{ emu_container }}
 
-# Deploy a replay without the UI, e.g. `just emu-deploy miata` (joint SPAR on all nodes).
-emu-deploy target *args:
+# Deploy a replay without the page (joint SPAR on all nodes); default target GLE350.
+emu-deploy target="gle350" *args:
     docker exec {{ emu_container }} python /emu/deploy.py --target {{ target }} {{ args }}
 
 # Change a link now, e.g. `just emu-fault rs3 down`, `just emu-fault all set --loss 20`.
@@ -65,6 +71,6 @@ emu-shell node="":
     exec docker exec -it {{ emu_container }} mnexec -a "$pid" bash
 
 # Stop the edge stack and the emulator.
-emu-down:
+emu-down-all:
     -docker compose -p edge-emu down
     -docker stop {{ emu_container }}

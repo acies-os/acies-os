@@ -15,10 +15,13 @@ docker compose in the container's root namespace (``docker/emu-edge.yml``).
 
 Faults from the experiment file are timed relative to the replay start: the
 runner watches ``**/ctl/notify/start_at`` and re-arms the schedule on every
-deploy. Faults can also be sent live on the ``emu/ctl`` topic (see fault.py).
-Every applied change is published on ``emu/events`` for the recorder.
+deploy. Faults can also be sent live on the ``emu/ctl`` topic (see fault.py), and the
+schedule can be replaced there with ``{"action": "plan", "events": [...]}`` (the monitor page
+does this when it deploys); a running replay picks up the plan's remaining events.
+Every applied change is published on ``emu/events`` for the recorder, and the
+state of every link (settings plus tc counters) on ``emu/state`` once a second.
 
-Usage (inside the container; see ``just emu-up``)::
+Usage (inside the container; see ``just emu-up-nodes``)::
 
     python /emu/topo.py /emu/experiments/outage.toml [--cli]
 """
@@ -26,6 +29,7 @@ Usage (inside the container; see ``just emu-up``)::
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import signal
@@ -59,6 +63,7 @@ LOG_DIR = Path('/root/.acies/emu/logs')
 DEFAULT_NODES = ['rs1', 'rs2', 'rs3', 'rs5', 'rs6', 'rs7', 'rs8', 'rs10']
 LINK_KEYS = ('bw', 'delay', 'jitter', 'loss', 'max_queue_size')
 ACTIONS = ('down', 'up', 'set', 'reset', 'unplug', 'plug')
+STATE_INTERVAL_S = 1.0  # emu/state period
 
 
 # ------------------------------- configuration -------------------------------
@@ -96,6 +101,7 @@ def load_experiment(path: str) -> dict[str, Any]:
         if 'at' not in ev:
             raise ValueError(f'events[{i}]: missing `at` (seconds after replay start)')
     events.sort(key=lambda ev: float(ev['at']))
+    exp['_path'] = path
     return exp
 
 
@@ -111,6 +117,8 @@ class Emulator:
         self.base: dict[str, dict[str, Any]] = exp['_base_links']
         self.current: dict[str, dict[str, Any]] = {n: dict(p) for n, p in self.base.items()}
         self.down: dict[str, bool] = {n: False for n in self.base}
+        self.unplugged: dict[str, bool] = {n: False for n in self.base}
+        self.experiment = Path(exp.get('_path', '')).stem
         self.lock = threading.Lock()  # serializes all Mininet / tc calls
         self.procs: list[tuple[str, subprocess.Popen[bytes]]] = []
         self.session: zenoh.Session | None = None
@@ -249,8 +257,10 @@ class Emulator:
                         self._apply(name)
                     case 'unplug':
                         self.net.configLinkStatus(name, 's1', 'down')
+                        self.unplugged[name] = True
                     case 'plug':
                         self.net.configLinkStatus(name, 's1', 'up')
+                        self.unplugged[name] = False
                         self._apply(name)  # restore shaping on the re-enabled interfaces
         effective = {n: {**self.current[n], **({'loss': 100} if self.down[n] else {})} for n in targets}
         logger.info('[%s] %s %s -> %s', source, action, ','.join(targets), effective)
@@ -286,17 +296,124 @@ class Emulator:
         self.apply_event({'action': 'reset', 'nodes': 'all+edge'}, source='arm')
         self._publish('emu/events', {'source': 'arm', 'wall_ns': time.time_ns(), 'start_at': start_at,
                                      'action': 'armed', 'nodes': [], 'events': events})  # fmt: skip
+        self._run_schedule(start_at, events, gen)
+
+    def _run_schedule(self, start_at: float, events: list[dict[str, Any]], gen: int) -> None:
+        """Apply each event at start_at + at, in a thread that a newer schedule (gen) cancels."""
 
         def run() -> None:
             for ev in events:
                 delay = start_at + float(ev['at']) - time.time()
+                if delay < -1.0:
+                    continue  # already past (a plan sent mid-replay)
                 if delay > 0 and self.stop.wait(delay):
                     return
                 if gen != self.schedule_gen:
-                    return  # superseded by a newer deploy
+                    return  # superseded by a newer deploy or plan
                 self.apply_event(ev, source='schedule')
 
         threading.Thread(target=run, name=f'schedule-{gen}', daemon=True).start()
+
+    def set_plan(self, events: list[dict[str, Any]], source: str) -> None:
+        """Replace the schedule (the experiment file's events) with a plan from emu/ctl."""
+        plan = []
+        for i, ev in enumerate(events):
+            if ev.get('action') not in ACTIONS or 'at' not in ev:
+                raise ValueError(f'plan[{i}]: needs `at` and an action in {ACTIONS}: {ev!r}')
+            targets = _expand_targets(ev.get('nodes', ev.get('node')), self.names)
+            unknown = [t for t in targets if t not in self.base]
+            if unknown:
+                raise ValueError(f'plan[{i}]: unknown node(s) {unknown}')
+            plan.append({**{k: v for k, v in ev.items() if k in ('action', 'nodes', 'node', *LINK_KEYS)},
+                         'at': float(ev['at'])})  # fmt: skip
+        plan.sort(key=lambda ev: ev['at'])
+        self.exp['events'] = plan
+        self.experiment = 'page plan' if source == 'ctl' else self.experiment
+        self.schedule_gen += 1
+        logger.info('[%s] new plan with %d event(s)', source, len(plan))
+        self._publish('emu/events', {'source': source, 'wall_ns': time.time_ns(), 'start_at': self.armed_start_at,
+                                     'action': 'plan', 'nodes': [], 'events': plan})  # fmt: skip
+        if self.armed_start_at is not None:
+            self._run_schedule(self.armed_start_at, plan, self.schedule_gen)
+
+    # ------------------------------ link state -----------------------------
+
+    def publish_state(self) -> None:
+        """Publish every link's settings and tc counters on ``emu/state`` once a second.
+
+        "up" is traffic towards the edge (sent by the node-side interface; for the edge link,
+        by the switch side), "down" is traffic from the edge. Byte counts are what left the
+        interface; drops and backlog come from the root qdisc (netem loss counts as a drop).
+        """
+        prev: dict[str, dict[str, int]] = {}
+        prev_t = time.monotonic()
+        while not self.stop.wait(STATE_INTERVAL_S):
+            try:
+                counters = self._read_counters()
+            except Exception:
+                logger.exception('reading link counters failed')
+                continue
+            now = time.monotonic()
+            dt = max(1e-3, now - prev_t)
+            links: dict[str, Any] = {}
+            for name in self.base:
+                up_intf, down_intf = self._directions(name)
+                cur = {
+                    'up_bytes': counters.get(up_intf, {}).get('tx_bytes', 0),
+                    'down_bytes': counters.get(down_intf, {}).get('tx_bytes', 0),
+                    'up_drops': counters.get(up_intf, {}).get('drops', 0),
+                    'down_drops': counters.get(down_intf, {}).get('drops', 0),
+                }
+                old = prev.get(name, cur)
+                links[name] = {
+                    'config': dict(self.current[name]),
+                    'down': self.down[name],
+                    'unplugged': self.unplugged[name],
+                    'up_kbps': round(max(0, cur['up_bytes'] - old['up_bytes']) * 8 / 1000 / dt, 1),
+                    'down_kbps': round(max(0, cur['down_bytes'] - old['down_bytes']) * 8 / 1000 / dt, 1),
+                    'up_drops_ps': round(max(0, cur['up_drops'] - old['up_drops']) / dt, 1),
+                    'down_drops_ps': round(max(0, cur['down_drops'] - old['down_drops']) / dt, 1),
+                    'up_backlog_b': counters.get(up_intf, {}).get('backlog', 0),
+                    'down_backlog_b': counters.get(down_intf, {}).get('backlog', 0),
+                    **cur,
+                }
+                prev[name] = cur
+            prev_t = now
+            self._publish(
+                'emu/state',
+                {
+                    'wall_ns': time.time_ns(),
+                    'experiment': self.experiment,
+                    'start_at': self.armed_start_at,
+                    'events': self.exp['events'],
+                    'nodes': self.names,
+                    'links': links,
+                },
+            )
+
+    def _directions(self, name: str) -> tuple[str, str]:
+        """(interface sending towards the edge, interface sending away from it) of a link."""
+        link = self._link(name)
+        host_side, switch_side = (link.intf1, link.intf2) if link.intf1.node.name == name else (link.intf2, link.intf1)
+        if name == EDGE_NAME:
+            return switch_side.name, host_side.name
+        return host_side.name, switch_side.name
+
+    def _read_counters(self) -> dict[str, dict[str, int]]:
+        """Interface byte counters and root-qdisc drops/backlog, from every namespace."""
+        out: dict[str, dict[str, int]] = {}
+        prefixes: list[list[str]] = [[]]  # container root namespace: switch ports and the edge
+        prefixes += [['mnexec', '-a', str(self.net.get(n).pid)] for n in self.names]
+        for prefix in prefixes:
+            for intf in _run_json([*prefix, 'ip', '-s', '-j', 'link', 'show']):
+                tx = intf.get('stats64', {}).get('tx', {})
+                out.setdefault(intf['ifname'], {})['tx_bytes'] = tx.get('bytes', 0)
+            for qd in _run_json([*prefix, 'tc', '-s', '-j', 'qdisc', 'show']):
+                if qd.get('root') and 'dev' in qd:
+                    entry = out.setdefault(qd['dev'], {})
+                    entry['drops'] = qd.get('drops', 0)
+                    entry['backlog'] = qd.get('backlog', 0)
+        return out
 
     # -------------------------------- zenoh --------------------------------
 
@@ -332,6 +449,9 @@ class Emulator:
     def _on_ctl(self, sample: zenoh.Sample) -> None:
         try:
             ev = msgspec.msgpack.decode(bytes(sample.payload))
+            if ev.get('action') == 'plan':
+                self.set_plan(list(ev.get('events') or []), source='ctl')
+                return
             if ev.get('action') not in ACTIONS:
                 logger.error('emu/ctl: action must be one of %s: %r', ACTIONS, ev)
                 return
@@ -372,6 +492,11 @@ def _env(key: str) -> str:
     return value
 
 
+def _run_json(cmd: list[str]) -> list[dict[str, Any]]:
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
+    return json.loads(result.stdout) if result.stdout.strip() else []
+
+
 def _expand_targets(value: Any, names: list[str]) -> list[str]:
     """'rs3' | ['rs3', 'rs5'] | 'all' (every node) | 'all+edge' -> list of link names."""
     if value is None:
@@ -409,6 +534,7 @@ def main() -> None:
         emu.start_nodes()
         threading.Thread(target=emu.watch_procs, name='watch', daemon=True).start()
         threading.Thread(target=emu.connect_zenoh, name='zenoh', daemon=True).start()
+        threading.Thread(target=emu.publish_state, name='state', daemon=True).start()
         if args.cli:
             from mininet.cli import CLI
 
